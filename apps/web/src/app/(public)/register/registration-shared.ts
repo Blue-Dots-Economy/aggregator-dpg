@@ -8,6 +8,20 @@
  */
 
 import type { RJSFSchema } from '@rjsf/utils';
+import { z } from 'zod';
+import { readErrorEnvelope } from '@/lib/api-error';
+import { readJsonObject } from '@/lib/json-object';
+
+/** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
+export const OrgOptionSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  display_name: z.string(),
+});
+export type OrgOption = z.infer<typeof OrgOptionSchema>;
+
+/** `GET /api/orgs`: the active orgs a coordinator can register under. */
+export const OrgListResponseSchema = z.object({ orgs: z.array(OrgOptionSchema) });
 
 /** Discriminated submit lifecycle shared by both registration forms. */
 export type SubmitState =
@@ -16,17 +30,6 @@ export type SubmitState =
   | { status: 'error'; title: string; detail: string; code: string; requestId: string }
   /** An invite was accepted; the browser is on its way to sign in. */
   | { status: 'signing_in' };
-
-/** Canonical API error envelope (partial — every field optional on the wire). */
-export interface ApiErrorEnvelope {
-  error?: {
-    code?: string;
-    title?: string;
-    detail?: string;
-    requestId?: string;
-    fields?: Record<string, unknown>;
-  };
-}
 
 /** Ajv-shaped validation error as surfaced by RJSF's `onError`. */
 export interface AjvLikeError {
@@ -130,20 +133,21 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
  * @param body - Parsed response body (may not be an envelope).
  * @param fallbackStatus - HTTP status, used to synthesise a detail line.
  * @param fallbackReqId - Request id to attribute when the body omits one.
- * @returns Normalised `{ title, detail, code, requestId }`, plus `fields` when the body has them.
+ * @returns Normalised `{ title, detail, code, requestId, status }`, plus `fields` when the body has them.
  */
 export function parseError(
   body: unknown,
   fallbackStatus: number,
   fallbackReqId: string,
 ): SubmitError {
-  const env = body as ApiErrorEnvelope;
+  const error = readErrorEnvelope(body);
   return {
-    title: env?.error?.title ?? 'Submission failed',
-    detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
-    code: env?.error?.code ?? 'UNKNOWN',
-    requestId: env?.error?.requestId ?? fallbackReqId,
-    ...(env?.error?.fields ? { fields: env.error.fields } : {}),
+    title: error.title ?? 'Submission failed',
+    detail: error.detail ?? `The server returned HTTP ${fallbackStatus}.`,
+    code: error.code ?? 'UNKNOWN',
+    requestId: error.requestId ?? fallbackReqId,
+    status: fallbackStatus,
+    ...(error.fields ? { fields: error.fields } : {}),
   };
 }
 
@@ -168,12 +172,33 @@ export interface SubmitError {
   detail: string;
   code: string;
   requestId: string;
+  /** HTTP status; 0 when the request never reached the server. */
+  status?: number;
   fields?: Record<string, unknown>;
 }
 
 /** Result of {@link submitRegistration}: parsed success body or display error. */
 export type SubmitResult =
   { ok: true; body: Record<string, unknown> } | { ok: false; error: SubmitError };
+
+/**
+ * Reads the body of an accepted registration.
+ *
+ * The server has accepted the registration, so a body that is not a JSON
+ * object gives an empty body rather than an error: an error would invite a
+ * second submission.
+ *
+ * @param res - The 2xx response. Its body is consumed.
+ * @param endpoint - The BFF route, for the log line.
+ * @returns The body, or `{}` when it is not a JSON object.
+ */
+async function readSuccessBody(res: Response, endpoint: string): Promise<Record<string, unknown>> {
+  const body: unknown = await res.json().catch(() => null);
+  const object = readJsonObject(body);
+  if (object) return object;
+  console.error('[register] unexpected response shape', { endpoint });
+  return {};
+}
 
 /**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.
@@ -197,15 +222,16 @@ export async function submitRegistration(
       const body = await res.json().catch(() => ({}));
       return { ok: false, error: parseError(body, res.status, reqId) };
     }
-    return { ok: true, body: (await res.json()) as Record<string, unknown> };
-  } catch (err) {
+    return { ok: true, body: await readSuccessBody(res, endpoint) };
+  } catch {
     return {
       ok: false,
       error: {
         title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
+        detail: 'Could not reach the server.',
         code: 'NETWORK_ERROR',
         requestId: '',
+        status: 0,
       },
     };
   }

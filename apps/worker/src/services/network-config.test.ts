@@ -30,8 +30,9 @@ vi.mock('@aggregator-dpg/network-config/paths', () => ({
 
 const errorLog = vi.fn();
 const infoLog = vi.fn();
+const warnLog = vi.fn();
 vi.mock('../logger.js', () => ({
-  logger: { info: infoLog, error: errorLog, warn: vi.fn() },
+  logger: { info: infoLog, error: errorLog, warn: warnLog },
 }));
 
 const { getNetworkConfig, _setNetworkConfig } = await import('./network-config.js');
@@ -50,6 +51,7 @@ beforeEach(() => {
   loaderCtorCalls.length = 0;
   errorLog.mockClear();
   infoLog.mockClear();
+  warnLog.mockClear();
   _setNetworkConfig(null);
 });
 
@@ -69,6 +71,35 @@ describe('getNetworkConfig', () => {
       expect.objectContaining({ operation: 'network-config.load', status: 'success' }),
       expect.any(String),
     );
+  });
+
+  it('logs the parts of network.json the loader dropped, once', async () => {
+    const warnings: ResolvedNetworkConfig['warnings'] = [
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+    ];
+    loadMock.mockResolvedValueOnce({ success: true, value: fakeConfig({ warnings }) });
+
+    await getNetworkConfig();
+    await getNetworkConfig();
+
+    expect(warnLog).toHaveBeenCalledTimes(1);
+    expect(warnLog).toHaveBeenCalledWith(
+      {
+        operation: 'network-config.load',
+        status: 'skipped',
+        finding: 'network_json_parts_dropped',
+        warnings,
+      },
+      expect.any(String),
+    );
+  });
+
+  it('does not log dropped parts when the loader reports none', async () => {
+    loadMock.mockResolvedValueOnce({ success: true, value: fakeConfig() });
+
+    await getNetworkConfig();
+
+    expect(warnLog).not.toHaveBeenCalled();
   });
 
   it('caches the resolved config — a second call does not reload', async () => {

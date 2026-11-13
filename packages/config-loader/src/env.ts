@@ -7,9 +7,18 @@
  * @module @aggregator-dpg/config-loader/env
  */
 
+import { z } from 'zod';
 import type { Env } from './interface.js';
 
-const VALID_ENVS = new Set<string>(['development', 'staging', 'production', 'test']);
+/** Every valid deployment environment. */
+const VALID_ENVS = [
+  'development',
+  'staging',
+  'production',
+  'test',
+] as const satisfies readonly Env[];
+
+const EnvSchema = z.enum(VALID_ENVS);
 
 /**
  * Resolves the active deployment environment.
@@ -24,11 +33,12 @@ const VALID_ENVS = new Set<string>(['development', 'staging', 'production', 'tes
  */
 export function resolveEnv(): Env {
   const raw = process.env['CONFIG_ENV'] ?? process.env['NODE_ENV'] ?? 'development';
-  if (!VALID_ENVS.has(raw)) {
+  const parsed = EnvSchema.safeParse(raw);
+  if (!parsed.success) {
     throw new Error(
-      `Invalid environment "${raw}". Must be one of: ${[...VALID_ENVS].join(', ')}. ` +
+      `Invalid environment "${raw}". Must be one of: ${VALID_ENVS.join(', ')}. ` +
         `Set CONFIG_ENV or NODE_ENV to a valid value.`,
     );
   }
-  return raw as Env;
+  return parsed.data;
 }

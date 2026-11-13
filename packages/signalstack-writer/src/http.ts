@@ -12,10 +12,12 @@
  * duplicate (limited by the per-user cap).
  */
 
+import type { z } from 'zod';
 import {
   AuthError,
   UpstreamError,
   ValidationError,
+  toError,
 } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
@@ -38,6 +40,18 @@ import {
   type SignalStackProbeUserResult,
   type SignalStackUpsertAggregatorInput,
 } from './interface.js';
+import {
+  DashboardResponseSchema,
+  DecryptProfilesResponseSchema,
+  ChosenItemSchema,
+  ItemIdentitySchema,
+  OnboardResponseSchema,
+  ProbeUserResponseSchema,
+  UpsertAggregatorResponseSchema,
+  readJsonBody,
+  responseIssues,
+} from './signals-responses.js';
+import { isTimeout } from './thrown.js';
 
 export interface HttpSignalStackWriterConfig {
   /** Base URL of the signalstack API, e.g. `http://localhost:2743`. No trailing slash. */
@@ -74,11 +88,27 @@ export interface HttpSignalStackWriterConfig {
   retryBaseMs?: number;
 }
 
+/** How requests authenticate to Signals: an admin API key or a bearer token. */
+type SignalStackAuth =
+  | { kind: 'apikey'; apiKey: string }
+  | { kind: 'bearer'; tokenProvider: SignalStackTokenProviderBase };
+
+/** Fetch init with headers as a plain record, so the 401 retry can replace one header. */
+type SignalStackRequestInit = Omit<RequestInit, 'headers'> & { headers: Record<string, string> };
+
+/** Default retry count: three attempts in total ride out a brief Signals restart. */
+const DEFAULT_MAX_RETRIES = 2;
+
+/** Default first backoff in ms; it doubles per retry, so the default waits 200 + 400 ms. */
+const DEFAULT_RETRY_BASE_MS = 200;
+
+/** Longest status filter kept in the export filename; longer than any Signals status. */
+const MAX_FILENAME_STATUS_CHARS = 32;
+
 export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly baseUrl: string;
   private readonly endpoint: string;
-  private readonly apiKey: string | undefined;
-  private readonly tokenProvider: SignalStackTokenProviderBase | undefined;
+  private readonly auth: SignalStackAuth;
   /**
    * Signalstack organisation id sent as `x-acting-org-id` on the aggregator
    * upsert call. When unset, the upsert returns `SIGNALSTACK_CONFIG_MISSING`.
@@ -94,23 +124,25 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (!config.baseUrl) {
       throw new Error('HttpSignalStackWriter requires baseUrl');
     }
-    if (!config.apiKey && !config.tokenProvider) {
-      throw new Error('HttpSignalStackWriter requires either apiKey or tokenProvider');
-    }
     if (config.apiKey && config.tokenProvider) {
       throw new Error(
         'HttpSignalStackWriter accepts only one of apiKey or tokenProvider, not both',
       );
     }
+    if (config.tokenProvider) {
+      this.auth = { kind: 'bearer', tokenProvider: config.tokenProvider };
+    } else if (config.apiKey) {
+      this.auth = { kind: 'apikey', apiKey: config.apiKey };
+    } else {
+      throw new Error('HttpSignalStackWriter requires either apiKey or tokenProvider');
+    }
     this.baseUrl = stripTrailingSlashes(config.baseUrl);
     this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;
-    this.apiKey = config.apiKey;
-    this.tokenProvider = config.tokenProvider;
     this.actingOrgId = config.actingOrgId;
     this.fetchImpl = config.fetchImpl ?? fetch;
     this.timeoutMs = config.timeoutMs;
-    this.maxRetries = config.maxRetries ?? 2;
-    this.retryBaseMs = config.retryBaseMs ?? 200;
+    this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryBaseMs = config.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
   }
 
   /**
@@ -129,7 +161,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
    * @returns The final `Response` (success, non-retryable, or exhausted).
    * @throws The last transport/timeout error when every attempt threw.
    */
-  private async requestWithRetry(url: string, init: RequestInit): Promise<Response> {
+  private async requestWithRetry(url: string, init: SignalStackRequestInit): Promise<Response> {
     let currentInit = init;
     let remintDone = false;
     // Counts retries only; the 401 token refresh does not use the budget.
@@ -143,18 +175,15 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           ...(controller ? { signal: controller.signal } : {}),
         });
 
-        if (res.status === 401 && this.tokenProvider && !remintDone) {
+        if (res.status === 401 && this.auth.kind === 'bearer' && !remintDone) {
           remintDone = true;
-          this.tokenProvider.invalidate();
-          const refreshed = await this.tokenProvider.getToken();
+          this.auth.tokenProvider.invalidate();
+          const refreshed = await this.auth.tokenProvider.getToken();
           // If the refresh fails, return the original 401 (SIGNALSTACK_FORBIDDEN).
           if (refreshed.success) {
             currentInit = {
               ...currentInit,
-              headers: {
-                ...(currentInit.headers as Record<string, string>),
-                authorization: `Bearer ${refreshed.value}`,
-              },
+              headers: { ...currentInit.headers, authorization: `Bearer ${refreshed.value}` },
             };
             continue;
           }
@@ -199,8 +228,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
    * @returns ok(headers), or the token provider's error.
    */
   private async buildHeaders(): Promise<Result<Record<string, string>, BaseError>> {
-    if (this.tokenProvider) {
-      const tokenResult = await this.tokenProvider.getToken();
+    if (this.auth.kind === 'bearer') {
+      const tokenResult = await this.auth.tokenProvider.getToken();
       if (!tokenResult.success) return err(tokenResult.error);
       return ok({
         'content-type': 'application/json',
@@ -209,7 +238,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     }
     return ok({
       'content-type': 'application/json',
-      'x-api-key': this.apiKey as string,
+      'x-api-key': this.auth.apiKey,
     });
   }
 
@@ -279,7 +308,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
             code,
             details: {
               status: res.status,
-              body: bodyText,
               ...(signalsMessage ? { signalsMessage } : {}),
               ...(upstreamCode ? { upstreamCode } : {}),
               ...(signalsFields ? { signalsFields } : {}),
@@ -288,31 +316,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // Response: { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, ... }] }
-      // `profile_item_id` is the item matching network/domain/type, else the first item.
-      const raw = (await res.json()) as {
-        user_id?: unknown;
-        user_existed?: unknown;
-        owned_elsewhere?: unknown;
-        items?: Array<{
-          item_id?: unknown;
-          item_network?: unknown;
-          item_domain?: unknown;
-          item_type?: unknown;
-          lifecycle_status?: unknown;
-        }>;
-        onboarded_at?: unknown;
-      };
-      if (!raw || typeof raw !== 'object' || typeof raw.user_id !== 'string') {
-        return err(
-          new UpstreamError('signalstack onboard returned unexpected payload', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload: raw },
-          }),
-        );
-      }
-      const items = Array.isArray(raw.items) ? raw.items : [];
+      const json = await readJsonBody(res, 'signalstack onboard');
+      if (!json.success) return json;
+      const parsed = OnboardResponseSchema.safeParse(json.value);
+      if (!parsed.success) return err(badResponseError('onboard', parsed.error));
+      const raw = parsed.data;
+      const items = raw.items ?? [];
       const ownedElsewhereSignal = raw.owned_elsewhere === true;
+      const onboardedAt = raw.onboarded_at ?? '';
 
       // account_only: empty `items` is expected. A returning own user is a
       // success, not `already_registered`; only an explicit `owned_elsewhere`
@@ -321,7 +332,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         return ok({
           user_id: raw.user_id,
           profile_item_id: '',
-          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          onboarded_at: onboardedAt,
           already_registered: false,
           owned_elsewhere: ownedElsewhereSignal,
         });
@@ -332,26 +343,36 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         return ok({
           user_id: raw.user_id,
           profile_item_id: '',
-          onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+          onboarded_at: onboardedAt,
           already_registered: true,
           owned_elsewhere: true,
         });
       }
-      const matched =
-        items.find(
-          (it) =>
-            it.item_network === input.network &&
-            it.item_domain === input.domain &&
-            it.item_type === input.item_type,
-        ) ?? items[0];
-      if (!matched || typeof matched.item_id !== 'string') {
+      // `profile_item_id` is the item matching network/domain/type, else the
+      // first item. Only that item is checked; see OnboardResponseSchema.
+      const matchedIndex = items.findIndex((it) => {
+        const identity = ItemIdentitySchema.safeParse(it);
+        return (
+          identity.success &&
+          identity.data.item_network === input.network &&
+          identity.data.item_domain === input.domain &&
+          identity.data.item_type === input.item_type
+        );
+      });
+      const chosenIndex = matchedIndex === -1 ? 0 : matchedIndex;
+      if (items.length === 0) {
         return err(
           new UpstreamError('signalstack onboard returned no item for the request', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload: raw },
+            details: { item_count: 0 },
           }),
         );
       }
+      const chosen = ChosenItemSchema.safeParse(items[chosenIndex]);
+      if (!chosen.success) {
+        return err(badResponseError('onboard', chosen.error, `items.${chosenIndex}`));
+      }
+      const matched = chosen.data;
       const lifecycleStatus =
         matched.lifecycle_status === 'draft' ||
         matched.lifecycle_status === 'live' ||
@@ -361,25 +382,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const result: SignalStackOnboardParticipantResult = {
         user_id: raw.user_id,
         profile_item_id: matched.item_id,
-        onboarded_at: typeof raw.onboarded_at === 'string' ? raw.onboarded_at : '',
+        onboarded_at: onboardedAt,
         owned_elsewhere: false,
         ...(lifecycleStatus !== undefined ? { lifecycle_status: lifecycleStatus } : {}),
       };
       return ok(result);
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack onboard timed out after ${this.timeoutMs}ms`
-            : `signalstack onboard transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('onboard', e));
     }
   }
 
@@ -431,27 +440,21 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         headers,
         body: JSON.stringify(body),
       });
-      return await this.parseUpsertResponse(res);
+      return await this.parseUpsertResponse(res, input);
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack aggregator upsert timed out after ${this.timeoutMs}ms`
-            : `signalstack aggregator upsert transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('aggregator upsert', e));
     }
   }
 
-  /** Maps a signalstack aggregator-upsert response to a Result. */
+  /**
+   * Maps a signalstack aggregator-upsert response to a Result.
+   *
+   * Signals returns only `{ org_id, created }`, so the other aggregator fields
+   * come from the request.
+   */
   private async parseUpsertResponse(
     res: Response,
+    input: SignalStackUpsertAggregatorInput,
   ): Promise<Result<SignalStackAggregator, BaseError>> {
     if (!res.ok) {
       const bodyText = await safeReadText(res);
@@ -462,20 +465,21 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       return err(
         new UpstreamError(message, {
           code: this.codeForStatus(res.status),
-          details: { status: res.status, body: bodyText },
+          details: { status: res.status },
         }),
       );
     }
-    const payload = (await res.json()) as unknown;
-    if (!hasValidAggregatorOrgId(payload)) {
-      return err(
-        new UpstreamError('signalstack aggregator upsert returned unexpected payload', {
-          code: 'SIGNALSTACK_BAD_RESPONSE',
-          details: { payload },
-        }),
-      );
-    }
-    return ok(payload);
+    const json = await readJsonBody(res, 'signalstack aggregator upsert');
+    if (!json.success) return json;
+    const parsed = UpsertAggregatorResponseSchema.safeParse(json.value);
+    if (!parsed.success) return err(badResponseError('aggregator upsert', parsed.error));
+    return ok({
+      org_id: parsed.data.org_id,
+      external_id: input.external_id,
+      name: input.name,
+      slug: input.slug,
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+    });
   }
 
   /**
@@ -531,104 +535,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         return err(
           new UpstreamError(message, {
             code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
+            details: { status: res.status },
           }),
         );
       }
 
-      const payload = (await res.json()) as SignalStackDashboardPage;
-      if (
-        !payload ||
-        typeof payload !== 'object' ||
-        !('by_domain' in payload) ||
-        !payload.by_domain ||
-        typeof payload.by_domain !== 'object'
-      ) {
-        return err(
-          new UpstreamError('Signalstack dashboard payload missing by_domain', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-          }),
-        );
-      }
-      if (!payload.metadata || typeof payload.metadata !== 'object') {
-        return err(
-          new UpstreamError('Signalstack dashboard payload missing metadata', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-          }),
-        );
-      }
-
-      const byDomain = payload.by_domain as Record<string, unknown>;
-      for (const [domainId, sliceRaw] of Object.entries(byDomain)) {
-        if (!sliceRaw || typeof sliceRaw !== 'object') {
-          return err(
-            new UpstreamError(`Signalstack domain slice "${domainId}" is not an object`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
-          );
-        }
-        const slice = sliceRaw as Record<string, unknown>;
-        if (!Array.isArray(slice.items)) {
-          return err(
-            new UpstreamError(`Signalstack slice "${domainId}" missing items[]`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
-          );
-        }
-        if (!slice.rollup || typeof slice.rollup !== 'object') {
-          return err(
-            new UpstreamError(`Signalstack slice "${domainId}" missing rollup`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
-          );
-        }
-        const r = slice.rollup as Record<string, unknown>;
-        if (typeof r.total_items !== 'number') {
-          return err(
-            new UpstreamError(`Signalstack slice "${domainId}" rollup missing total_items`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
-          );
-        }
-        if (!r.by_initiated_action_status || typeof r.by_initiated_action_status !== 'object') {
-          return err(
-            new UpstreamError(
-              `Signalstack slice "${domainId}" rollup missing by_initiated_action_status`,
-              { code: 'SIGNALSTACK_BAD_RESPONSE' },
-            ),
-          );
-        }
-        if (!r.by_received_action_status || typeof r.by_received_action_status !== 'object') {
-          return err(
-            new UpstreamError(
-              `Signalstack slice "${domainId}" rollup missing by_received_action_status`,
-              { code: 'SIGNALSTACK_BAD_RESPONSE' },
-            ),
-          );
-        }
-        if (!r.by_status || typeof r.by_status !== 'object') {
-          return err(
-            new UpstreamError(`Signalstack slice "${domainId}" rollup missing by_status`, {
-              code: 'SIGNALSTACK_BAD_RESPONSE',
-            }),
-          );
-        }
-      }
-      return ok(payload);
+      const json = await readJsonBody(res, 'signalstack dashboard');
+      if (!json.success) return json;
+      const parsed = DashboardResponseSchema.safeParse(json.value);
+      if (!parsed.success) return err(badResponseError('dashboard', parsed.error));
+      return ok(parsed.data);
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack dashboard timed out after ${this.timeoutMs}ms`
-            : `signalstack dashboard transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('dashboard', e));
     }
   }
 
@@ -683,7 +601,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         return err(
           new UpstreamError(message, {
             code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
+            details: { status: res.status },
           }),
         );
       }
@@ -698,19 +616,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
       return ok({ csv, filename: buildDefaultExportFilename(query.status) });
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack dashboard export timed out after ${this.timeoutMs}ms`
-            : `signalstack dashboard export transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('dashboard export', e));
     }
   }
 
@@ -761,34 +667,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         return err(
           new UpstreamError(message, {
             code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
+            details: { status: res.status },
           }),
         );
       }
 
-      const parsed = (await res.json()) as SignalStackDecryptedProfiles;
-      if (!parsed || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.skipped)) {
-        return err(
-          new UpstreamError('signalstack decrypt returned a malformed body', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-          }),
-        );
-      }
-      return ok({ profiles: parsed.profiles, skipped: parsed.skipped });
+      const json = await readJsonBody(res, 'signalstack decrypt');
+      if (!json.success) return json;
+      const parsed = DecryptProfilesResponseSchema.safeParse(json.value);
+      if (!parsed.success) return err(badResponseError('decrypt', parsed.error));
+      return ok(parsed.data);
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack decrypt timed out after ${this.timeoutMs}ms`
-            : `signalstack decrypt transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('decrypt', e));
     }
   }
 
@@ -860,7 +750,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           return err(
             new ValidationError(message, {
               code: this.codeForStatus(res.status),
-              details: { status: res.status, body: bodyText },
+              details: { status: res.status },
             }),
           );
         }
@@ -868,34 +758,25 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           return err(
             new AuthError(message, {
               code: this.codeForStatus(res.status),
-              details: { status: res.status, body: bodyText },
+              details: { status: res.status },
             }),
           );
         }
         return err(
           new UpstreamError(message, {
             code: this.codeForStatus(res.status),
-            details: { status: res.status, body: bodyText },
+            details: { status: res.status },
           }),
         );
       }
 
-      // Response: { user_id: string | null, items: [...] }. `items` holds only
-      // this aggregator's items, across all domains.
-      const raw = (await res.json()) as {
-        user_id?: unknown;
-        items?: unknown;
-      };
-      if (!raw || typeof raw !== 'object') {
-        return err(
-          new UpstreamError('signalstack probe returned unexpected payload', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload: raw },
-          }),
-        );
-      }
-
-      const userId = typeof raw.user_id === 'string' && raw.user_id.length > 0 ? raw.user_id : null;
+      // `items` holds only this aggregator's items, across all domains. It is
+      // required, so a missing list fails instead of reading as owned elsewhere.
+      const json = await readJsonBody(res, 'signalstack probe');
+      if (!json.success) return json;
+      const parsed = ProbeUserResponseSchema.safeParse(json.value);
+      if (!parsed.success) return err(badResponseError('probe', parsed.error));
+      const { user_id: userId, items } = parsed.data;
 
       // No matching identity: a new user.
       if (!userId) {
@@ -905,22 +786,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           lifecycle_summary: null,
         });
       }
-
-      // `items` is required; fail instead of treating it as owned elsewhere.
-      if (!Array.isArray(raw.items)) {
-        return err(
-          new UpstreamError('signalstack probe response missing items array', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload: raw },
-          }),
-        );
-      }
-      const items = raw.items as Array<{
-        item_id?: unknown;
-        item_network?: unknown;
-        item_domain?: unknown;
-        lifecycle_status?: unknown;
-      }>;
 
       // No items owned by this aggregator: owned elsewhere.
       if (items.length === 0) {
@@ -932,13 +797,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
 
       // The primary item must match the probed network and domain, since
-      // `items` can include other domains.
-      const domainItem = items.find(
-        (it) => it.item_domain === input.domain && it.item_network === input.network,
-      );
+      // `items` can include other domains. Only that item is checked.
+      const domainIndex = items.findIndex((it) => {
+        const identity = ItemIdentitySchema.safeParse(it);
+        return (
+          identity.success &&
+          identity.data.item_domain === input.domain &&
+          identity.data.item_network === input.network
+        );
+      });
 
       // Own user with no item in this domain: no lifecycle summary.
-      if (!domainItem) {
+      if (domainIndex === -1) {
         return ok({
           user_exists: true,
           owned_elsewhere: false,
@@ -946,22 +816,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      const itemId = typeof domainItem.item_id === 'string' ? domainItem.item_id : '';
-      if (!itemId) {
-        return err(
-          new UpstreamError('signalstack probe primary item missing item_id', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-            details: { payload: raw },
-          }),
-        );
+      const domainItem = ChosenItemSchema.safeParse(items[domainIndex]);
+      if (!domainItem.success) {
+        return err(badResponseError('probe', domainItem.error, `items.${domainIndex}`));
       }
+      const itemId = domainItem.data.item_id;
 
       // lifecycle_status mapping:
       //   - absent/empty      → 'live' (older signals builds omit it).
       //   - draft/live/paused → used as-is.
       //   - retired           → no summary; not resumable.
       //   - anything else     → SIGNALSTACK_BAD_RESPONSE.
-      const rawLifecycle = domainItem.lifecycle_status;
+      const rawLifecycle = domainItem.data.lifecycle_status;
       if (rawLifecycle === 'retired') {
         return ok({
           user_exists: true,
@@ -970,17 +836,17 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
       let lifecycleStatus: 'draft' | 'live' | 'paused';
-      if (rawLifecycle === undefined || rawLifecycle === null || rawLifecycle === '') {
+      if (!rawLifecycle) {
         lifecycleStatus = 'live';
       } else if (rawLifecycle === 'draft' || rawLifecycle === 'live' || rawLifecycle === 'paused') {
         lifecycleStatus = rawLifecycle;
       } else {
         return err(
           new UpstreamError(
-            `signalstack probe returned unknown lifecycle_status: ${
-              typeof rawLifecycle === 'string' ? rawLifecycle : JSON.stringify(rawLifecycle)
-            }`,
-            { code: 'SIGNALSTACK_BAD_RESPONSE', details: { payload: raw } },
+            `signalstack probe returned unknown lifecycle_status: ${rawLifecycle}`,
+            {
+              code: 'SIGNALSTACK_BAD_RESPONSE',
+            },
           ),
         );
       }
@@ -995,19 +861,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         },
       });
     } catch (e) {
-      const cause = e as Error;
-      const aborted = cause.name === 'AbortError';
-      return err(
-        new UpstreamError(
-          aborted
-            ? `signalstack probe timed out after ${this.timeoutMs}ms`
-            : `signalstack probe transport failure: ${cause.message}`,
-          {
-            cause,
-            code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED',
-          },
-        ),
-      );
+      return err(this.transportError('probe', e));
     }
   }
 
@@ -1072,6 +926,23 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (status >= 500) return 'SIGNALSTACK_SERVER_ERROR';
     return 'SIGNALSTACK_UPSTREAM_ERROR';
   }
+
+  /**
+   * Maps a thrown request error to an UpstreamError.
+   *
+   * @param operation - Operation name used in the message, e.g. `onboard`.
+   * @param e - The value thrown by {@link requestWithRetry} or by reading the body.
+   */
+  private transportError(operation: string, e: unknown): UpstreamError {
+    const cause = toError(e);
+    const aborted = isTimeout(e);
+    return new UpstreamError(
+      aborted
+        ? `signalstack ${operation} timed out after ${this.timeoutMs}ms`
+        : `signalstack ${operation} transport failure: ${cause.message}`,
+      { cause, code: aborted ? 'SIGNALSTACK_TIMEOUT' : 'SIGNALSTACK_TRANSPORT_FAILED' },
+    );
+  }
 }
 
 async function safeReadText(res: Response): Promise<string> {
@@ -1082,21 +953,52 @@ async function safeReadText(res: Response): Promise<string> {
   }
 }
 
-/** Extracts signalstack's machine error code from a JSON error body, if any. */
-function extractUpstreamCode(bodyText: string): string | null {
+/**
+ * Builds the error for a 2xx response that does not match its schema.
+ *
+ * The message and details hold field paths and issue codes only. The
+ * response can hold participant data, so it is never attached.
+ */
+function badResponseError(
+  operation: string,
+  error: z.ZodError,
+  pathPrefix: string = '',
+): UpstreamError {
+  const issues = responseIssues(error, pathPrefix);
+  const where = issues.map((issue) => `${issue.path || '(root)'} (${issue.code})`).join(', ');
+  return new UpstreamError(`signalstack ${operation} returned an unexpected payload: ${where}`, {
+    code: 'SIGNALSTACK_BAD_RESPONSE',
+    details: { issues },
+  });
+}
+
+/** Parses a JSON error body. Returns `null` for an empty, non-JSON, or non-object body. */
+function parseJsonObject(bodyText: string): Record<string, unknown> | null {
   if (!bodyText) return null;
   try {
-    const obj = JSON.parse(bodyText) as Record<string, unknown>;
-    // Fastify validation errors put the code in `code`; signals puts it in `error`.
-    const c = obj?.['code'];
-    if (typeof c === 'string' && /^[A-Z][A-Z0-9_]+$/.test(c)) return c;
-    const e = obj?.['error'];
-    if (typeof e === 'string') return e;
-    if (isObject(e) && typeof e['code'] === 'string') return e['code'] as string;
+    const parsed: unknown = JSON.parse(bodyText);
+    return isObject(parsed) ? parsed : null;
   } catch {
-    /* non-JSON body — no machine code */
+    return null;
   }
-  return null;
+}
+
+/** Reads `obj[key]` when it is a string. */
+function stringField(obj: Record<string, unknown>, key: string): string | null {
+  const value = obj[key];
+  return typeof value === 'string' ? value : null;
+}
+
+/** Extracts signalstack's machine error code from a JSON error body, if any. */
+function extractUpstreamCode(bodyText: string): string | null {
+  const obj = parseJsonObject(bodyText);
+  if (!obj) return null;
+  // Fastify validation errors put the code in `code`; signals puts it in `error`.
+  const code = stringField(obj, 'code');
+  if (code && /^[A-Z][A-Z0-9_]+$/.test(code)) return code;
+  const errField = obj['error'];
+  if (typeof errField === 'string') return errField;
+  return isObject(errField) ? stringField(errField, 'code') : null;
 }
 
 /**
@@ -1104,17 +1006,11 @@ function extractUpstreamCode(bodyText: string): string | null {
  * JSON error body. Only string entries are kept.
  */
 function extractUpstreamFields(bodyText: string): Record<string, string> | null {
-  if (!bodyText) return null;
-  try {
-    const obj = JSON.parse(bodyText) as Record<string, unknown>;
-    const f = obj['fields'];
-    if (!isObject(f)) return null;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(f)) if (typeof v === 'string') out[k] = v;
-    return Object.keys(out).length > 0 ? out : null;
-  } catch {
-    return null;
-  }
+  const fields = parseJsonObject(bodyText)?.['fields'];
+  if (!isObject(fields)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fields)) if (typeof v === 'string') out[k] = v;
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /**
@@ -1122,16 +1018,12 @@ function extractUpstreamFields(bodyText: string): Record<string, string> | null 
  * prefix that {@link extractUpstreamMessage} adds. Safe to show end users.
  */
 function extractUpstreamMessageText(bodyText: string): string | null {
-  if (!bodyText) return null;
-  try {
-    const obj = JSON.parse(bodyText) as Record<string, unknown>;
-    if (typeof obj['message'] === 'string') return obj['message'] as string;
-    const e = obj['error'];
-    if (isObject(e) && typeof e['message'] === 'string') return e['message'] as string;
-  } catch {
-    /* non-JSON body */
-  }
-  return null;
+  const obj = parseJsonObject(bodyText);
+  if (!obj) return null;
+  const errField = obj['error'];
+  return (
+    stringField(obj, 'message') ?? (isObject(errField) ? stringField(errField, 'message') : null)
+  );
 }
 
 /**
@@ -1142,33 +1034,24 @@ function extractUpstreamMessageText(bodyText: string): string | null {
  *   { "statusCode": 400, "error": "Bad Request", "message": "body/x Invalid …" }
  *   { "error": { "message": "…" } }
  *
- * Returns `"<code>: <message>"` when both exist. A non-JSON body is returned
- * trimmed to 500 characters. Returns `null` when there is no usable text.
+ * Returns `"<code>: <message>"` when both exist. Returns `null` for a
+ * non-JSON body, such as a proxy error page: its text can echo participant
+ * data, and the message reaches operator logs and errors.csv.
  */
 function extractUpstreamMessage(bodyText: string): string | null {
   if (!bodyText) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    const trimmed = bodyText.trim();
-    return trimmed.length > 0 ? trimmed.slice(0, 500) : null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const obj = parsed as Record<string, unknown>;
-  const errField = obj['error'];
+  const parsed = parseJsonObject(bodyText);
+  if (!parsed) return null;
+  const errField = parsed['error'];
   const errCode =
     typeof errField === 'string'
       ? errField
-      : isObject(errField) && typeof errField['code'] === 'string'
-        ? (errField['code'] as string)
+      : isObject(errField)
+        ? stringField(errField, 'code')
         : null;
   const messageText =
-    typeof obj['message'] === 'string'
-      ? (obj['message'] as string)
-      : isObject(errField) && typeof errField['message'] === 'string'
-        ? (errField['message'] as string)
-        : null;
+    stringField(parsed, 'message') ??
+    (isObject(errField) ? stringField(errField, 'message') : null);
   if (errCode && messageText) return `${errCode}: ${messageText}`;
   if (messageText) return messageText;
   if (errCode) return errCode;
@@ -1179,11 +1062,6 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** True when a signalstack response carries a usable aggregator `org_id`. */
-function hasValidAggregatorOrgId(payload: unknown): payload is SignalStackAggregator {
-  return isObject(payload) && typeof payload.org_id === 'string' && payload.org_id.length > 0;
-}
-
 /**
  * Default filename for the dashboard CSV export.
  *
@@ -1192,7 +1070,9 @@ function hasValidAggregatorOrgId(payload: unknown): payload is SignalStackAggreg
  * `Content-Disposition` header.
  */
 function buildDefaultExportFilename(status: string | undefined): string {
-  const sanitised = (status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
+  const sanitised = (status ?? 'all')
+    .replace(/[^a-z0-9_]/gi, '_')
+    .slice(0, MAX_FILENAME_STATUS_CHARS);
   const date = new Date().toISOString().slice(0, 10);
   return `aggregator-dashboard-${sanitised}-${date}.csv`;
 }

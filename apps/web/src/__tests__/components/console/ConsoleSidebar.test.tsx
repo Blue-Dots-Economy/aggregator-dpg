@@ -4,7 +4,20 @@
  * portal. Hooks the shared shell reads are mocked, as in `Sidebar.test.tsx`.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, within, fireEvent } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
+import { makeQueryClient } from '@/__tests__/test-utils';
+
+/** Renders inside a query client, which the shell's support dialog reads through. */
+function render(ui: ReactElement) {
+  const client = makeQueryClient();
+  return rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const { useAuth, useThemeMode, useAggregatorConfig, usePathname } = vi.hoisted(() => ({
   useAuth: vi.fn(),

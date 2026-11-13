@@ -282,6 +282,8 @@ services:
       # match KEYCLOAK_API_CLIENT_SECRET below; aggregator-dpg's must match
       # SIGNALSTACK_CLIENT_SECRET on aggregator-api/worker (same var).
       SIGNALS_API_SECRET: ${SIGNALS_API_CLIENT_SECRET:-signals-api-local-dev-secret}
+      # Keycloak calls the portal's back-channel logout on this compose's service name.
+      PORTAL_BACKCHANNEL_LOGOUT_URL: http://aggregator-web:3000/api/auth/backchannel-logout
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
       VOICE_DPG_SIGNALS_SECRET: ${VOICE_DPG_SIGNALS_SECRET:-voice-dpg-signals-local-dev-secret}
       # Realm name substituted into the realm JSON's "realm" field by
@@ -716,13 +718,10 @@ services:
       HOSTNAME: "0.0.0.0"
       API_BASE_URL: http://aggregator-envoy:4000
       # Switchable UI languages — resolved server-side per request, so a restart
-      # is enough to change them (no image rebuild). No literal defaults: they
-      # would mask the legacy-name fallback below. See the root compose file.
+      # is enough to change them (no image rebuild). No literal defaults: the
+      # defaults live in the app. See the root compose file.
       ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
-      # Transitional, for a `.env` still using the pre-rename names.
-      NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
-      NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
       # OIDC issuer must resolve identically for the browser AND this container.
       # Both reach Keycloak at http://keycloak:8080 (browser via the /etc/hosts
       # entry, container via docker DNS) so the token `iss` claim always matches.

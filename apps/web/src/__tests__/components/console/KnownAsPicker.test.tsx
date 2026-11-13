@@ -11,7 +11,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { org } from './fixtures';
 import type { KnownAsEntry, Org } from '@aggregator-dpg/shared-primitives/user-org';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -47,7 +49,13 @@ const picker = (org: PickerOrg, parentValues: KnownAsEntry[]) => (
 
 const select = () => screen.getByLabelText(m.known_as);
 const save = () => screen.getByRole('button', { name: m.save });
-const optionNames = () => screen.getAllByRole('option').map((o) => o.textContent);
+/** Opens the dropdown, lists its option labels in order, and closes it again. */
+const optionNames = async () => {
+  fireEvent.click(select());
+  const names = (await screen.findAllByRole('option')).map((o) => o.textContent);
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+  return names;
+};
 
 describe('<KnownAsPicker />', () => {
   const original = global.fetch;
@@ -59,10 +67,10 @@ describe('<KnownAsPicker />', () => {
     global.fetch = original;
   });
 
-  it("offers the parent's values, with the current one chosen", () => {
+  it("offers the parent's values, with the current one chosen", async () => {
     render(picker(ORG, OPTIONS));
-    expect(select()).toHaveValue('district');
-    expect(optionNames()).toEqual(['District', 'Block']);
+    expect(select()).toHaveTextContent('District');
+    expect(await optionNames()).toEqual(['District', 'Block']);
     expect(
       screen.getByText('Choose from the values Karnataka has set for the organisations under it.'),
     ).toBeInTheDocument();
@@ -75,35 +83,35 @@ describe('<KnownAsPicker />', () => {
     expect(screen.queryByText(/Blue Dots has set/)).toBeNull();
   });
 
-  it('keeps the current value when it is not among the choices, marked as such', () => {
+  it('keeps the current value when it is not among the choices, marked as such', async () => {
     render(picker({ ...ORG, known_as: 'aggregator', known_as_name: 'Aggregator' }, OPTIONS));
-    expect(select()).toHaveValue('aggregator');
-    expect(optionNames()).toEqual(['Aggregator (no longer offered)', 'District', 'Block']);
+    expect(select()).toHaveTextContent('Aggregator (no longer offered)');
+    expect(await optionNames()).toEqual(['Aggregator (no longer offered)', 'District', 'Block']);
   });
 
-  it('offers only Aggregator when the parent has no values', () => {
+  it('offers only Aggregator when the parent has no values', async () => {
     render(picker({ ...ORG, known_as: 'aggregator', known_as_name: 'Aggregator' }, []));
-    expect(select()).toHaveValue('aggregator');
-    expect(optionNames()).toEqual(['Aggregator']);
+    expect(select()).toHaveTextContent('Aggregator');
+    expect(await optionNames()).toEqual(['Aggregator']);
   });
 
-  it('keeps a current value that is not Aggregator when the parent has no values', () => {
+  it('keeps a current value that is not Aggregator when the parent has no values', async () => {
     render(picker(ORG, []));
-    expect(select()).toHaveValue('district');
-    expect(optionNames()).toEqual(['District (no longer offered)', 'Aggregator']);
+    expect(select()).toHaveTextContent('District (no longer offered)');
+    expect(await optionNames()).toEqual(['District (no longer offered)', 'Aggregator']);
   });
 
-  it('shows the key when the current value has no name', () => {
+  it('shows the key when the current value has no name', async () => {
     render(picker({ ...ORG, known_as: 'old_key', known_as_name: null }, OPTIONS));
-    expect(optionNames()[0]).toBe('old_key (no longer offered)');
+    expect((await optionNames())[0]).toBe('old_key (no longer offered)');
   });
 
   it('sends the chosen key and refreshes the page', async () => {
     vi.mocked(global.fetch).mockResolvedValue(
-      json({ id: ID, known_as: 'block', known_as_name: 'Block' }),
+      json(org({ id: ID, known_as: 'block', known_as_name: 'Block' })),
     );
     render(picker(ORG, OPTIONS));
-    fireEvent.change(select(), { target: { value: 'block' } });
+    await chooseOption(select(), 'Block');
     fireEvent.click(save());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(global.fetch).toHaveBeenCalledWith(
@@ -117,7 +125,7 @@ describe('<KnownAsPicker />', () => {
   it('takes a newer value from the page', () => {
     const { rerender } = render(picker(ORG, OPTIONS));
     rerender(picker({ ...ORG, known_as: 'block', known_as_name: 'Block' }, OPTIONS));
-    expect(select()).toHaveValue('block');
+    expect(select()).toHaveTextContent('Block');
   });
 
   it('shows the API message when the value is not allowed', async () => {
@@ -125,9 +133,19 @@ describe('<KnownAsPicker />', () => {
       json({ error: { code: 'SCHEMA_VALIDATION', fields: { known_as: 'invalid' } } }, 400),
     );
     render(picker(ORG, OPTIONS));
-    fireEvent.change(select(), { target: { value: 'block' } });
+    await chooseOption(select(), 'Block');
     fireEvent.click(save());
     expect(await screen.findByText(messages.console.errors.known_as_invalid)).toBeInTheDocument();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the page when the saved org cannot be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ID, known_as: 'block' }));
+    render(picker(ORG, OPTIONS));
+    await chooseOption(select(), 'Block');
+    fireEvent.click(save());
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
   });
 });

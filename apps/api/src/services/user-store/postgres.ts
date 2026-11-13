@@ -26,7 +26,7 @@ import {
 } from '../../db/schema.js';
 import { DEFAULT_ORG_SLUG } from '../organisation-store/interface.js';
 import { coordinatorLocations, renderOrgDetails } from './org-details.js';
-import { servesOf } from './serves.js';
+import { servesForCreate, servesOf } from './serves.js';
 import {
   changeContact,
   ContactTakenError,
@@ -56,6 +56,7 @@ import {
   type StoreResult,
   type UpdateCoordinatorPatch,
 } from './interface.js';
+import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Ledger sources that record a registration consent (the others are attestations). */
 const REGISTRATION_CONSENT_SOURCES = sql`('registration', 'registration-backfill')`;
@@ -83,7 +84,7 @@ export class PostgresUserStore extends UserStoreBase {
             userType: 'coordinator',
             signalstackOrgSlug: input.orgSlug,
             signalstackOrgName: input.name,
-            serves: servesOf(input.type),
+            serves: servesForCreate(input),
             contactId,
             alternatePhone: extra.alternatePhone ?? null,
             createdBy: input.createdBy,
@@ -114,7 +115,7 @@ export class PostgresUserStore extends UserStoreBase {
           operation: 'userStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
-          error_type: (err.cause as Error | undefined)?.name ?? 'unknown',
+          error_type: errorType(err.cause),
           latency_ms: Date.now() - start,
         });
         return {
@@ -369,8 +370,7 @@ export class PostgresUserStore extends UserStoreBase {
       if (filter.orgIds !== null) conds.push(inArray(users.orgId, filter.orgIds));
       if (filter.status) conds.push(eq(users.status, filter.status));
       if (filter.serves) {
-        // '{}' serves every domain.
-        conds.push(sql`(${users.serves} = '{}' OR ${filter.serves} = ANY(${users.serves}))`);
+        conds.push(sql`${filter.serves} = ANY(${users.serves})`);
       }
       // Compare at millisecond precision: the cursor is a JS Date, `created_at`
       // has microseconds, and rows inserted in one transaction share an instant.
@@ -504,18 +504,16 @@ export class PostgresUserStore extends UserStoreBase {
     // Never echo the driver message: it contains query parameters (emails, phones).
     const code = pgErrorCode(err);
     const constraint = pgConstraint(err) ?? '';
-    const message = err instanceof Error ? err.message : '';
-
     // contactId() rejects a non-canonical phone before any SQL runs. Its
     // message is fixed and safe to return.
-    if (err instanceof TypeError && message.startsWith('contactId:')) {
+    if (err instanceof TypeError && err.message.startsWith('contactId:')) {
       logger.warn({
         operation: op,
         status: 'failure',
         error: 'CHECK_VIOLATION',
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'CHECK_VIOLATION', message } };
+      return { ok: false, error: { code: 'CHECK_VIOLATION', message: err.message } };
     }
 
     if (code === PG_UNIQUE_VIOLATION) {
@@ -557,18 +555,18 @@ export class PostgresUserStore extends UserStoreBase {
    */
   private mapReadError(op: string, err: unknown, start?: number): StoreResult<never> {
     const code = pgErrorCode(err);
-    const errorType = (err as Error | undefined)?.constructor?.name ?? 'unknown';
+    const errType = errorType(err);
     logger.error({
       operation: op,
       status: 'failure',
-      error: code ? `database error ${code}` : errorType,
-      error_type: errorType,
+      error: code ? `database error ${code}` : errType,
+      error_type: errType,
       sqlstate: code,
       ...(start !== undefined ? { latency_ms: Date.now() - start } : {}),
     });
     return {
       ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: code ? `database error ${code}` : errorType },
+      error: { code: 'DB_UNAVAILABLE', message: code ? `database error ${code}` : errType },
     };
   }
 }

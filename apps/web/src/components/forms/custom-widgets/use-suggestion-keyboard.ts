@@ -60,94 +60,93 @@ export function useSuggestionKeyboard({
   onSelect,
   idPrefix,
 }: UseSuggestionKeyboardArgs): UseSuggestionKeyboardResult {
-  const [activeIndex, setActiveIndex] = React.useState(-1);
+  // The highlight belongs to the list it was set on, so a new `items` array
+  // starts with none. Keyed on `items`, not on `count` (same-size results
+  // would keep a stale index) or `open` (opening by keypress would clear the
+  // index it just set).
+  const [active, setActive] = React.useState<{ items: readonly unknown[]; index: number }>({
+    items,
+    index: -1,
+  });
+  const activeIndex = active.items === items ? active.index : -1;
   const count = items.length;
 
   const listboxId = `${idPrefix}-listbox`;
-  const optionId = React.useCallback((index: number) => `${idPrefix}-option-${index}`, [idPrefix]);
+  const optionId = (index: number) => `${idPrefix}-option-${index}`;
 
-  // New results start with no active option. Keyed on `items`, not on `count`
-  // (same-size results would keep a stale index) or `open` (opening by
-  // keypress would clear the index it just set).
-  React.useEffect(() => {
-    setActiveIndex(-1);
-  }, [items]);
+  const setActiveIndex = (index: number) => setActive({ items, index });
+  /** Moves the highlight relative to where it is on the current list. */
+  const moveActiveIndex = (next: (index: number) => number) =>
+    setActive((prev) => ({ items, index: next(prev.items === items ? prev.index : -1) }));
 
   // Keep the highlighted option scrolled into view.
   React.useEffect(() => {
     if (activeIndex < 0) return;
-    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: 'nearest' });
-  }, [activeIndex, optionId]);
+    document
+      .getElementById(`${idPrefix}-option-${activeIndex}`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, idPrefix]);
 
   // On a closed list, ArrowDown opens at the top and ArrowUp at the bottom.
-  const handleClosedKey = React.useCallback(
-    (event: React.KeyboardEvent): void => {
-      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-      event.preventDefault();
-      onOpen();
-      setActiveIndex(event.key === 'ArrowDown' ? 0 : count - 1);
-    },
-    [count, onOpen],
-  );
+  const handleClosedKey = (event: React.KeyboardEvent): void => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    onOpen();
+    setActiveIndex(event.key === 'ArrowDown' ? 0 : count - 1);
+  };
 
-  const handleOpenKey = React.useCallback(
-    (event: React.KeyboardEvent): void => {
-      switch (event.key) {
-        case 'ArrowDown':
-          event.preventDefault();
-          // Stops at the last option; does not wrap.
-          setActiveIndex((i) => Math.min(i + 1, count - 1));
-          return;
+  const handleOpenKey = (event: React.KeyboardEvent): void => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        // Stops at the last option; does not wrap.
+        moveActiveIndex((i) => Math.min(i + 1, count - 1));
+        return;
 
-        case 'ArrowUp':
-          event.preventDefault();
-          // With nothing active, ArrowUp goes to the last option.
-          setActiveIndex((i) => (i < 0 ? count - 1 : Math.max(i - 1, 0)));
-          return;
+      case 'ArrowUp':
+        event.preventDefault();
+        // With nothing active, ArrowUp goes to the last option.
+        moveActiveIndex((i) => (i < 0 ? count - 1 : Math.max(i - 1, 0)));
+        return;
 
-        case 'Home':
-          event.preventDefault();
-          setActiveIndex(0);
-          return;
+      case 'Home':
+        event.preventDefault();
+        setActiveIndex(0);
+        return;
 
-        case 'End':
-          event.preventDefault();
-          setActiveIndex(count - 1);
-          return;
+      case 'End':
+        event.preventDefault();
+        setActiveIndex(count - 1);
+        return;
 
-        case 'Enter':
-          // With no active option, Enter falls through and submits the form.
-          if (activeIndex < 0) return;
-          event.preventDefault();
-          onSelect(activeIndex);
-          return;
+      case 'Enter':
+        // With no active option, Enter falls through and submits the form.
+        if (activeIndex < 0) return;
+        event.preventDefault();
+        onSelect(activeIndex);
+        return;
 
-        case 'Escape':
-          event.preventDefault();
-          onClose();
-          setActiveIndex(-1);
-          return;
+      case 'Escape':
+        event.preventDefault();
+        onClose();
+        setActiveIndex(-1);
+        return;
 
-        case 'Tab':
-          // Not prevented: focus moves on and the list closes.
-          onClose();
-          return;
+      case 'Tab':
+        // Not prevented: focus moves on and the list closes.
+        onClose();
+        return;
 
-        default:
-          return;
-      }
-    },
-    [count, activeIndex, onClose, onSelect],
-  );
+      default:
+        return;
+    }
+  };
 
-  const onKeyDown = React.useCallback(
-    (event: React.KeyboardEvent) => {
-      if (count === 0) return;
-      if (open) handleOpenKey(event);
-      else handleClosedKey(event);
-    },
-    [count, open, handleOpenKey, handleClosedKey],
-  );
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (count === 0) return;
+    if (open) handleOpenKey(event);
+    else handleClosedKey(event);
+  };
 
   return {
     activeIndex,

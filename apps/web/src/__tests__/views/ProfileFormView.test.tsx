@@ -48,6 +48,7 @@ const apiResponse = {
   org_name: 'Acme Org',
   actor_type: 'aggregator' as const,
   type: 'seeker',
+  serves: ['seeker'],
   url: 'https://acme.example',
   contact: { name: 'Jane', phone: '9876543210', email: 'jane@acme.example' },
   locations: [
@@ -135,12 +136,15 @@ describe('<ProfileFormView />', () => {
     expect(screen.getByText('https://acme.example')).toBeInTheDocument();
   });
 
-  it('gates the submit button on at least one entered new value, then shows the pending banner', () => {
+  it('asks for at least one new value on an empty submit, then shows the pending banner', () => {
     useProfileRaw.mockReturnValue({ data: apiResponse, isLoading: false, isError: false });
     renderView();
     fireEvent.click(screen.getByText(messages.profile.view.btn_request_update));
     const submitBtn = screen.getByText(messages.profile.view.btn_submit_request);
-    expect(submitBtn).toBeDisabled();
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+    expect(screen.getByText(messages.profile.view.update_request_none)).toBeInTheDocument();
+    expect(screen.queryByText(messages.profile.view.update_request_pending)).toBeNull();
 
     const inputs = screen.getAllByPlaceholderText(messages.profile.view.new_value_placeholder);
     fireEvent.change(inputs[0]!, { target: { value: 'New Org Name' } });
@@ -248,5 +252,39 @@ describe('<ProfileFormView />', () => {
     // `name` (no matching API field) and `url` (explicitly null) both render
     // the em-dash placeholder.
     expect(screen.getAllByText('—')).toHaveLength(2);
+  });
+
+  describe('with a list domain field', () => {
+    const listSchema: RJSFSchema = {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        type: { type: 'array', items: { type: 'string', enum: ['seeker', 'provider'] } },
+      },
+    };
+
+    function renderList(serves: string[]) {
+      useProfileRaw.mockReturnValue({
+        data: { ...apiResponse, type: serves[0] ?? null, serves },
+        isLoading: false,
+        isError: false,
+      });
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ThemeModeProvider>
+            <ProfileFormView schema={listSchema} uiSchema={uiSchema} />
+          </ThemeModeProvider>
+        </NextIntlClientProvider>,
+      );
+      return (lastRjsfProps?.formData as Record<string, unknown>)['type'];
+    }
+
+    it('shows every stored domain', () => {
+      expect(renderList(['seeker', 'provider'])).toEqual(['seeker', 'provider']);
+    });
+
+    it('ticks no choice for a coordinator serving none', () => {
+      expect(renderList([])).toEqual([]);
+    });
   });
 });

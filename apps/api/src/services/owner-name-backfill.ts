@@ -15,6 +15,7 @@ import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { getDb } from '../db/client.js';
 import { logger } from '../logger.js';
 import type { IdpAdminAdapter, IdpUser, IdpResult } from './idp-admin/interface.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** An org whose linked owner contact has no name yet. */
 export interface OwnerNameCandidate {
@@ -133,8 +134,8 @@ async function backfillOne(
     logger.error({
       operation: 'ownerNameBackfill.setName',
       status: 'failure',
-      error: (err as Error).message,
-      error_type: (err as Error).constructor?.name,
+      error: errorMessage(err),
+      error_type: errorType(err),
       latency_ms: Date.now() - start,
       org_id: c.orgId,
     });

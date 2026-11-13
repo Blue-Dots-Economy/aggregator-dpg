@@ -1,19 +1,23 @@
 'use client';
 
 /**
- * Coordinator actions: change the domains served while the coordinator is
- * pending; after that, and for a viewer who cannot manage the coordinator's
- * organisation, the domains are read-only.
+ * Coordinator actions: change the domains served. Domains can be changed while
+ * the coordinator is pending or active; a rejected or retired coordinator's
+ * domains, and every coordinator for a viewer who cannot manage its
+ * organisation, are shown read-only.
  *
- * Domains are the network's configured domains. A coordinator saved with none
- * serves every domain, so all are shown ticked. A save bar appears once the
+ * Domains are the network's configured domains; a saved id the network no
+ * longer has is not shown and is dropped on the next save. A coordinator saved
+ * with none serves nothing, so none is ticked. A save bar appears once the
  * choice differs from what is saved, and at least one domain must stay ticked.
+ * A save that removes a saved domain asks for confirmation first. Saving ends
+ * the coordinator's sessions; its next sign-in carries the new domains.
  */
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, Tag } from 'lucide-react';
-import type { User } from '@aggregator-dpg/shared-primitives/user-org';
+import { UserSchema, type User } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/cn';
 import { DomainChips } from './DomainChips';
@@ -33,9 +37,9 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
 }
 
-/** The domains shown ticked; an empty `serves` means every domain. */
+/** The saved domains the network still has, in network order. */
 function tickedIds(serves: readonly string[], domains: ReadonlyArray<{ id: string }>): string[] {
-  return serves.length ? [...serves] : domains.map((d) => d.id);
+  return domains.filter((d) => serves.includes(d.id)).map((d) => d.id);
 }
 
 /** The list with `id` added, or removed when it is already there. */
@@ -58,25 +62,50 @@ export function CoordinatorActions({
   const [saved, setSaved] = useState<string[]>(() => ticked(user.serves));
   const [chosen, setChosen] = useState<string[]>(() => ticked(user.serves));
   const [servesNote, setServesNote] = useState<string | null>(null);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const dirty = !sameIds(chosen, saved);
   const empty = chosen.length === 0;
+  const editable = !readOnly && (user.status === 'pending' || user.status === 'active');
+  const removed = domains.filter((d) => saved.includes(d.id) && !chosen.includes(d.id));
 
   function toggle(id: string) {
     setServesNote(null);
+    setConfirmingRemoval(false);
     setChosen((c) => toggled(c, id));
+  }
+
+  /** The save bar's message: an empty choice, a removal to confirm, or unsaved changes. */
+  function barNote(): string {
+    if (empty) return t('coordinator.domains_empty');
+    if (confirmingRemoval) {
+      return t('coordinator.remove_domains_note', {
+        domains: removed.map((d) => d.label).join(', '),
+      });
+    }
+    return t('coordinator.unsaved');
   }
 
   function discard() {
     setChosen(saved);
     setServesNote(null);
+    setConfirmingRemoval(false);
   }
 
   async function saveServes() {
+    if (empty) {
+      document.querySelector<HTMLInputElement>('#coordinator-domains input')?.focus();
+      return;
+    }
+    if (removed.length > 0 && !confirmingRemoval) {
+      setConfirmingRemoval(true);
+      return;
+    }
+    setConfirmingRemoval(false);
     setBusy(true);
-    const r = await sendConsole<User>(`/api/console/user/metadata/${user.id}`, 'PATCH', {
-      serves: chosen,
+    const r = await sendConsole(`/api/console/user/metadata/${user.id}`, 'PATCH', UserSchema, {
+      serves: ticked(chosen),
     });
     setBusy(false);
     if (!r.ok) {
@@ -99,12 +128,13 @@ export function CoordinatorActions({
             <p className="mt-0.5 text-[13px] text-ink-500">{t('coordinator.domains_sub')}</p>
           </header>
           <div className="flex flex-col gap-3.5 px-[22px] pt-4 pb-[22px] text-[13.5px]">
-            {readOnly || user.status !== 'pending' ? (
-              <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
-            ) : (
+            {editable ? (
               <>
                 <fieldset
+                  id="coordinator-domains"
                   aria-label={t('coordinator.domains')}
+                  aria-invalid={(dirty && empty) || undefined}
+                  aria-describedby="coordinator-domains__error"
                   className="m-0 min-w-0 border-0 p-0 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2.5"
                 >
                   {domains.map((d) => (
@@ -121,6 +151,9 @@ export function CoordinatorActions({
                   <SaveBar
                     empty={empty}
                     busy={busy}
+                    note={barNote()}
+                    confirmingRemoval={confirmingRemoval}
+                    onCancelRemoval={() => setConfirmingRemoval(false)}
                     onDiscard={discard}
                     onSave={() => void saveServes()}
                   />
@@ -129,6 +162,8 @@ export function CoordinatorActions({
                   <output className="text-[13px] text-ink-600">{servesNote}</output>
                 ) : null}
               </>
+            ) : (
+              <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
             )}
           </div>
         </section>
@@ -166,24 +201,51 @@ function DomainOption({
   );
 }
 
-/** The bar shown while the domain choice is unsaved; at least one domain must stay ticked. */
+/**
+ * The bar shown while the domain choice is unsaved. At least one domain must
+ * stay ticked; removing a saved domain asks for confirmation first.
+ */
 function SaveBar({
   empty,
   busy,
+  note,
+  confirmingRemoval,
+  onCancelRemoval,
   onDiscard,
   onSave,
-}: Readonly<{ empty: boolean; busy: boolean; onDiscard: () => void; onSave: () => void }>) {
+}: Readonly<{
+  empty: boolean;
+  busy: boolean;
+  /** The bar's message. */
+  note: string;
+  /** A removal is waiting for confirmation. */
+  confirmingRemoval: boolean;
+  onCancelRemoval: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}>) {
   const t = useTranslations('console');
   return (
     <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-(--bd-border-soft) bg-(--bd-bg) px-3 py-2.5">
-      <span className={cn('mr-auto text-[13px]', empty ? 'text-rose-700' : 'text-ink-500')}>
-        {empty ? t('coordinator.domains_empty') : t('coordinator.unsaved')}
+      <span
+        id="coordinator-domains__error"
+        className={cn('mr-auto text-[13px]', empty ? 'text-rose-700' : 'text-ink-500')}
+      >
+        {note}
       </span>
-      <Button kind="ghost" disabled={busy} onClick={onDiscard}>
-        {t('coordinator.discard')}
-      </Button>
-      <Button disabled={busy || empty} onClick={onSave}>
-        {t('coordinator.save_domains')}
+      {confirmingRemoval ? (
+        <Button kind="ghost" disabled={busy} onClick={onCancelRemoval}>
+          {t('coordinator.cancel')}
+        </Button>
+      ) : (
+        <Button kind="ghost" disabled={busy} onClick={onDiscard}>
+          {t('coordinator.discard')}
+        </Button>
+      )}
+      <Button disabled={busy} onClick={onSave}>
+        {confirmingRemoval
+          ? t('coordinator.remove_domains_confirm')
+          : t('coordinator.save_domains')}
       </Button>
     </div>
   );

@@ -16,6 +16,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
+import { useRequestErrorMessage } from '@/components/forms/useRequestErrorMessage';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -27,9 +28,16 @@ import { dashboardService, type LifecycleFilter } from '../../../services/dashbo
 import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 import { useCan } from '../../../lib/auth-context';
-import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
-import { useProfileRaw } from '../../../hooks/useProfile';
+import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
+import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
+import { DomainTabs } from '../../../components/ui/DomainTabs';
+import {
+  NoProfileTypesNotice,
+  ProfileLoadError,
+} from '../../../components/access/DomainAccessGate';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
   DirectionalStats,
@@ -39,6 +47,7 @@ import type {
   Provider,
   Seeker,
 } from '../../../types';
+import { SelectField } from '@/components/ui/SelectField';
 
 /**
  * Indexes a domain's `status_rules` by status key for the status cards.
@@ -47,7 +56,7 @@ import type {
  * @returns Map of status key to its optional label/description copy.
  */
 function indexStatusRules(
-  rules: { status: string; label?: string; description?: string }[] | undefined,
+  rules: StatusRule[] | undefined,
 ): Record<string, { label?: string; description?: string }> {
   const out: Record<string, { label?: string; description?: string }> = {};
   for (const r of rules ?? []) {
@@ -200,6 +209,19 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
 }
 
 /**
+ * Text to show for a failed dashboard call. Never the error's own message,
+ * which can hold a response body.
+ *
+ * @param err - The failure.
+ * @param unreadable - The message for a reply that could not be read.
+ * @param otherwise - The message for any other failure.
+ * @returns `unreadable` for an unreadable reply, else `otherwise`.
+ */
+function failureText(err: unknown, unreadable: string, otherwise: string): string {
+  return err instanceof ResponseShapeError ? unreadable : otherwise;
+}
+
+/**
  * Domain summary bar above the lifecycle funnel.
  *
  * Shows the domain's `plural_label`, the live total, a hint, and the refresh action.
@@ -245,8 +267,8 @@ function SummaryBar({
       </span>
       <div className="ml-auto flex items-center gap-2">
         {refreshError ? (
-          <span className="max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-            {t('state.refreshFailed')}
+          <span role="alert" className="max-w-[320px] text-right text-xs text-red-600">
+            {refreshError}
           </span>
         ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
           <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>
@@ -827,7 +849,7 @@ function ParticipantTable<R extends ParticipantBase>({
   useEffect(() => {
     if (!filterOpen) return;
     const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+      if (filterRef.current && e.target instanceof Node && !filterRef.current.contains(e.target)) {
         setFilterOpen(false);
       }
     };
@@ -966,16 +988,17 @@ function ParticipantTable<R extends ParticipantBase>({
             />
           </div>
           {onLifecycleFilterChange ? (
-            <select
+            <SelectField
               aria-label={t('filters.lifecycle_label')}
-              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7 flex-1 sm:flex-initial"
+              className="w-auto max-w-[170px] flex-1 px-2.5 py-1.5 text-[12.5px] sm:flex-initial"
               value={lifecycleFilter}
-              onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
-            >
-              <option value="all">{t('filters.lifecycle_all')}</option>
-              <option value="draft">{t('filters.lifecycle_draft')}</option>
-              <option value="live">{t('filters.lifecycle_live')}</option>
-            </select>
+              onChange={(v) => onLifecycleFilterChange(parseLifecycleParam(v))}
+              options={[
+                { value: 'all', label: t('filters.lifecycle_all') },
+                { value: 'draft', label: t('filters.lifecycle_draft') },
+                { value: 'live', label: t('filters.lifecycle_live') },
+              ]}
+            />
           ) : null}
           <div ref={filterRef} className="relative ml-auto sm:ml-0">
             <Button
@@ -1401,12 +1424,14 @@ function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>
 
 /** Props for the participant-profile tab (any `profile_*` domain). */
 interface DomainTabProps {
-  /** The signed-in coordinator's own domain, from its `aggregator_type`. */
+  /** The active domain the coordinator is working with. */
   domainId: string | undefined;
 }
 
 function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
+  const requestErrorText = useRequestErrorText();
+  const requestMessage = useRequestErrorMessage();
   const locale = useLocale();
   // `/aggregator/dashboard` scopes results to the caller's org and returns
   // each domain under `by_domain[<id>]`. An `undefined` domain id skips the
@@ -1522,7 +1547,13 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+      setRefreshError(
+        failureText(
+          err,
+          t('state.refreshUnreadable'),
+          requestErrorText(err, requestMessage(err, t('state.refreshFailed'))),
+        ),
+      );
     } finally {
       setRefreshing(false);
     }
@@ -1756,6 +1787,8 @@ function formatRelative(iso: string): string {
 
 function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
+  const requestErrorText = useRequestErrorText();
+  const requestMessage = useRequestErrorMessage();
   const locale = useLocale();
   // Same rollup shape and fetch as SeekersTab; only the labels differ.
   const providerDomainId = domainId;
@@ -1866,7 +1899,13 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+      setRefreshError(
+        failureText(
+          err,
+          t('state.refreshUnreadable'),
+          requestErrorText(err, requestMessage(err, t('state.refreshFailed'))),
+        ),
+      );
     } finally {
       setRefreshing(false);
     }
@@ -1987,16 +2026,18 @@ function toProviderRow(
 }
 
 export default function DashboardPageRoot() {
-  const rawProfile = useProfileRaw();
-  // Wait for the profile before mounting a tab, so no tab fetches the wrong domain.
-  const profileType = rawProfile.data?.type;
-  if (!profileType) {
-    return <DashboardLoadingFrame />;
+  const activeDomain = useActiveDomain();
+  // Wait for the profile and the stored choice before mounting a tab, so no
+  // tab fetches the wrong domain. A failed load or no profile types shows a
+  // full-page notice instead of the tabs.
+  if (activeDomain.error || !activeDomain.ready || activeDomain.domains.length === 0) {
+    return <DashboardGateFrame activeDomain={activeDomain} />;
   }
-  return <DashboardContent aggregatorType={profileType} />;
+  return <DashboardContent activeDomain={activeDomain} />;
 }
 
-function DashboardLoadingFrame() {
+/** The dashboard title over the loading state, the load error or the no-access notice. */
+function DashboardGateFrame({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
@@ -2005,22 +2046,37 @@ function DashboardLoadingFrame() {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      {activeDomain.error ? (
+        <ProfileLoadError onRetry={activeDomain.retry} retrying={activeDomain.retrying} />
+      ) : !activeDomain.ready ? (
+        <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      ) : (
+        <NoProfileTypesNotice />
+      )}
     </div>
   );
 }
 
-function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
+function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Domain id from the config entry matching `aggregatorType`. Undefined when
-  // no entry matches, which skips the dashboard fetch.
-  const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
+  const { domains, active, setActive } = activeDomain;
+  // Defined here: the page root renders this only when a domain is served.
+  const primaryDomainCfg = domains.find((d) => d.id === active);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
   const canOnboard = useCan()('profiles.onboard');
+  // Same query as the active tab's first unfiltered page, so it shares that
+  // request. The payload carries every domain's rollup, which gives each tab
+  // its count.
+  const { data: dashboard } = useDashboard(
+    primaryDomain ? { domain: primaryDomain, page: 1, limit: PAGE_SIZE } : undefined,
+  );
+  const counts = Object.fromEntries(
+    domains.map((d) => [d.id, dashboard?.by_domain[d.id]?.rollup.total_items]),
+  );
 
   return (
     <div className="fade-up">
@@ -2028,21 +2084,30 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
-          <div className="flex items-center gap-2">
-            {canOnboard && (
-              <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-                {t('buttons.addParticipants')}
-              </Button>
-            )}
-          </div>
+          canOnboard && (
+            <Button
+              className="whitespace-nowrap"
+              icon={<I.plus size={14} />}
+              onClick={() => router.push('/onboarding')}
+            >
+              {t('buttons.addParticipants')}
+            </Button>
+          )
         }
       />
+      <DomainTabs
+        className="-mt-2 mb-6"
+        domains={domains}
+        value={active}
+        onChange={setActive}
+        counts={counts}
+      />
 
-      {/* No tab strip: the tab is fixed by the aggregator's type. */}
+      {/* Keyed by domain so a switch resets paging, filters and selection. */}
       {isProviderLike ? (
-        <ProvidersTab domainId={primaryDomain} />
+        <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
       ) : (
-        <SeekersTab domainId={primaryDomain} />
+        <SeekersTab key={primaryDomain} domainId={primaryDomain} />
       )}
     </div>
   );

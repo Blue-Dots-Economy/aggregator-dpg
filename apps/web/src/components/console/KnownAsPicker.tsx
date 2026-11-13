@@ -18,7 +18,8 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
-import { errorKey, setOrgKnownAs } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAs } from '../../lib/console-client';
+import { SelectField } from '@/components/ui/SelectField';
 
 /**
  * Renders the "known as" picker.
@@ -64,6 +65,8 @@ export function KnownAsPicker({
       router.refresh();
       return;
     }
+    // The change may have been saved: reload the page's copy.
+    if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     setMessage(t(errorKey(r)));
   }
 
@@ -75,26 +78,25 @@ export function KnownAsPicker({
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="org-known-as-pick">{t('org.known_as')}</Label>
-        <select
+        <SelectField
           id="org-known-as-pick"
-          className="bd-input"
           value={selected}
-          onChange={(e) => {
-            setSelected(e.target.value);
+          onChange={(v) => {
+            setSelected(v);
             setMessage(null);
           }}
-        >
-          {currentListed || current.key === null ? null : (
-            <option value={current.key}>
-              {t('org.known_as_pick_unlisted', { name: current.name ?? current.key })}
-            </option>
-          )}
-          {options.map((o) => (
-            <option key={o.key} value={o.key}>
-              {o.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            ...(currentListed || current.key === null
+              ? []
+              : [
+                  {
+                    value: current.key,
+                    label: t('org.known_as_pick_unlisted', { name: current.name ?? current.key }),
+                  },
+                ]),
+            ...options.map((o) => ({ value: o.key, label: o.name })),
+          ]}
+        />
         <span className="text-[12px] text-ink-500">
           {org.depth === 1 || !org.parent_name
             ? t('org.known_as_pick_hint_network')

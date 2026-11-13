@@ -8,6 +8,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { UserInviteResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { sendConsole } from '../../lib/console-client';
 import { cn } from '../../lib/cn';
 
@@ -33,7 +34,12 @@ export function ResendInviteButton({
       kind === 'user'
         ? { org_id: orgId, recipients: [{ email }] }
         : { parent_id: orgId, recipients: [{ email }] };
-    const r = await sendConsole(`/api/console/${kind}/invite`, 'POST', body);
+    const r = await sendConsole(
+      `/api/console/${kind}/invite`,
+      'POST',
+      UserInviteResponseSchema,
+      body,
+    );
     if (!r.ok) {
       setPhase('failed');
       return;

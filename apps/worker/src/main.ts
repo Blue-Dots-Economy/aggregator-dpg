@@ -19,6 +19,7 @@ import {
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
+import { initObjectStorage } from '@aggregator-dpg/object-storage';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { closeDb } from './db.js';
@@ -32,8 +33,10 @@ import { getRedis, closeRedis } from './services/redis.js';
 import { closeQueues } from './services/bulk-queue.js';
 import { parseWorkerRoles, missingRoles } from './worker-roles.js';
 import { startHealthServer } from './health.js';
+import { errorType, toError } from '@aggregator-dpg/shared-primitives/errors';
 
 async function main(): Promise<void> {
+  initObjectStorage(config);
   const connection = getRedis();
   const healthServer = startHealthServer(config.HEALTH_PORT, connection);
   // Consumers this process runs. Unset means all.
@@ -186,12 +189,14 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
+  const error = toError(err);
   logger.error({
     operation: 'worker.boot',
     status: 'failure',
-    error: (err as Error).message,
-    stack: (err as Error).stack,
+    error: error.message,
+    error_type: errorType(err),
+    stack: error.stack,
   });
   process.exit(1);
 });

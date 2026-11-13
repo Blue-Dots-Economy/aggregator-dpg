@@ -7,16 +7,16 @@
 
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type {
-  CataloguePermissionsResponse,
-  CatalogueRolesResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
 import { can } from '@/lib/capabilities';
 import { Topbar } from '@/components/shell/Topbar';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { AccessCatalogue } from '@/components/console/AccessCatalogue';
+import {
+  CataloguePermissionsResponseSchema,
+  CatalogueRolesResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 export default async function ConsoleAccessPermissionsPage() {
   const t = await getTranslations('console.access');
@@ -24,8 +24,8 @@ export default async function ConsoleAccessPermissionsPage() {
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
   const [roles, permissions] = await Promise.all([
-    consoleReadOptional<CatalogueRolesResponse>('/v1/rbac/roles'),
-    consoleReadOptional<CataloguePermissionsResponse>('/v1/rbac/permissions'),
+    consoleReadOptional('/v1/rbac/roles', CatalogueRolesResponseSchema),
+    consoleReadOptional('/v1/rbac/permissions', CataloguePermissionsResponseSchema),
   ]);
   return (
     <>

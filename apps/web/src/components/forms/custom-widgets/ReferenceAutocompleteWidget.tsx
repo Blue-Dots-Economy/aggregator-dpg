@@ -22,6 +22,9 @@ import { Input } from '../../ui/Input';
 import { cn } from '../../../lib/cn';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
+import { withStableKeys } from '@/lib/list-keys';
+import { useReferenceDataset } from '@/hooks/useReferenceDataset';
+import { errorAria } from '../error-aria';
 
 interface ReferenceOption {
   name: string;
@@ -49,14 +52,6 @@ const MAX_SUGGESTIONS = 50;
 /** Shortest query that shows matches. */
 const MIN_QUERY_LENGTH = 2;
 const BLUR_CLOSE_MS = 150;
-
-/** Where reference datasets are served from when no override is configured. */
-const DEFAULT_REFERENCE_BASE = '/reference/';
-
-/**
- * Dataset fetch promises by dataset id, shared across mounts so each loads once.
- */
-const datasetCache = new Map<string, Promise<ReferenceOption[]>>();
 
 /** Reads `field` off an unverified record, or `undefined` if it is not a string. */
 function stringField(source: Record<string, unknown>, field: string): string | undefined {
@@ -143,41 +138,9 @@ export function resolveDatasetId(source: string, collegeDataset: string): string
   return source === 'colleges' ? `colleges-${collegeDataset}` : source;
 }
 
-/**
- * Builds the URL a dataset is fetched from.
- *
- * Defaults to `/reference/`, where a deployment mounts its ConfigMap. The
- * datasets are not in this repo; for local dev set `referenceBaseUrl` (see
- * `infra/env.template`). A relative value resolves against the app origin.
- * A remote host must allow CORS, since the browser fetches it directly.
- *
- * @param id - Resolved dataset file id.
- * @param referenceBaseUrl - Optional base URL override.
- * @returns An absolute URL to the dataset JSON.
- */
-function referenceUrl(id: string, referenceBaseUrl: string = DEFAULT_REFERENCE_BASE): string {
-  // Treat a blank value as unset too.
-  const raw = referenceBaseUrl.trim() || DEFAULT_REFERENCE_BASE;
-  const base = raw.endsWith('/') ? raw : `${raw}/`;
-  return new URL(`${id}.json`, new URL(base, window.location.origin)).toString();
-}
-
-function loadDataset(id: string, referenceBaseUrl: string | undefined): Promise<ReferenceOption[]> {
-  const cached = datasetCache.get(id);
-  if (cached) return cached;
-  const pending = fetch(referenceUrl(id, referenceBaseUrl))
-    .then((res) => {
-      if (!res.ok) throw new Error(`reference dataset ${id} → ${res.status}`);
-      return res.json();
-    })
-    .then(flattenReferenceDataset)
-    .catch((err: unknown) => {
-      // Drop the failed promise so a later mount can retry.
-      datasetCache.delete(id);
-      throw err;
-    });
-  datasetCache.set(id, pending);
-  return pending;
+/** Identifies an option by the fields it shows. */
+function optionKey(option: ReferenceOption): string {
+  return `${option.name}|${option.district ?? ''}|${option.state ?? ''}`;
 }
 
 export function ReferenceAutocompleteWidget({
@@ -186,8 +149,10 @@ export function ReferenceAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   placeholder,
   options,
+  rawErrors,
 }: Readonly<WidgetProps>) {
   const opts = options as { source?: string; subtitleFields?: string[] } | undefined;
   const source = opts?.source;
@@ -199,32 +164,24 @@ export function ReferenceAutocompleteWidget({
     : DEFAULT_SUBTITLE;
 
   const { collegeDataset, referenceBaseUrl } = useFormRuntimeConfig();
+  // On a failed load the list is empty and the field works as plain text input.
+  const dataset = useReferenceDataset(
+    source ? resolveDatasetId(source, collegeDataset) : null,
+    referenceBaseUrl,
+    flattenReferenceDataset,
+  );
 
-  const [text, setText] = React.useState<string>((value as string) ?? '');
-  const [dataset, setDataset] = React.useState<ReferenceOption[]>([]);
+  const valueText = typeof value === 'string' ? value : '';
+  const [text, setText] = React.useState(valueText);
+  // Take a new value from RJSF (e.g. a prefill) during render. The input keeps
+  // its own text so typing is not held up by the form's update.
+  const [syncedValue, setSyncedValue] = React.useState(valueText);
+  if (valueText !== syncedValue) {
+    setSyncedValue(valueText);
+    setText(valueText);
+  }
   const [open, setOpen] = React.useState(false);
   const blurRef = React.useRef<number | undefined>(undefined);
-
-  // Keep the input in sync when RJSF pushes a new value (e.g. a prefill).
-  React.useEffect(() => {
-    setText((value as string) ?? '');
-  }, [value]);
-
-  React.useEffect(() => {
-    if (!source) return undefined;
-    let live = true;
-    void loadDataset(resolveDatasetId(source, collegeDataset), referenceBaseUrl)
-      .then((loaded) => {
-        if (live) setDataset(loaded);
-      })
-      .catch(() => {
-        // On failure the field works as plain text input.
-        if (live) setDataset([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [source, collegeDataset, referenceBaseUrl]);
 
   React.useEffect(() => () => window.clearTimeout(blurRef.current), []);
 
@@ -283,11 +240,13 @@ export function ReferenceAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...errorAria(id, rawErrors)}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
           blurRef.current = window.setTimeout(() => setOpen(false), BLUR_CLOSE_MS);
+          onBlur?.(id, text);
         }}
       />
       {open && suggestions.length > 0 && (
@@ -296,11 +255,11 @@ export function ReferenceAutocompleteWidget({
           role="listbox"
           className="absolute z-50 mt-1 max-h-[320px] w-full overflow-y-auto rounded-[10px] border border-(--bd-border) bg-(--bd-card) p-1 shadow-lg"
         >
-          {suggestions.map((o, i) => {
+          {withStableKeys(suggestions, optionKey).map(({ item: o, key }, i) => {
             const sub = subtitle(o);
             return (
               <li
-                key={`${o.name}-${i}`}
+                key={key}
                 id={optionId(i)}
                 role="option"
                 aria-selected={i === activeIndex}

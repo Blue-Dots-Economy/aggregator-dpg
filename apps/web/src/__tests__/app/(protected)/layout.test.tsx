@@ -27,6 +27,8 @@ vi.mock('@/lib/signals-roles', () => ({
   resolveSignalsRealmRoles: async () => ['signals_participant', 'signals_admin'],
 }));
 vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));
+const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ logger: { warn: logWarn, error: vi.fn(), info: vi.fn() } }));
 vi.mock('@/lib/console-actor', () => ({
   getConsoleActor: vi.fn(async () => ({ ok: false, reason: 'unavailable' })),
 }));
@@ -238,5 +240,29 @@ describe('<ProtectedLayout />', () => {
     await renderLayout();
 
     expect(screen.getByTestId('support-enabled')).toHaveTextContent('false');
+  });
+
+  it.each([
+    ['the string "false"', 'false'],
+    ['the number 1', 1],
+  ])('treats `enabled` given as %s as false', async (_label, enabled) => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(callApi).mockResolvedValue(
+      new Response(JSON.stringify({ enabled }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }) as never,
+    );
+
+    await renderLayout();
+
+    expect(screen.getByTestId('support-enabled')).toHaveTextContent('false');
+    expect(logWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'protectedLayout.fetchSupportEnabled',
+        status: 'failure',
+      }),
+    );
   });
 });

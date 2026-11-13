@@ -10,6 +10,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
@@ -47,7 +48,8 @@ const OnboardingBySourceResponseSchema = z
   })
   .passthrough();
 
-export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
+export async function registerOnboardingRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/onboarding/summary',
     {
@@ -67,7 +69,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
+      const range = parseRange(req.query);
       const conditions = [eq(onboarding.userId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
@@ -111,7 +113,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
+      const range = parseRange(req.query);
       const conditions = [eq(onboarding.userId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));

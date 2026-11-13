@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../../components/shell/Topbar';
 import { I } from '../../../../icons';
 import { CreateLinkSection } from '../_components/RegistrationLinksSection';
+import { DomainAccessGate } from '../../../../components/access/DomainAccessGate';
 
 export default function RegistrationLinksPage() {
   const t = useTranslations('onboarding');
@@ -37,7 +38,9 @@ export default function RegistrationLinksPage() {
           </div>
         }
       />
-      <CreateLinkSection />
+      <DomainAccessGate>
+        <CreateLinkSection />
+      </DomainAccessGate>
     </div>
   );
 }

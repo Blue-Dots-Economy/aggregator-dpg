@@ -8,6 +8,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { users, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   RegistrationLinksStoreBase,
   type CreateRegistrationLinkInput,
@@ -18,23 +19,7 @@ import {
   type StoreResult,
   type UpdateDraftInput,
 } from './interface.js';
-
-const PG_UNIQUE_VIOLATION = '23505';
-
-/**
- * Extracts the Postgres SQLSTATE from a thrown error.
- *
- * Drizzle wraps driver errors, so this walks the `.cause` chain to find `code`.
- */
-function pgErrorCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
@@ -76,11 +61,11 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.create',
         status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
+        error: errorMessage(err),
+        error_type: errorType(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -97,9 +82,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findBySlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -120,9 +105,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findByOrgAndSlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -139,9 +124,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findById',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -178,9 +163,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.list',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -234,10 +219,10 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateDraft',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -261,9 +246,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateStatus',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 }

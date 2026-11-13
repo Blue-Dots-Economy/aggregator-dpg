@@ -28,6 +28,7 @@ describe('approveCoordinator', () => {
       buildCoordinator({
         id: ID,
         status: 'pending',
+        type: 'seeker',
         parentOrgId: buildDefaultOrg().id,
         isDefaultOrg: true,
       }),
@@ -66,6 +67,32 @@ describe('approveCoordinator', () => {
     expect(kc.ok && kc.value?.enabled).toBe(true);
     const row = await store.findById(ID);
     expect(row.ok && row.value?.updatedBy).toBe(INVITER);
+  });
+
+  it.each([
+    ['serves nothing', [] as string[]],
+    ['serves only ids the network does not have', ['retired']],
+  ])('refuses to approve a coordinator that %s, before any write', async (_label, serves) => {
+    const row = await store.findById(ID);
+    if (!row.ok || !row.value) throw new Error('seed missing');
+    store.seed([{ ...row.value, serves }]);
+    const signals = new SignalStackWriterFake();
+    _setSignalStackWriter(signals);
+
+    expect(await approve()).toEqual({ kind: 'no_profile_types' });
+    expect(signals.listAggregators()).toHaveLength(0);
+    const kc = await idp.findById(kcId);
+    expect(kc.ok && kc.value?.enabled).toBe(false);
+    const after = await store.findById(ID);
+    expect(after.ok && after.value?.status).toBe('pending');
+  });
+
+  it('refuses to approve a coordinator with no types when Signals is not set up', async () => {
+    const row = await store.findById(ID);
+    if (!row.ok || !row.value) throw new Error('seed missing');
+    store.seed([{ ...row.value, serves: [] }]);
+    _setSignalStackWriter(null);
+    expect(await approve()).toEqual({ kind: 'no_profile_types' });
   });
 
   it('undoes Keycloak when the row leaves pending before the approval compare-and-set', async () => {

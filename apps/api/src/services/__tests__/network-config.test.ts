@@ -11,12 +11,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockLoad, mockLoaderCtor, mockLoggerError, mockLoggerInfo } = vi.hoisted(() => ({
-  mockLoad: vi.fn(),
-  mockLoaderCtor: vi.fn(),
-  mockLoggerError: vi.fn(),
-  mockLoggerInfo: vi.fn(),
-}));
+const { mockLoad, mockLoaderCtor, mockLoggerError, mockLoggerInfo, mockLoggerWarn } = vi.hoisted(
+  () => ({
+    mockLoad: vi.fn(),
+    mockLoaderCtor: vi.fn(),
+    mockLoggerError: vi.fn(),
+    mockLoggerInfo: vi.fn(),
+    mockLoggerWarn: vi.fn(),
+  }),
+);
 
 vi.mock('@aggregator-dpg/network-config/loader', () => ({
   FileNetworkConfigLoader: class {
@@ -32,7 +35,7 @@ vi.mock('@aggregator-dpg/network-config/paths', () => ({
 }));
 
 vi.mock('../../logger.js', () => ({
-  logger: { error: mockLoggerError, info: mockLoggerInfo, warn: vi.fn(), debug: vi.fn() },
+  logger: { error: mockLoggerError, info: mockLoggerInfo, warn: mockLoggerWarn, debug: vi.fn() },
 }));
 
 const sampleConfig = {
@@ -48,6 +51,7 @@ describe('getNetworkConfig', () => {
     mockLoaderCtor.mockReset();
     mockLoggerError.mockReset();
     mockLoggerInfo.mockReset();
+    mockLoggerWarn.mockReset();
     delete process.env.NETWORK_CONFIG_CACHE_DIR;
   });
 
@@ -61,6 +65,41 @@ describe('getNetworkConfig', () => {
     expect(mockLoad).toHaveBeenCalledTimes(1);
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       expect.objectContaining({ operation: 'network-config.load', status: 'success' }),
+      expect.any(String),
+    );
+  });
+
+  it('logs the parts of network.json the loader dropped, once', async () => {
+    const warnings = [
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'dashboard_buckets.by_status', code: 'NON_STRING_ENTRIES_DROPPED' },
+    ];
+    mockLoad.mockResolvedValue({ success: true, value: { ...sampleConfig, warnings } });
+    const { getNetworkConfig } = await import('../network-config.js');
+    await getNetworkConfig();
+    await getNetworkConfig();
+    const dropped = mockLoggerWarn.mock.calls.filter(
+      ([fields]) => fields?.finding === 'network_json_parts_dropped',
+    );
+    expect(dropped).toEqual([
+      [
+        {
+          operation: 'network-config.load',
+          status: 'skipped',
+          finding: 'network_json_parts_dropped',
+          warnings,
+        },
+        expect.any(String),
+      ],
+    ]);
+  });
+
+  it('does not log dropped parts when the loader reports none', async () => {
+    mockLoad.mockResolvedValue({ success: true, value: sampleConfig });
+    const { getNetworkConfig } = await import('../network-config.js');
+    await getNetworkConfig();
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ finding: 'network_json_parts_dropped' }),
       expect.any(String),
     );
   });

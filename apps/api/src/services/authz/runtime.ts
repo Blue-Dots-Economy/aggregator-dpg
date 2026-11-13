@@ -19,7 +19,7 @@ import {
   type AuthorizerBase,
   type RoleIndex,
 } from '@aggregator-dpg/rbac';
-import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { ConfigError, errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { getRbacCatalogue, type RbacCatalogueBase } from '../rbac-catalogue/index.js';
@@ -179,7 +179,7 @@ async function refreshOnce(): Promise<RefreshOutcome> {
     logger.error({
       operation: 'rbac.catalogue.refresh',
       status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage(err),
       error_type: err instanceof ConfigError ? err.code : 'unknown',
       kept_revision: current.catalogueRevision,
     });

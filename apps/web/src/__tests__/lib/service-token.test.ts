@@ -96,4 +96,23 @@ describe('getServiceAccessToken', () => {
     delete process.env.BFF_SERVICE_CLIENT_SECRET;
     await expect(getServiceAccessToken()).rejects.toThrow();
   });
+
+  it.each([
+    ['no access_token', { expires_in: 300 }],
+    ['an empty access_token', { access_token: '', expires_in: 300 }],
+    ['a text expires_in', { access_token: 'AT-secret', expires_in: '300' }],
+    ['no expires_in', { access_token: 'AT-secret' }],
+  ])('throws without caching or quoting the token when the body has %s', async (_label, body) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const error: unknown = await getServiceAccessToken().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).not.toContain('AT-secret');
+
+    await getServiceAccessToken().catch(() => undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

@@ -9,16 +9,17 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getUserStore } from '../services/user-store/index.js';
-import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { resolveRequestedDomain } from './served-domains-shared.js';
 
 /**
  * Lifecycle statuses the dashboard shows. Paused and retired are excluded.
@@ -79,7 +80,8 @@ const ExportProfilesBodySchema = z.object({
   domain: z.string().min(1).optional(),
 });
 
-export async function registerDashboardRoutes(app: FastifyInstance): Promise<void> {
+export async function registerDashboardRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/dashboard',
     {
@@ -91,8 +93,11 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
           "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of the rollup on every reply).",
         security: [{ bearerAuth: [] }],
         querystring: DashboardQuerySchema,
-        // 200 carries no schema on purpose — see description.
-        response: { ...errorResponses(400, 401, 403, 500, 503) },
+        // `z.unknown()` accepts any payload, so the proxied body is sent unchanged.
+        response: {
+          200: z.unknown().describe('The signalstack dashboard payload, unchanged.'),
+          ...errorResponses(400, 401, 403, 500, 503),
+        },
       },
     },
     async (req, reply) => {
@@ -104,15 +109,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       const start = Date.now();
 
       // Validated (and defaulted) by the route's `querystring` zod schema.
-      const query = req.query as z.infer<typeof DashboardQuerySchema>;
+      const query = req.query;
       const { page, limit, status, lifecycle, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const domain = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -168,7 +167,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     },
   );
 
-  app.get(
+  // The 200 reply is a CSV file, so it has no response schema; `Reply` types it instead.
+  app.get<{ Querystring: z.output<typeof DashboardExportQuerySchema>; Reply: string }>(
     '/v1/dashboard/export',
     {
       config: { rbac: { capability: 'profiles.export' } },
@@ -179,7 +179,6 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
           'Returns a CSV (text/csv) of the dashboard items for the caller aggregator. Filters by optional status. Body is the CSV text, with Content-Disposition: attachment.',
         security: [{ bearerAuth: [] }],
         querystring: DashboardExportQuerySchema,
-        // 200 carries no schema — the reply is a text/csv attachment.
         response: { ...errorResponses(400, 401, 403, 500, 503) },
       },
     },
@@ -192,15 +191,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       const start = Date.now();
 
       // Validated (and defaulted) by the route's `querystring` zod schema.
-      const query = req.query as z.infer<typeof DashboardExportQuerySchema>;
+      const query = req.query;
       const { status, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const domain = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -252,7 +245,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
     },
   );
 
-  app.post(
+  // The 200 reply is a CSV file, so it has no response schema; `Reply` types it instead.
+  app.post<{ Body: z.output<typeof ExportProfilesBodySchema>; Reply: string }>(
     '/v1/dashboard/export/profiles',
     {
       config: { rbac: { capability: 'profiles.view_pii' } },
@@ -274,16 +268,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       });
       const start = Date.now();
 
-      const { item_ids, domain: requestedDomain } = req.body as z.infer<
-        typeof ExportProfilesBodySchema
-      >;
-      const networkCfg = await getNetworkConfig();
-      const domain = requestedDomain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const { item_ids, domain: requestedDomain } = req.body;
+      const domain = await resolveRequestedDomain(auth, requestedDomain);
 
       const ss = getSignalStackWriter();
       if (!ss) {

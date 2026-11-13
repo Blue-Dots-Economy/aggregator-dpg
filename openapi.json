@@ -142,8 +142,20 @@
                     "maxLength": 200
                   },
                   "type": {
-                    "type": "string",
-                    "minLength": 1
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1
+                      }
+                    ]
                   },
                   "url": {
                     "type": "string",
@@ -2015,6 +2027,12 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "serves": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "url": {
                       "type": "string",
                       "nullable": true
@@ -2210,6 +2228,7 @@
                     "org_slug",
                     "actor_type",
                     "type",
+                    "serves",
                     "url",
                     "contact",
                     "locations",
@@ -2606,6 +2625,12 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "serves": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "url": {
                       "type": "string",
                       "nullable": true
@@ -2758,6 +2783,7 @@
                     "org_slug",
                     "actor_type",
                     "type",
+                    "serves",
                     "url",
                     "contact",
                     "locations",
@@ -3486,7 +3512,8 @@
                     "serves": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "org_id": {
@@ -3852,7 +3879,8 @@
                           "serves": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1
                             }
                           },
                           "org_id": {
@@ -5242,11 +5270,11 @@
     },
     "/v1/user/metadata/update/{id}": {
       "patch": {
-        "summary": "Change a coordinator's served domains",
+        "summary": "Change a coordinator's profile types",
         "tags": [
           "console"
         ],
-        "description": "`serves` lists network domain ids (`[]` = every domain). For an approved coordinator the Signals organisation's domains are updated first.",
+        "description": "`serves` lists one or more network domain ids. The coordinator's Keycloak `aggregator_type` attribute is written first, then, for an approved coordinator, the Signals organisation's domains. The coordinator's sessions are then ended, so its next login carries the new types.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5260,6 +5288,7 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "minItems": 1,
                     "maxItems": 50
                   }
                 },
@@ -5336,7 +5365,8 @@
                     "serves": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "org_id": {
@@ -14069,6 +14099,57 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
           }
         }
       }
@@ -14079,7 +14160,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.",
+        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns pre-signed upload instructions. The browser uploads CSV bytes directly to object storage, then calls /start. `participant_type` is validated against the active network config at request time.",
         "requestBody": {
           "required": true,
           "content": {
@@ -14117,8 +14198,44 @@
                     "upload_id": {
                       "type": "string"
                     },
+                    "upload": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "PUT",
+                            "POST"
+                          ]
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "form_fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "url",
+                        "headers",
+                        "form_fields"
+                      ],
+                      "additionalProperties": false
+                    },
                     "upload_url": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: a signed PUT URL without the size limit; follow `upload` instead.",
+                      "deprecated": true
                     },
                     "s3_key": {
                       "type": "string"
@@ -14127,7 +14244,9 @@
                       "type": "string"
                     },
                     "content_type": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: the content type is in `upload`.",
+                      "deprecated": true
                     },
                     "max_bytes": {
                       "type": "number"
@@ -14144,6 +14263,7 @@
                   },
                   "required": [
                     "upload_id",
+                    "upload",
                     "upload_url",
                     "s3_key",
                     "expires_at",
@@ -14420,7 +14540,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator.",
+        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator. Uploads that were never started (`pending`, or failed as `upload_abandoned`) are left out.",
         "parameters": [
           {
             "schema": {
@@ -15434,7 +15554,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
+        "description": "Returns a JSON payload carrying a short-lived pre-signed download URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
         "parameters": [
           {
             "schema": {
@@ -15719,6 +15839,57 @@
             }
           },
           "410": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -19829,6 +20000,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "The signalstack dashboard payload, unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "The signalstack dashboard payload, unchanged."
+                }
+              }
+            }
+          },
           "400": {
             "description": "Default Response",
             "content": {
@@ -20720,7 +20901,7 @@
                       "required": [
                         "name"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "brand": {
                       "type": "object",
@@ -20752,22 +20933,202 @@
                         "favicon_url": {
                           "type": "string"
                         },
+                        "palette": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "secondary": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "accent": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gradients": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "from": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  "to": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "from",
+                                  "to"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "typography": {
+                          "type": "object",
+                          "properties": {
+                            "primaryFont": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "headings": {
+                              "type": "object",
+                              "properties": {
+                                "family": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "weight": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "sampleCopy": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "family",
+                                "weight"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "body": {
+                              "type": "object",
+                              "properties": {
+                                "family": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "weight": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "sampleCopy": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "family",
+                                "weight"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primaryFont"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "logo": {
+                          "type": "object",
+                          "properties": {
+                            "default": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "light": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "withStrapline": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "withStraplineLight": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "onBrand": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "additionalProperties": false
+                        },
                         "attribution": {
                           "type": "array",
                           "items": {
                             "type": "object",
                             "properties": {
                               "label": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "name": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "logo": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "logoLight": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               }
                             },
                             "required": [
@@ -20783,7 +21144,7 @@
                         "long_name",
                         "url_slug"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "network": {
                       "type": "object",
@@ -20798,7 +21159,7 @@
                       "required": [
                         "id"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "domains": {
                       "type": "array",
@@ -20825,6 +21186,78 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "dashboardTiles": {
+                            "type": "object",
+                            "properties": {
+                              "profile": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "field": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "field",
+                                    "label"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "user": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "field": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "field",
+                                    "label"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "profile_title": {
+                                "type": "string"
+                              },
+                              "user_title": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "status_rules": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "when": {}
+                              },
+                              "required": [
+                                "status"
+                              ],
+                              "additionalProperties": false
+                            }
                           }
                         },
                         "required": [
@@ -20835,7 +21268,7 @@
                           "guardian_consent_required",
                           "go_live_required"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": false
                       }
                     },
                     "dashboardBuckets": {
@@ -20847,31 +21280,53 @@
                             "type": "string"
                           }
                         },
-                        "by_action_status": {
+                        "by_initiated_action_status": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "by_received_action_status": {
                           "type": "object",
                           "additionalProperties": {
                             "type": "string"
                           }
                         }
                       },
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "registration_modes": {
                       "type": "object",
                       "additionalProperties": {
                         "type": "object",
                         "properties": {
-                          "label": {
-                            "type": "string"
+                          "label_i18n_key": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "submission_shape": {
+                            "type": "string",
+                            "enum": [
+                              "account_only",
+                              "account_and_profile"
+                            ]
+                          },
+                          "public_hint_i18n_key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "nullable": true
                           },
                           "signals_cta": {
                             "type": "boolean"
                           }
                         },
                         "required": [
+                          "label_i18n_key",
+                          "submission_shape",
+                          "public_hint_i18n_key",
                           "signals_cta"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": false
                       }
                     },
                     "signals_ui_urls": {
@@ -20890,7 +21345,12 @@
                       "required": [
                         "custom_roles"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
+                    },
+                    "bulk_upload_max_bytes": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
                     },
                     "organisation": {
                       "type": "object",
@@ -20913,9 +21373,10 @@
                     "registration_modes",
                     "signals_ui_urls",
                     "features",
+                    "bulk_upload_max_bytes",
                     "organisation"
                   ],
-                  "additionalProperties": true
+                  "additionalProperties": false
                 }
               }
             }
@@ -21297,7 +21758,6 @@
                   },
                   "phone": {
                     "type": "string",
-                    "minLength": 3,
                     "maxLength": 20
                   },
                   "type": {

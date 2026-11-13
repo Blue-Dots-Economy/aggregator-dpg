@@ -42,7 +42,7 @@ export function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return;
-    const before = document.activeElement as HTMLElement | null;
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     confirmRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

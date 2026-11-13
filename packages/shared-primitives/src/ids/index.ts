@@ -10,10 +10,11 @@
 import { z } from 'zod';
 
 /**
- * Nominal brand helper — adds a phantom type tag so TypeScript treats
- * each ID family as structurally incompatible with every other.
+ * Nominal brand helper. Adds Zod's phantom brand tag, so TypeScript treats
+ * each ID family as incompatible with every other, and a branded Zod schema
+ * produces the type without a cast.
  */
-export type Brand<T, B extends string> = T & { readonly __brand: B };
+export type Brand<T, B extends string> = T & z.BRAND<B>;
 
 /** Opaque string ID representing an aggregator tenant. */
 export type AggregatorId = Brand<string, 'AggregatorId'>;
@@ -35,68 +36,76 @@ export type ExportId = Brand<string, 'ExportId'>;
 
 const nonEmptyString = z.string().min(1, 'ID must not be empty');
 
+/** Branded schemas, one per ID family. */
+const AggregatorIdSchema = nonEmptyString.brand<'AggregatorId'>();
+const UserIdSchema = nonEmptyString.brand<'UserId'>();
+const OrgIdSchema = nonEmptyString.brand<'OrgId'>();
+const LinkIdSchema = nonEmptyString.brand<'LinkId'>();
+const BatchIdSchema = nonEmptyString.brand<'BatchId'>();
+const ExportIdSchema = nonEmptyString.brand<'ExportId'>();
+
 /**
- * Casts a raw string to AggregatorId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as AggregatorId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded AggregatorId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function aggregatorId(raw: string): AggregatorId {
-  return nonEmptyString.parse(raw) as AggregatorId;
+  return AggregatorIdSchema.parse(raw);
 }
 
 /**
- * Casts a raw string to UserId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as UserId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded UserId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function userId(raw: string): UserId {
-  return nonEmptyString.parse(raw) as UserId;
+  return UserIdSchema.parse(raw);
 }
 
 /**
- * Casts a raw string to OrgId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as OrgId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded OrgId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function orgId(raw: string): OrgId {
-  return nonEmptyString.parse(raw) as OrgId;
+  return OrgIdSchema.parse(raw);
 }
 
 /**
- * Casts a raw string to LinkId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as LinkId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded LinkId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function linkId(raw: string): LinkId {
-  return nonEmptyString.parse(raw) as LinkId;
+  return LinkIdSchema.parse(raw);
 }
 
 /**
- * Casts a raw string to BatchId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as BatchId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded BatchId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function batchId(raw: string): BatchId {
-  return nonEmptyString.parse(raw) as BatchId;
+  return BatchIdSchema.parse(raw);
 }
 
 /**
- * Casts a raw string to ExportId after validating it is non-empty.
+ * Validates that a raw string is non-empty and brands it as ExportId.
  *
  * @param raw - Untrusted string value.
  * @returns Branded ExportId.
- * @throws {Error} If raw is empty.
+ * @throws {z.ZodError} If raw is empty.
  */
 export function exportId(raw: string): ExportId {
-  return nonEmptyString.parse(raw) as ExportId;
+  return ExportIdSchema.parse(raw);
 }

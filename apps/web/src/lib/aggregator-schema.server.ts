@@ -9,6 +9,8 @@
 
 import { applyUrlRule } from '@aggregator-dpg/network-config/uri-fields';
 import 'server-only';
+import { readDomainLabels } from './aggregator-config-domains';
+import { parseJsonObject, parseJsonSchema, readJsonObject } from './json-object';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -45,7 +47,7 @@ export function resolveAggregatorSchemaPath(file: string): string {
 
 /**
  * Replaces the `type` options in the schema and UI schema with the network's
- * domains from `GET /v1/aggregator-config`.
+ * domains from `GET /v1/aggregator-config`, for a single-choice or a list field.
  *
  * Keeps the file's static values if the api is unreachable.
  *
@@ -60,21 +62,26 @@ export async function patchTypeFromNetwork(
   try {
     const res = await fetch(`${apiBase}/v1/aggregator-config`, { cache: 'no-store' });
     if (!res.ok) return;
-    const cfg = (await res.json()) as {
-      domains?: Array<{ id: string; label?: string; plural_label?: string }>;
-    };
-    const domains = cfg?.domains ?? [];
+    const domains = readDomainLabels(await res.json()) ?? [];
     if (domains.length === 0) return;
 
-    const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    const typeField = props?.['type'];
-    if (typeField) {
-      typeField['enum'] = domains.map((d) => d.id);
-      typeField['oneOf'] = domains.map((d) => ({ const: d.id, title: d.label ?? d.id }));
-    }
+    const ids = domains.map((d) => d.id);
+    const labels = domains.map((d) => d.label);
+    const typeField = schema.properties?.['type'];
+    const typeUi = readJsonObject(uiSchema['type']) ?? {};
 
-    const typeUi = (uiSchema['type'] as Record<string, unknown> | undefined) ?? {};
-    typeUi['ui:enumNames'] = domains.map((d) => d.label ?? d.id);
+    // A list field (several domains) carries its choices on `items`, and RJSF
+    // reads their labels from the items UI schema.
+    if (typeof typeField === 'object' && typeField.type === 'array') {
+      typeField.items = { type: 'string', enum: ids };
+      typeUi['items'] = { 'ui:enumNames': labels };
+    } else {
+      if (typeof typeField === 'object') {
+        typeField.enum = ids;
+        typeField.oneOf = domains.map((d) => ({ const: d.id, title: d.label }));
+      }
+      typeUi['ui:enumNames'] = labels;
+    }
     uiSchema['type'] = typeUi;
   } catch {
     // Best-effort; the static values remain.
@@ -94,8 +101,8 @@ export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
   ]);
   // The same web-address rule the API and Signals apply, so the form refuses
   // what the server would refuse and says why.
-  const schema = applyUrlRule(JSON.parse(schemaRaw) as RJSFSchema);
-  const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
+  const schema = applyUrlRule(parseJsonSchema(schemaRaw));
+  const uiSchema = parseJsonObject(uiSchemaRaw);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };
 }

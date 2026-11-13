@@ -31,12 +31,14 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aggregator-dpg/shared-primitives": "workspace:*"
+    "@aggregator-dpg/shared-primitives": "workspace:*",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",

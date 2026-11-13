@@ -128,14 +128,14 @@ suite('console store methods (Postgres)', () => {
       expect(all.ok && all.value.rows.map((r) => r.id)).toEqual([ids.c3, ids.c2, ids.c1]);
     });
 
-    it('filters by status and by served domain ("every domain" matches any)', async () => {
+    it('filters by status and by served profile type (an empty list matches none)', async () => {
       const pending = await coordinators.search({ orgIds: null, status: 'pending' });
       expect(pending.ok && pending.value.rows.map((r) => r.id).sort()).toEqual(
         [ids.c1, ids.c3].sort(),
       );
       const seekers = await coordinators.search({ orgIds: null, serves: 'seeker' });
-      // c1 serves seeker; c2 serves every domain.
-      expect(seekers.ok && seekers.value.rows.map((r) => r.id)).toEqual([ids.c2, ids.c1]);
+      // c1 serves seeker; c2 serves no profile type.
+      expect(seekers.ok && seekers.value.rows.map((r) => r.id)).toEqual([ids.c1]);
     });
 
     it('pages by (created_at, id) without gaps or repeats', async () => {

@@ -360,16 +360,28 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
+ * Wraps an optional display field or block so a malformed value reads as absent.
+ *
+ * Any problem inside the block drops the whole block, e.g. one bad tile drops
+ * every tile of that domain. The UI then uses its defaults and the rest of
+ * `network.json` still loads. The loader lists each dropped block in
+ * {@link ResolvedNetworkConfig.warnings}.
+ */
+function droppedWhenMalformed<T extends z.ZodTypeAny>(schema: T) {
+  return schema.optional().catch(undefined);
+}
+
+/**
  * One dashboard tile: the rollup key to read and its label.
  *
  * `field` is a key on the signalstack rollup (e.g. `total_users`). The
  * aggregator reads the precomputed value. An unknown `field` skips the tile
  * and logs a warning.
  */
-export interface DashboardTileDef {
-  field: string;
-  label: string;
-}
+export const DashboardTileDefSchema = z
+  .object({ field: z.string(), label: z.string() })
+  .passthrough();
+export type DashboardTileDef = z.infer<typeof DashboardTileDefSchema>;
 
 /**
  * Per-domain dashboard tiles, split into profile and user groups.
@@ -377,12 +389,32 @@ export interface DashboardTileDef {
  * Copied from `network.json`. All fields are optional; the UI uses defaults
  * for missing groups and titles.
  */
-export interface DashboardTiles {
-  profile?: DashboardTileDef[];
-  user?: DashboardTileDef[];
-  profile_title?: string;
-  user_title?: string;
-}
+export const DashboardTilesSchema = z
+  .object({
+    profile: z.array(DashboardTileDefSchema).optional(),
+    user: z.array(DashboardTileDefSchema).optional(),
+    profile_title: z.string().optional(),
+    user_title: z.string().optional(),
+  })
+  .passthrough();
+export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
+
+/**
+ * Labels for some or all buckets of one kind, keyed by bucket.
+ *
+ * Signals fixes the usual keys (`new`, `active`, `at_risk`, `inactive`;
+ * `create`, `accept`, `reject`, `cancel`), but any key is kept. Entries whose
+ * value is not a string are dropped.
+ */
+const BucketLabelsSchema = z
+  .record(z.string(), z.unknown())
+  .transform((labels): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [key, label] of Object.entries(labels)) {
+      if (typeof label === 'string') out[key] = label;
+    }
+    return out;
+  });
 
 /**
  * Network-wide label overrides for the dashboard status and action buckets.
@@ -391,11 +423,14 @@ export interface DashboardTiles {
  * labels are split into initiated and received. All optional; the UI uses
  * English defaults.
  */
-export interface DashboardBuckets {
-  by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
-  by_initiated_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
-  by_received_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
-}
+export const DashboardBucketsSchema = z
+  .object({
+    by_status: BucketLabelsSchema.optional(),
+    by_initiated_action_status: BucketLabelsSchema.optional(),
+    by_received_action_status: BucketLabelsSchema.optional(),
+  })
+  .passthrough();
+export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;
 
 /**
  * One entry of a domain's `status_rules` array from `network.json`.
@@ -403,56 +438,130 @@ export interface DashboardBuckets {
  * `when` is the metrics-service condition, passed through unchanged.
  * `label` and `description` are shown on the dashboard status cards.
  */
-export interface StatusRule {
-  status: string;
-  label?: string;
-  description?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  when?: any;
-}
+export const StatusRuleSchema = z
+  .object({
+    status: z.string(),
+    label: z.string().optional(),
+    description: z.string().optional(),
+    when: z.unknown().optional(),
+  })
+  .passthrough();
+export type StatusRule = z.infer<typeof StatusRuleSchema>;
 
 /**
  * One domain inside a signalstack network.
  *
- * Holds the JSON Schemas keyed by `item_type`.
+ * Holds the JSON Schemas keyed by `item_type`. Unknown keys are kept unchanged.
  */
-export interface NetworkDomain {
-  id: string;
-  description?: string;
-  /** Dashboard tile groups. Optional, copied from `network.json`. */
-  dashboard_tiles?: DashboardTiles;
-  /** Status rules and their UI labels. Optional, copied from `network.json`. */
-  status_rules?: StatusRule[];
-  /**
-   * When true, minors need guardian consent, so the form collects a birth year.
-   *
-   * Absent means `false`.
-   */
-  guardian_consent_required?: boolean;
-  /**
-   * Go-live gate tokens, e.g. `schema_required`, `consent_required`.
-   *
-   * Decides whether the form shows the profile-creation consent step. Absent means `[]`.
-   */
-  go_live_required?: string[];
-  item_schemas: Record<string, Record<string, unknown>>;
-}
+export const NetworkDomainSchema = z
+  .object(
+    {
+      id: z.string({
+        required_error: 'each domain must declare `id`',
+        invalid_type_error: 'each domain must declare `id`',
+      }),
+      description: droppedWhenMalformed(z.string()),
+      /** Dashboard tile groups. Optional, copied from `network.json`. */
+      dashboard_tiles: droppedWhenMalformed(DashboardTilesSchema),
+      /** Status rules and their UI labels. Optional, copied from `network.json`. */
+      status_rules: droppedWhenMalformed(z.array(StatusRuleSchema)),
+      /**
+       * When true, minors need guardian consent, so the form collects a birth year.
+       *
+       * Absent means `false`.
+       */
+      guardian_consent_required: droppedWhenMalformed(z.boolean()),
+      /**
+       * Go-live gate tokens, e.g. `schema_required`, `consent_required`.
+       *
+       * Decides whether the form shows the profile-creation consent step. Absent
+       * means `[]`. Entries that are not strings are dropped.
+       */
+      go_live_required: droppedWhenMalformed(
+        z
+          .array(z.unknown())
+          .transform((tokens) => tokens.filter((t): t is string => typeof t === 'string')),
+      ),
+      item_schemas: z.record(z.string(), z.record(z.string(), z.unknown())),
+    },
+    { invalid_type_error: 'each domain must declare `id`' },
+  )
+  .passthrough();
+export type NetworkDomain = z.infer<typeof NetworkDomainSchema>;
+
+/** A JSON object; rejects null and arrays. */
+const JsonObjectSchema = z.record(z.string(), z.unknown());
+
+/**
+ * Checks a domain's `id` and `item_schemas` first, so the error names the domain.
+ */
+const DomainWithNamedErrorsSchema = z
+  .object(
+    {
+      id: z.string({
+        required_error: 'each domain must declare `id`',
+        invalid_type_error: 'each domain must declare `id`',
+      }),
+      item_schemas: z.unknown(),
+    },
+    { invalid_type_error: 'each domain must declare `id`' },
+  )
+  .passthrough()
+  .superRefine((domain, ctx) => {
+    const itemSchemas = JsonObjectSchema.safeParse(domain.item_schemas);
+    if (!itemSchemas.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['item_schemas'],
+        message: `domain ${domain.id} missing item_schemas`,
+      });
+      return;
+    }
+    for (const [itemType, schema] of Object.entries(itemSchemas.data)) {
+      if (!JsonObjectSchema.safeParse(schema).success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['item_schemas', itemType],
+          message: `domain ${domain.id} item schema ${itemType} must be an object`,
+        });
+      }
+    }
+  })
+  .pipe(NetworkDomainSchema);
 
 /**
  * Parsed signalstack `network.json`.
  *
- * Unknown keys are kept unchanged.
+ * Only the fields the aggregator reads are checked. Unknown keys are kept
+ * unchanged. Malformed dashboard blocks are dropped.
  */
-export interface SignalstackNetwork {
-  id: string;
-  display_name?: string;
-  description?: string;
-  domains: NetworkDomain[];
-  /** Shared dashboard bucket labels. Optional, copied from `network.json`. */
-  dashboard_buckets?: DashboardBuckets;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
+export const SignalstackNetworkSchema = z
+  .object(
+    {
+      id: z
+        .string({
+          required_error: 'network.json missing `id`',
+          invalid_type_error: 'network.json missing `id`',
+        })
+        .min(1, 'network.json missing `id`'),
+      display_name: droppedWhenMalformed(z.string()),
+      description: droppedWhenMalformed(z.string()),
+      domains: z
+        .array(DomainWithNamedErrorsSchema, {
+          required_error: 'network.json must declare at least one domain',
+          invalid_type_error: 'network.json must declare at least one domain',
+        })
+        .min(1, 'network.json must declare at least one domain'),
+      /** Shared dashboard bucket labels. Optional, copied from `network.json`. */
+      dashboard_buckets: droppedWhenMalformed(DashboardBucketsSchema),
+    },
+    {
+      required_error: 'network.json must be an object',
+      invalid_type_error: 'network.json must be an object',
+    },
+  )
+  .passthrough();
+export type SignalstackNetwork = z.infer<typeof SignalstackNetworkSchema>;
 
 // ─── Resolved config (what callers read) ─────────────────────────────────────
 
@@ -512,6 +621,23 @@ export interface ResolvedNetworkConfig {
    * The web app then uses its on-disk participant `consent.json`.
    */
   participantConsent?: ParticipantConsentDoc;
+  /**
+   * Parts of `network.json` the loader dropped as malformed.
+   *
+   * Undefined when nothing was dropped. The package does not log; callers log these.
+   */
+  warnings?: NetworkConfigWarning[];
+}
+
+/** One part of `network.json` the loader dropped. */
+export interface NetworkConfigWarning {
+  /** Dot path in `network.json`, e.g. `domains.0.dashboard_tiles`. */
+  path: string;
+  /**
+   * `MALFORMED_BLOCK_DROPPED`: the whole optional block was ignored.
+   * `NON_STRING_ENTRIES_DROPPED`: entries that are not strings were removed from a list.
+   */
+  code: 'MALFORMED_BLOCK_DROPPED' | 'NON_STRING_ENTRIES_DROPPED';
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

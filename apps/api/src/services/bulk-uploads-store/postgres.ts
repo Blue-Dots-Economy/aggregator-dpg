@@ -5,7 +5,7 @@
  * `StoreError` codes.
  */
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { bulkUploads, type BulkUploadRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -17,8 +17,7 @@ import {
   type ListBulkUploadsResult,
   type StoreResult,
 } from './interface.js';
-
-const PG_UNIQUE_VIOLATION = '23505';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
   async create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>> {
@@ -29,7 +28,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .values({
           userId: input.aggregatorId,
           participantType: input.participantType,
-          s3Key: input.s3Key,
+          storageKey: input.storageKey,
           schemaId: input.schemaId,
           schemaVersion: input.schemaVersion,
           uploadedBy: input.uploadedBy,
@@ -52,11 +51,11 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.create',
         status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
+        error: errorMessage(err),
+        error_type: errorType(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -73,31 +72,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.findById',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
-    }
-  }
-
-  async findByAggregatorAndEtag(
-    aggregatorId: string,
-    s3Etag: string,
-  ): Promise<StoreResult<BulkUpload | null>> {
-    try {
-      const rows = await getDb()
-        .select()
-        .from(bulkUploads)
-        .where(and(eq(bulkUploads.userId, aggregatorId), eq(bulkUploads.s3Etag, s3Etag)))
-        .limit(1);
-      const row = rows[0];
-      return { ok: true, value: row ? toDomain(row) : null };
-    } catch (err: unknown) {
-      logger.error({
-        operation: 'bulkUploadsStore.findByAggregatorAndEtag',
-        status: 'failure',
-        error: (err as Error).message,
-      });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -106,7 +83,11 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>> {
     try {
-      const where = eq(bulkUploads.userId, aggregatorId);
+      const where = and(
+        eq(bulkUploads.userId, aggregatorId),
+        ne(bulkUploads.status, 'pending'),
+        or(isNull(bulkUploads.statusReason), ne(bulkUploads.statusReason, 'upload_abandoned')),
+      );
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()
@@ -126,9 +107,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.list',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -148,16 +129,16 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.deletePending',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
   async markUploaded(
     id: string,
     aggregatorId: string,
-    s3Etag: string,
+    contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>> {
     const start = Date.now();
     // Read the current state, then write with a status guard.
@@ -176,14 +157,14 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         },
       };
     }
-    if (current.status === 'uploaded' && current.s3Etag === s3Etag) {
+    if (current.status === 'uploaded' && current.contentFingerprint === contentFingerprint) {
       return { ok: true, value: current };
     }
     try {
       // The status guard stops a concurrent caller moving a later row back to `uploaded`.
       const rows = await getDb()
         .update(bulkUploads)
-        .set({ status: 'uploaded', s3Etag, updatedAt: new Date() })
+        .set({ status: 'uploaded', contentFingerprint, updatedAt: new Date() })
         .where(
           and(
             eq(bulkUploads.id, id),
@@ -211,23 +192,13 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === PG_UNIQUE_VIOLATION) {
-        return {
-          ok: false,
-          error: {
-            code: 'DUPLICATE_ETAG',
-            message: 'aggregator already has an upload with this S3 ETag',
-          },
-        };
-      }
       logger.error({
         operation: 'bulkUploadsStore.markUploaded',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 }
@@ -237,11 +208,11 @@ function toDomain(row: BulkUploadRow): BulkUpload {
     id: row.id,
     aggregatorId: row.userId,
     participantType: row.participantType,
-    s3Key: row.s3Key,
-    s3Etag: row.s3Etag,
+    storageKey: row.storageKey,
+    contentFingerprint: row.contentFingerprint,
     status: row.status,
     statusReason: row.statusReason,
-    errorsCsvS3Key: row.errorsCsvS3Key,
+    errorsCsvStorageKey: row.errorsCsvStorageKey,
     schemaId: row.schemaId,
     schemaVersion: row.schemaVersion,
     uploadedBy: row.uploadedBy,

@@ -175,21 +175,13 @@ export const ERR = {
     detail: 'Your account does not manage an active organisation.',
     hint: 'Admin account resolved by subject but owns no active org (pending, rejected or released). See services/auth/actor.',
   },
-  AGGREGATOR_TYPE_MISMATCH: {
-    code: 'AGGREGATOR_TYPE_MISMATCH',
+  DOMAIN_NOT_SERVED: {
+    code: 'DOMAIN_NOT_SERVED',
     status: 403,
-    title: 'Wrong participant type',
+    title: 'Profile type not served',
     detail:
-      'Your aggregator is registered for a different participant type. You can only upload or create registration links for the type you registered as.',
-    hint: 'Request body participant_type does not match the JWT `aggregator_type` claim.',
-  },
-  AGGREGATOR_TYPE_MISSING: {
-    code: 'AGGREGATOR_TYPE_MISSING',
-    status: 403,
-    title: 'Aggregator type not set',
-    detail:
-      'Your account is missing its aggregator type. Sign out and back in to refresh your session; if the problem persists, contact support.',
-    hint: 'JWT has no `aggregator_type` claim. KC user attribute missing or mapper not configured. Refresh required after backfill.',
+      'Your account does not serve this profile type. You can only work with the profile types your account serves. If they were changed recently, sign out and back in.',
+    hint: "The requested domain is not in the token's aggregator_type claim (empty = none). The claim changes at the next login.",
   },
 
   // ── Registration ────────────────────────────────────────────────────────
@@ -420,6 +412,13 @@ export const ERR = {
     title: 'Organisation unavailable',
     detail: 'The selected organisation is not accepting users. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
+  },
+  NO_PROFILE_TYPES: {
+    code: 'NO_PROFILE_TYPES',
+    status: 409,
+    title: 'No profile types set',
+    detail: "Set the coordinator's profile types before approving.",
+    hint: "The coordinator's serves holds no domain id of this network. Set it with PATCH /v1/user/metadata/update/:id, then approve.",
   },
 
   ORG_DETAILS_READ_ONLY: {

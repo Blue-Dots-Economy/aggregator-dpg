@@ -18,6 +18,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
+vi.mock('@/components/access/DomainAccessGate', () => ({
+  DomainAccessGate: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title, subtitle, right }: { title: string; subtitle?: string; right?: ReactNode }) => (
     <div>

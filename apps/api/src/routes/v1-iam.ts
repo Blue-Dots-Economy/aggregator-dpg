@@ -15,7 +15,8 @@
  * change is written to `iam_audit`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   CAPABILITIES,
@@ -58,9 +59,7 @@ import {
 import { guardWriteRate } from './console-shared.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
-type IdParams = z.infer<typeof IdParamsSchema>;
 const KeyParamsSchema = z.object({ key: z.string().min(1).max(40) });
-type KeyParams = z.infer<typeof KeyParamsSchema>;
 
 /** Throws the HTTP error for a failed custom-role change. */
 function throwCustomFailure(f: CustomRoleFailure): never {
@@ -146,7 +145,8 @@ function throwFailure(f: RoleFailure): never {
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerV1IamRoutes(app: FastifyInstance): void {
+export function registerV1IamRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/roles',
     {
@@ -157,7 +157,7 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         response: { 200: RolesResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       await requireActor(req);
       const rt = getRbacRuntime();
       if (!rt) throw httpError('RBAC_NOT_ENABLED');
@@ -186,9 +186,9 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         response: { 200: UserRolesResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       const now = new Date();
       const res = await listUserRoles(actor, id, now);
       if (!res.ok) throwFailure(res.failure);
@@ -217,11 +217,11 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof AssignRoleRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       const res = await assignRole(req, actor, id, {
         roleKey: body.role_key,
         orgId: body.org_id,
@@ -255,11 +255,11 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof RevokeRoleRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       const res = await revokeRole(req, actor, id, body.role_key, body.org_id);
       if (!res.ok) throwFailure(res.failure);
       req.log.info({
@@ -291,10 +291,10 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         response: { 201: RoleSchema, ...errorResponses(400, 401, 403, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const body = req.body as z.infer<typeof CreateRoleRequestSchema>;
+      const body = req.body;
       const res = await createCustomRole(actor, {
         key: body.key,
         name: body.name,
@@ -328,11 +328,11 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         response: { 200: RoleSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const { key } = req.params as KeyParams;
-      const body = req.body as z.infer<typeof UpdateRoleRequestSchema>;
+      const { key } = req.params;
+      const body = req.body;
       const res = await updateCustomRole(actor, key, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
@@ -368,10 +368,10 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const { key } = req.params as KeyParams;
+      const { key } = req.params;
       const res = await deleteCustomRole(actor, key);
       if (!res.ok) throwCustomFailure(res.failure);
       req.log.info({

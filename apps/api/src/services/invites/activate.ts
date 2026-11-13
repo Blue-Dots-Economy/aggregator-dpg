@@ -32,6 +32,8 @@ export type ActivateOutcome =
   | { kind: 'email_not_verified' }
   /** The org the invitee joins is no longer active. */
   | { kind: 'org_inactive' }
+  /** The invited coordinator serves no profile type of the network. */
+  | { kind: 'no_profile_types' }
   | { kind: 'unavailable'; dependency: 'db' | 'idp' | 'signalstack' };
 
 /** The `decision_made` value an invite accept writes. */
@@ -127,6 +129,8 @@ async function activateCoordinator(
       return { kind: 'not_found' };
     case 'org_inactive':
       return { kind: 'org_inactive' };
+    case 'no_profile_types':
+      return refused(log, outcome, { aggregator_id: row.id });
     case 'unavailable':
       return outcome;
   }

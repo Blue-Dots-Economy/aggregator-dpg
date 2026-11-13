@@ -12,7 +12,7 @@ import { useThemeMode } from '../../lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
 import { Button } from '../ui/Button';
 import { useDashboard } from '../../hooks/useDashboard';
-import { useProfileRaw } from '../../hooks/useProfile';
+import { useActiveDomain } from '../../hooks/useActiveDomain';
 import {
   useAggregatorConfig,
   DEFAULT_AGGREGATOR_CONFIG,
@@ -180,7 +180,7 @@ function SidebarPanel({
       if (
         e instanceof KeyboardEvent
           ? e.key === 'Escape'
-          : !accountRef.current?.contains(e.target as Node)
+          : e.target instanceof Node && !accountRef.current?.contains(e.target)
       ) {
         setDetailsOpen(false);
       }
@@ -563,18 +563,13 @@ export function Sidebar() {
   const t = useTranslations('nav');
   const { user } = useAuth();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Dashboard rollup feeds the participant-count badge. Domain follows
-  // the aggregator's registered focus; falls back to the first domain
-  // declared by the network when the profile is still resolving.
-  const profileType = useProfileRaw().data?.type;
-  // No 'seeker' fallback — until both profile + live network config have
-  // loaded, `activeDomain` is undefined and useDashboard skips the
-  // fetch (prevents a stale `?domain=seeker` request on cold mount).
-  const activeDomain = profileType ?? cfg.domains[0]?.id;
+  // Dashboard rollup feeds the participant-count badge, for the domain the
+  // coordinator is working with. `active` is undefined until the profile and
+  // network config have loaded, so useDashboard skips the fetch until then.
+  const { active: activeDomain } = useActiveDomain();
   const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
-  // Plan-C / by_domain dashboard shape: every served domain ships under
-  // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
-  // rollup so the sidebar count stays in sync with /dashboard.
+  // Every served domain ships under `by_domain[<id>]`; the badge shows the
+  // active domain's rollup so the count matches /dashboard.
   const participantsBadge = activeDomain
     ? dashboard?.by_domain[activeDomain]?.rollup.total_items
     : undefined;

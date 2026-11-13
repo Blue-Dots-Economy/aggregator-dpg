@@ -19,6 +19,7 @@ import type { ConfigChangeCallback, Env, Unsubscribe } from '../interface.js';
 import { ConfigServiceBase } from '../interface.js';
 import { discoverPackages, type RegisteredPackage } from '../discovery.js';
 import { deepMerge } from '../merge.js';
+import { isRecord } from '../record.js';
 import { interpolateConfig } from '../interpolate.js';
 import { validateConfig } from '../validate.js';
 import { startWatcher } from './watcher.js';
@@ -39,13 +40,13 @@ function loadYaml(filePath: string): Record<string, unknown> {
     if (raw.trim() === '') return {};
     const parsed = parseYaml(raw);
     if (parsed === null || parsed === undefined) return {};
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       throw new ConfigError(
         `Config file must be a YAML mapping, got ${typeof parsed}: ${filePath}`,
         { code: 'CONFIG_PARSE_ERROR' },
       );
     }
-    return parsed as Record<string, unknown>;
+    return parsed;
   } catch (err) {
     if (err instanceof ConfigError) throw err;
     throw new ConfigError(`Failed to parse config file: ${filePath}`, {
@@ -102,7 +103,7 @@ export class FsConfigService extends ConfigServiceBase {
       const yamlDefaults = loadYaml(defaultsFilePath);
       const yamlSlice = Object.hasOwn(yamlDefaults, key) ? yamlDefaults[key] : yamlDefaults;
       if (yamlSlice !== undefined) {
-        if (yamlSlice === null || typeof yamlSlice !== 'object' || Array.isArray(yamlSlice)) {
+        if (!isRecord(yamlSlice)) {
           throw new ConfigError(
             `Default config for "${key}" must be a YAML mapping: ${defaultsFilePath}`,
             {
@@ -111,7 +112,7 @@ export class FsConfigService extends ConfigServiceBase {
             },
           );
         }
-        deepMerge(defaults, yamlSlice as Record<string, unknown>);
+        deepMerge(defaults, yamlSlice);
       }
       merged[key] = defaults;
     }

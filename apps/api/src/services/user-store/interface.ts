@@ -22,6 +22,7 @@ import type {
   BecknContact,
   BecknLocation,
   ConsentRecord,
+  ProfileType,
   RoleType,
 } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
@@ -45,10 +46,10 @@ export interface Coordinator {
   /** Always `'aggregator'`. */
   actorType: ActorType;
   name: string;
-  /** The first domain of {@link serves}, or `null` when it serves every domain. */
+  /** The first entry of {@link serves}, or `null` when it serves none. */
   type: RoleType | null;
-  /** The network domain ids the coordinator serves; `[]` = every domain. */
-  serves: RoleType[];
+  /** The profile types the coordinator serves; `[]` = none. */
+  serves: ProfileType[];
   /** From the org, else the coordinator's own value. */
   url: string | null;
   /** FK to `contact.id`. A PII-derived hash; never log it. */
@@ -116,8 +117,10 @@ export interface Coordinator {
 export interface CreateCoordinatorInput {
   orgSlug: string;
   name: string;
-  /** The domain served; `null` = every domain (stored as `serves = '{}'`). */
+  /** The profile type served; `null` = none (stored as `serves = '{}'`). */
   type: RoleType | null;
+  /** The profile types served; wins over {@link type} when given. */
+  serves?: ProfileType[];
   /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;
   /**
@@ -162,8 +165,8 @@ export interface CreateCoordinatorInput {
 export interface UpdateCoordinatorPatch {
   name?: string;
   type?: RoleType | null;
-  /** The domains served (`[]` = every domain); wins over {@link type} when both are given. */
-  serves?: RoleType[];
+  /** The profile types served; wins over {@link type} when both are given. */
+  serves?: ProfileType[];
   /** `company` / `gstNumber` are ignored; they belong to the org. */
   contact?: BecknContact;
   status?: AggregatorStatus;
@@ -196,7 +199,7 @@ export interface CoordinatorCursor {
 export interface SearchCoordinatorsFilter {
   orgIds: string[] | null;
   status?: AggregatorStatus;
-  /** A network domain id the coordinator serves (`serves = '{}'` serves every domain). */
+  /** A profile type the coordinator serves. */
   serves?: string;
   cursor?: CoordinatorCursor;
   /** 1..100, default 20. */

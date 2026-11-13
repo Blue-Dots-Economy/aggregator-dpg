@@ -6,6 +6,9 @@
  * no ownership filtering.
  */
 
+import { z } from 'zod';
+import { apiErrorMessage } from '../lib/api-error';
+import { parseResponseBody } from '../lib/response-shape-error';
 import { jsonFetch } from './http';
 
 /**
@@ -30,41 +33,57 @@ export interface DashboardQuery {
   refresh?: boolean;
 }
 
+// The dashboard payload is Signals' own, forwarded unchanged by the API. The
+// schemas require only the fields this app reads and keep every other key.
+
 /** Pre-computed participant and action counts for one domain. */
-export interface DashboardRollup {
-  total_items: number;
-  complete_profiles: number;
-  has_applications: number;
-  by_status: Record<string, number>;
-  by_initiated_action_status: Record<string, number>;
-  by_received_action_status: Record<string, number>;
-  total_users: number;
-  avg_items_per_user: number;
-  avg_actions_per_user: number;
-  mode_wise_counts: Record<string, number>;
-}
+export const DashboardRollupSchema = z
+  .object({
+    total_items: z.number(),
+    complete_profiles: z.number(),
+    by_status: z.record(z.number()),
+    has_applications: z.number().optional(),
+    by_initiated_action_status: z.record(z.number()).optional(),
+    by_received_action_status: z.record(z.number()).optional(),
+    total_users: z.number().optional(),
+    avg_items_per_user: z.number().optional(),
+    avg_actions_per_user: z.number().optional(),
+    mode_wise_counts: z.record(z.number()).optional(),
+  })
+  .passthrough();
+export type DashboardRollup = z.infer<typeof DashboardRollupSchema>;
 
 /** Per-domain slice of the dashboard payload: rollup and paginated items. */
-export interface DashboardDomainSlice {
-  rollup: DashboardRollup;
-  /** One row per item. */
-  items: Array<Record<string, unknown>>;
-  total_matching: number;
-  next_cursor: string | null;
-}
+export const DashboardDomainSliceSchema = z
+  .object({
+    rollup: DashboardRollupSchema,
+    /** One row per item. */
+    items: z.array(z.record(z.unknown())),
+    total_matching: z.number(),
+    next_cursor: z.string().nullable(),
+  })
+  .passthrough();
+export type DashboardDomainSlice = z.infer<typeof DashboardDomainSliceSchema>;
 
 /** Signals metadata about the cached rollup, used for the "last updated" hint. */
-export interface DashboardMetadata {
-  last_computed_at: string;
-  ttl_seconds: number;
-  refreshed: boolean;
-}
+export const DashboardMetadataSchema = z
+  .object({
+    /** `null` until Signals has computed the rollup. */
+    last_computed_at: z.string().nullish(),
+    ttl_seconds: z.number().optional(),
+    refreshed: z.boolean().optional(),
+  })
+  .passthrough();
+export type DashboardMetadata = z.infer<typeof DashboardMetadataSchema>;
 
 /** Full dashboard payload, with every domain keyed by id in `by_domain`. */
-export interface DashboardPage {
-  by_domain: Record<string, DashboardDomainSlice>;
-  metadata: DashboardMetadata;
-}
+export const DashboardPageSchema = z
+  .object({
+    by_domain: z.record(DashboardDomainSliceSchema),
+    metadata: DashboardMetadataSchema,
+  })
+  .passthrough();
+export type DashboardPage = z.infer<typeof DashboardPageSchema>;
 
 /**
  * Lifecycle bucket a dashboard row can be in.
@@ -106,10 +125,10 @@ export interface DashboardBulkActionInput {
   ids: string[];
 }
 
-/** Acknowledgement from the bulk-action endpoint (202 envelope). */
-export interface DashboardBulkActionResult {
-  accepted: number;
-}
+/** The ack of `POST /api/dashboard/actions`: how many ids were accepted. */
+const DashboardBulkActionResultSchema = z.object({ accepted: z.number().int().nonnegative() });
+
+export type DashboardBulkActionResult = z.infer<typeof DashboardBulkActionResultSchema>;
 
 export interface DashboardService {
   /**
@@ -138,6 +157,7 @@ export interface DashboardService {
    * @param input - Action name, domain and row ids.
    * @returns The 202 acknowledgement.
    * @throws {Error} If an input is missing or the request fails.
+   * @throws {ResponseShapeError} If the acknowledgement has the wrong shape.
    */
   dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult>;
   /**
@@ -168,7 +188,7 @@ class HttpDashboardService implements DashboardService {
     if (query?.lifecycle) params.set('lifecycle', query.lifecycle);
     if (query?.refresh) params.set('refresh', 'true');
     const url = `/api/dashboard?${params.toString()}`;
-    return jsonFetch<DashboardPage>(url);
+    return jsonFetch(url, DashboardPageSchema);
   }
 
   async dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult> {
@@ -183,16 +203,7 @@ class HttpDashboardService implements DashboardService {
       credentials: 'same-origin',
     });
     if (!res.ok) {
-      // Use the upstream error message when the body has one.
-      let message = `dashboard export failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `dashboard export failed: ${res.status}`));
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') ?? '';
@@ -215,16 +226,7 @@ class HttpDashboardService implements DashboardService {
       body: JSON.stringify({ item_ids: input.itemIds, domain: input.domain }),
     });
     if (!res.ok) {
-      // Use the upstream error message when the body has one.
-      let message = `profile export failed: ${res.status}`;
-      try {
-        const errBody = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = errBody?.error?.detail ?? errBody?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `profile export failed: ${res.status}`));
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') ?? '';
@@ -249,17 +251,9 @@ class HttpDashboardService implements DashboardService {
       body: JSON.stringify(input),
     });
     if (!res.ok) {
-      let message = `bulk action failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `bulk action failed: ${res.status}`));
     }
-    return (await res.json()) as DashboardBulkActionResult;
+    return parseResponseBody(res, '/api/dashboard/actions', DashboardBulkActionResultSchema);
   }
 }
 export const dashboardService: DashboardService = new HttpDashboardService();

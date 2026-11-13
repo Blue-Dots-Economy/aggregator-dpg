@@ -15,9 +15,14 @@
       "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"]
     },
     "type": {
-      "type": "string",
+      "type": "array",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider", "service_provider"]
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["seeker", "provider", "service_provider"]
+      }
     },
     "sub_org_name": {
       "type": "string",
@@ -102,7 +107,7 @@
         "phone": {
           "type": "string",
           "title": "Phone",
-          "pattern": "^(\\+?\\d{10,15}|\\d{10})$",
+          "pattern": "^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$",
           "examples": ["+919876543210", "9876543210"]
         },
         "email": {

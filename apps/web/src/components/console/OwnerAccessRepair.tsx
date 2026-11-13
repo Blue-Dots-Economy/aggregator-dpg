@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import type { OwnerAccessResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { OwnerAccessResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
@@ -24,9 +24,10 @@ export function OwnerAccessRepair({ orgId }: Readonly<{ orgId: string }>) {
 
   async function repair() {
     setBusy(true);
-    const r = await sendConsole<OwnerAccessResponse>(
+    const r = await sendConsole(
       `/api/console/org/repair/${orgId}`,
       'POST',
+      OwnerAccessResponseSchema,
       {},
     );
     setBusy(false);

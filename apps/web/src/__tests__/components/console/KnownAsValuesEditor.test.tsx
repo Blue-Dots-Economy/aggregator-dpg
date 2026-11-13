@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { org } from './fixtures';
 import {
   KNOWN_AS_MAX_VALUES,
   KNOWN_AS_NAME_MAX,
@@ -114,7 +115,9 @@ describe('<KnownAsValuesEditor />', () => {
       { key: 'block', name: 'Block' },
       { key: 'ward', name: 'Ward', default: true },
     ];
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: after }));
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ ...org({ id: ORG }), known_as_values: after }),
+    );
     renderIt();
     fireEvent.change(nameField(1), { target: { value: 'Zone' } });
     addValue('  Ward ');
@@ -138,7 +141,9 @@ describe('<KnownAsValuesEditor />', () => {
   });
 
   it('removes a row and clears the default when it was the default', async () => {
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [SAVED[1]] }));
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ ...org({ id: ORG }), known_as_values: [SAVED[1]] }),
+    );
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove District' }));
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -154,7 +159,7 @@ describe('<KnownAsValuesEditor />', () => {
 
   it('says how many organisations moved to the default after a save', async () => {
     vi.mocked(global.fetch).mockResolvedValue(
-      json({ id: ORG, known_as_values: [SAVED[0]], reset_count: 3 }),
+      json({ ...org({ id: ORG }), known_as_values: [SAVED[0]], reset_count: 3 }),
     );
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
@@ -255,12 +260,35 @@ describe('<KnownAsValuesEditor />', () => {
     expect(newValue()).toBeDisabled();
     finish(
       json({
-        id: ORG,
+        ...org({ id: ORG }),
         known_as_values: [SAVED[0], { key: 'block', name: 'Taluk' }],
       }),
     );
     await waitFor(() => expect(nameField(1)).toBeEnabled());
     expect(nameField(2)).toHaveValue('Taluk');
+  });
+
+  it('blocks another save until the page reloads the list when the reply is unreadable', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(global.fetch).mockResolvedValue(json(org({ id: ORG })));
+    const { rerender } = renderIt();
+    addValue('Mentor');
+    fireEvent.click(save());
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
+    // The new row may have been saved with a key; sending it again unkeyed would add a copy.
+    fireEvent.change(nameField(3), { target: { value: 'Mentors' } });
+    expect(save()).toBeDisabled();
+    expect(screen.getByText(messages.console.errors.response_shape)).toBeInTheDocument();
+
+    const reloaded: KnownAsValues = [...SAVED, { key: 'mentor', name: 'Mentor' }];
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <KnownAsValuesEditor orgId={ORG} values={reloaded} />
+      </NextIntlClientProvider>,
+    );
+    fireEvent.change(nameField(3), { target: { value: 'Mentors' } });
+    expect(save()).toBeEnabled();
   });
 
   it('keeps unsaved edits when the page passes the same list in a new object', () => {

@@ -16,6 +16,7 @@ const KEYS = [
   'COLLEGE_DATASET',
   'REFERENCE_BASE_URL',
   'GEO_COUNTRY',
+  'PHONE_COUNTRIES',
 ] as const;
 
 afterEach(() => {
@@ -34,6 +35,14 @@ describe('getFormRuntimeConfig', () => {
     expect(getFormRuntimeConfig()).not.toHaveProperty('geoCountry');
     process.env.GEO_COUNTRY = 'India';
     expect(getFormRuntimeConfig()).not.toHaveProperty('geoCountry');
+  });
+
+  it('passes PHONE_COUNTRIES through trimmed, and omits it when blank', () => {
+    expect(getFormRuntimeConfig()).not.toHaveProperty('phoneCountries');
+    process.env.PHONE_COUNTRIES = ' ';
+    expect(getFormRuntimeConfig()).not.toHaveProperty('phoneCountries');
+    process.env.PHONE_COUNTRIES = ' IN:+91,GB:+44 ';
+    expect(getFormRuntimeConfig().phoneCountries).toBe('IN:+91,GB:+44');
   });
 
   it('reads every configured value', () => {

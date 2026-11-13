@@ -6,15 +6,11 @@
  * @module apps/web/src/lib/console-domains.server
  */
 
-/** One network domain. */
-export interface ConsoleDomain {
-  id: string;
-  label: string;
-}
+import { servedDomainIds } from '@aggregator-dpg/shared-primitives/aggregator';
+import { readDomainLabels, type DomainLabel } from './aggregator-config-domains';
 
-interface ConfigPayload {
-  domains?: ConsoleDomain[];
-}
+/** One network domain. */
+export type ConsoleDomain = DomainLabel;
 
 /**
  * Reads the network's domains (server-side; empty on any failure, so a
@@ -27,24 +23,30 @@ export async function networkDomains(): Promise<ConsoleDomain[]> {
   try {
     const res = await fetch(`${base}/v1/aggregator-config`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
-    const cfg = (await res.json()) as ConfigPayload;
-    return (cfg.domains ?? []).map((d) => ({ id: d.id, label: d.label }));
+    return readDomainLabels(await res.json()) ?? [];
   } catch {
     return [];
   }
 }
 
 /**
- * The domains a coordinator serves, with their labels.
+ * The network domains a coordinator serves, with their labels, in network
+ * order. Ids the network does not have are left out, as the portal and the API
+ * do. When the network's domains could not be read, the stored ids are shown
+ * as they are.
  *
- * @param serves - Domain ids served; empty means every domain.
- * @param domains - From {@link networkDomains}.
- * @returns The served domains (an unknown id keeps its id as the label); every domain when `serves` is empty.
+ * @param serves - Domain ids served; empty means none.
+ * @param domains - From {@link networkDomains}; empty when they could not be read.
+ * @returns The served domains.
  */
 export function servedDomains(
   serves: readonly string[],
   domains: readonly ConsoleDomain[],
 ): ConsoleDomain[] {
-  if (serves.length === 0) return [...domains];
-  return serves.map((id) => ({ id, label: domains.find((d) => d.id === id)?.label ?? id }));
+  if (domains.length === 0) return serves.map((id) => ({ id, label: id }));
+  const ids = servedDomainIds(
+    serves,
+    domains.map((d) => d.id),
+  );
+  return domains.filter((d) => ids.includes(d.id));
 }

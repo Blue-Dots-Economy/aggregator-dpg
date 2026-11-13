@@ -67,6 +67,13 @@ describe('getConsoleActor (C14)', () => {
     expect(await getConsoleActor()).toEqual({ ok: false, reason: 'not_provisioned' });
   });
 
+  it('reports unavailable and caches nothing when /me has an unexpected shape', async () => {
+    vi.mocked(getSession).mockResolvedValue(base);
+    vi.mocked(callApi).mockResolvedValue(json({ kind: 'admin', orgs: [] }));
+    expect(await getConsoleActor()).toEqual({ ok: false, reason: 'unavailable' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('reports no session', async () => {
     vi.mocked(getSession).mockResolvedValue(null);
     expect(await getConsoleActor()).toEqual({ ok: false, reason: 'no_session' });

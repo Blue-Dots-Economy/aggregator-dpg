@@ -15,6 +15,7 @@
  * for the audit trail. The route never returns PII. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { voiceContentSchema } from '../campaign/voice-content.js';
 import { auditFieldNameEntries } from '../campaign/audit-field-names.js';
@@ -28,7 +29,8 @@ import { httpError } from '../errors/http-error.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise<void> {
+export async function registerCampaignVoiceRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/voice',
     {
@@ -44,7 +46,7 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
       },
     },
     async (req, reply) => {
-      await submitCampaignJob(req, reply, {
+      await submitCampaignJob(req, reply, req.body, {
         channel: 'voice',
         parseContent: (rawContent) => {
           const contentParsed = voiceContentSchema.safeParse(rawContent);
@@ -61,7 +63,7 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
         piiFields: (content) => [
           'name',
           'phone',
-          ...auditFieldNameEntries((content.variables as string[] | undefined) ?? []),
+          ...auditFieldNameEntries(content.variables ?? []),
         ],
         buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
         maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,

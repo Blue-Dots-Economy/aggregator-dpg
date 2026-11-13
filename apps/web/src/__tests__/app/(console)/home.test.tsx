@@ -44,6 +44,7 @@ import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { readOpenInvites } from '@/lib/console-invites.server';
 
 type Row = OrgSearchResponse['orgs'][number];
@@ -189,7 +190,7 @@ describe('console home — owner', () => {
     expect(screen.getByRole('button', { name: /^Invited\s*3/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Users\s*4/ })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Resend/ }).length).toBeGreaterThan(0);
-    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
       filter: { org_id: 'org-1' },
       limit: 100,
     });

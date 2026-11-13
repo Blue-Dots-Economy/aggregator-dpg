@@ -26,3 +26,9 @@ describe('plainErrorKey', () => {
     ).toBe('coordinator.error.org_inactive');
   });
 });
+
+describe('plainErrorKey for an unreadable reply', () => {
+  it('maps RESPONSE_SHAPE to the shared response_shape message', () => {
+    expect(plainErrorKey(fail(200, 'RESPONSE_SHAPE'), 'orgs')).toBe('errors.response_shape');
+  });
+});

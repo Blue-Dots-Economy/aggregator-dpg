@@ -12,7 +12,8 @@
  * declared permission is logged but not enforced. Nothing here writes.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { compareCodeUnits, type RoleDefinition } from '@aggregator-dpg/rbac';
 import {
   CataloguePermissionsResponseSchema,
@@ -96,7 +97,8 @@ async function networkAdminRuntime(req: FastifyRequest): Promise<RbacRuntime> {
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerV1RbacCatalogueRoutes(app: FastifyInstance): void {
+export function registerV1RbacCatalogueRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/rbac/roles',
     {
@@ -107,7 +109,7 @@ export function registerV1RbacCatalogueRoutes(app: FastifyInstance): void {
         response: { 200: CatalogueRolesResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const rt = await networkAdminRuntime(req);
       const roles = [...rt.roles.byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
       return reply.status(200).send({ roles: roles.map(toCatalogueRole) });
@@ -127,7 +129,7 @@ export function registerV1RbacCatalogueRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const rt = await networkAdminRuntime(req);
       const stored = await getRbacCatalogue().listPermissions();
       if (!stored.ok) {

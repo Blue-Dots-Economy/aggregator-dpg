@@ -176,6 +176,7 @@ describe('parseError', () => {
       detail: 'Name is required',
       code: 'VALIDATION',
       requestId: 'req-1',
+      status: 400,
     });
   });
 
@@ -186,7 +187,28 @@ describe('parseError', () => {
       detail: 'The server returned HTTP 500.',
       code: 'UNKNOWN',
       requestId: 'req-xyz',
+      status: 500,
     });
+  });
+
+  it('falls back per field when a field has the wrong type', () => {
+    const out = parseError(
+      { error: { title: 42, detail: 'Name is required', code: ['X'], fields: 'oops' } },
+      400,
+      'req-2',
+    );
+    expect(out).toEqual({
+      title: 'Submission failed',
+      detail: 'Name is required',
+      code: 'UNKNOWN',
+      requestId: 'req-2',
+      status: 400,
+    });
+  });
+
+  it('keeps the fields object of the envelope', () => {
+    const out = parseError({ error: { code: 'X', fields: { name: 'required' } } }, 400, 'r');
+    expect(out.fields).toEqual({ name: 'required' });
   });
 
   it('falls back to the given requestId when the envelope omits one', () => {
@@ -238,6 +260,27 @@ describe('submitRegistration', () => {
     expect(result).toEqual({ ok: true, body: { aggregator_id: 'agg-1' } });
   });
 
+  it('returns an empty body when a 2xx body is not a JSON object', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response('null', { status: 201, headers: { 'content-type': 'application/json' } }),
+    ) as unknown as typeof fetch;
+
+    const result = await submitRegistration('/api/aggregator/register', {});
+    expect(result).toEqual({ ok: true, body: {} });
+  });
+
+  it('returns an empty body when a 2xx body is not JSON', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>', { status: 201 }),
+    ) as unknown as typeof fetch;
+
+    const result = await submitRegistration('/api/aggregator/register', {});
+    expect(result).toEqual({ ok: true, body: {} });
+  });
+
   it('returns a parsed error envelope on a non-2xx response', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -251,7 +294,13 @@ describe('submitRegistration', () => {
     const result = await submitRegistration('/api/aggregator/register', {});
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toEqual({ title: 'Nope', detail: 'Bad', code: 'X', requestId: 'req-9' });
+      expect(result.error).toEqual({
+        title: 'Nope',
+        detail: 'Bad',
+        code: 'X',
+        requestId: 'req-9',
+        status: 400,
+      });
     }
   });
 
@@ -269,7 +318,7 @@ describe('submitRegistration', () => {
     }
   });
 
-  it('returns a network-error result when fetch throws', async () => {
+  it('returns a network-error result, without the raw error text, when fetch throws', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => {
       throw new Error('fetch failed: DNS lookup');
@@ -280,9 +329,10 @@ describe('submitRegistration', () => {
     if (!result.ok) {
       expect(result.error).toEqual({
         title: 'Network error',
-        detail: 'fetch failed: DNS lookup',
+        detail: 'Could not reach the server.',
         code: 'NETWORK_ERROR',
         requestId: '',
+        status: 0,
       });
     }
   });

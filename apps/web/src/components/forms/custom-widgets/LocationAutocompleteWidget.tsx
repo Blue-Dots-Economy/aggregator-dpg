@@ -21,7 +21,10 @@ import { cn } from '../../../lib/cn';
 import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
+import { geoSuggestionKey } from './geo-suggestion-key';
+import { withStableKeys } from '@/lib/list-keys';
 import type { GeoComponents, GeoSuggestion } from '../../../lib/geo/types';
+import { errorAria } from '../error-aria';
 
 /**
  * A selected place reported to the page.
@@ -53,16 +56,26 @@ export function LocationAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   placeholder,
   registry,
   options,
+  rawErrors,
 }: Readonly<WidgetProps>) {
   const t = useTranslations('form');
   const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary =
     (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
-  const [text, setText] = React.useState<string>((value as string) ?? '');
+  const valueText = typeof value === 'string' ? value : '';
+  const [text, setText] = React.useState(valueText);
+  // Take a new value from RJSF (e.g. a prefill) during render. The input keeps
+  // its own text so typing is not held up by the form's update.
+  const [syncedValue, setSyncedValue] = React.useState(valueText);
+  if (valueText !== syncedValue) {
+    setSyncedValue(valueText);
+    setText(valueText);
+  }
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
   // Open the list upward when the input is near the viewport bottom.
@@ -84,12 +97,6 @@ export function LocationAutocompleteWidget({
     [config.googleMapsApiKey, config.photonUrl, config.geoCountry],
   );
 
-  // Sync the text with new values from RJSF. Does not search; only typing
-  // searches, so choosing a suggestion never re-opens the list.
-  React.useEffect(() => {
-    setText((value as string) ?? '');
-  }, [value]);
-
   // Cancel any pending work on unmount.
   React.useEffect(
     () => () => {
@@ -110,18 +117,22 @@ export function LocationAutocompleteWidget({
       return;
     }
     debounceRef.current = window.setTimeout(() => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      void provider.suggest(q, controller.signal).then((results) => {
-        if (controller.signal.aborted) return;
-        setSuggestions(results);
-        setOpen(results.length > 0);
-        if (results.length > 0) {
-          const rect = inputRef.current?.getBoundingClientRect();
-          setDropUp(!!rect && window.innerHeight - rect.bottom < DROP_UP_THRESHOLD_PX);
-        }
-      });
+      void search(q);
     }, DEBOUNCE_MS);
+  }
+
+  /** Asks the geocoder for `q` and shows the results, unless a newer search started. */
+  async function search(q: string) {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const results = await provider.suggest(q, controller.signal);
+    if (controller.signal.aborted) return;
+    setSuggestions(results);
+    setOpen(results.length > 0);
+    if (results.length > 0) {
+      const rect = inputRef.current?.getBoundingClientRect();
+      setDropUp(!!rect && window.innerHeight - rect.bottom < DROP_UP_THRESHOLD_PX);
+    }
   }
 
   function handleInput(next: string) {
@@ -184,12 +195,14 @@ export function LocationAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...errorAria(id, rawErrors)}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
           // Delay the close so a suggestion's mousedown still registers.
           blurRef.current = window.setTimeout(() => setOpen(false), BLUR_CLOSE_MS);
+          onBlur?.(id, text);
         }}
       />
       {open && suggestions.length > 0 && (
@@ -201,10 +214,10 @@ export function LocationAutocompleteWidget({
             dropUp ? 'bottom-full mb-1' : 'top-full mt-1',
           )}
         >
-          {suggestions.map((s, i) => (
+          {withStableKeys(suggestions, geoSuggestionKey).map(({ item: s, key }, i) => (
             // `role="option"` so `aria-activedescendant` can point at it.
             <li
-              key={`${s.lat},${s.lng},${i}`}
+              key={key}
               id={optionId(i)}
               role="option"
               aria-selected={i === activeIndex}

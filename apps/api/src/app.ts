@@ -15,11 +15,7 @@ import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import sensible from '@fastify/sensible';
 import fastifySwagger from '@fastify/swagger';
-import {
-  jsonSchemaTransform,
-  serializerCompiler,
-  validatorCompiler,
-} from 'fastify-type-provider-zod';
+import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import {
   config,
   corsOrigins,
@@ -27,6 +23,7 @@ import {
   signalsUiUrlWarnings,
   onboardingEnabledWarnings,
 } from './config.js';
+import { openApiTransform } from './openapi-transform.js';
 import { loggableUrl, loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
@@ -172,7 +169,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           },
         ],
       },
-      transform: jsonSchemaTransform,
+      transform: openApiTransform,
     });
     await app.register(import('@scalar/fastify-api-reference'), {
       routePrefix: '/api/reference',

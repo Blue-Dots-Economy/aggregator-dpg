@@ -6,6 +6,9 @@
  * upstream is unavailable/malformed, and always emits a cacheable SVG.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ logger: { warn: logWarn, error: vi.fn(), info: vi.fn() } }));
+
 import { GET } from '@/app/brand-icon/route';
 
 describe('GET /brand-icon', () => {
@@ -71,6 +74,40 @@ describe('GET /brand-icon', () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const svg = await res.text();
+    expect(svg).toContain('#2563EB');
+  });
+
+  it.each([
+    ['markup', '#fff"/><script>alert(1)</script>'],
+    ['a colour name', 'red'],
+    ['a number', 255],
+  ])('falls back to the default when primary_color is %s', async (_label, primary) => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ brand: { primary_color: primary } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+
+    const svg = await (await GET()).text();
+    expect(svg).toContain('#2563EB');
+    expect(svg).not.toContain('script');
+    expect(svg).not.toContain('red');
+    expect(logWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'brandIcon.loadPrimary', status: 'failure' }),
+    );
+    expect(JSON.stringify(logWarn.mock.calls)).not.toContain('script');
+  });
+
+  it('falls back to the default when the body is not JSON', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const svg = await (await GET()).text();
     expect(svg).toContain('#2563EB');
   });
 });

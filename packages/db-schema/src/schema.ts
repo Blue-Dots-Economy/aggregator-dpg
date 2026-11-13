@@ -244,8 +244,8 @@ export const users = pgTable(
       .unique('users_signalstack_org_slug_unique'),
     /** The coordinator's Signals org name. */
     signalstackOrgName: text('signalstack_org_name').notNull(),
-    // Domain ids the coordinator serves, e.g. `{seeker}`. Empty means every
-    // domain. `'{}'` for admin accounts.
+    // Profile types (domain ids) the coordinator serves, e.g. `{seeker}`.
+    // Empty means none. `'{}'` for admin accounts.
     serves: text('serves')
       .array()
       .notNull()
@@ -495,12 +495,12 @@ export const bulkUploads = pgTable(
       .$defaultFn(() => sql`NULL`),
     // A domain id of the active network. The application validates it.
     participantType: text('participant_type').notNull(),
-    s3Key: text('s3_key').notNull(),
+    storageKey: text('s3_key').notNull(),
     // ETag read on upload confirmation (POST /:id/start). NULL while pending.
-    s3Etag: text('s3_etag'),
+    contentFingerprint: text('s3_etag'),
     status: bulkUploadStatusEnum('status').notNull().default('pending'),
     statusReason: text('status_reason'),
-    errorsCsvS3Key: text('errors_csv_s3_key'),
+    errorsCsvStorageKey: text('errors_csv_s3_key'),
     schemaId: text('schema_id').notNull(),
     schemaVersion: text('schema_version').notNull(),
     uploadedBy: uuid('uploaded_by').notNull(),

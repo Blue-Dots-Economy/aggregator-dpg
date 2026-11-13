@@ -23,12 +23,13 @@ import {
   RegistrationSubmitButton,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
+  useRegistrationError,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 import { gstinCustomValidate } from '../../../lib/org-schema';
 import { withPhoneWidget } from '../../../lib/phone-ui-schema';
-import { readableFormErrors } from '../../../lib/readable-form-errors';
+import { useFieldErrors } from '@/components/forms/useFieldErrors';
 
 /** Message keys for the API's refusals when the inviting org can no longer take the org. */
 const TREE_ERRORS: Record<string, string> = {
@@ -84,7 +85,7 @@ export function OrgRegisterForm({
   invite,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     owner: { email: invite.email },
   }));
@@ -105,6 +106,12 @@ export function OrgRegisterForm({
     [uiSchema, formSchema],
   );
   const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
+  const fieldErrors = useFieldErrors(formSchema);
+  const registrationError = useRegistrationError(fieldErrors, {
+    email: 'owner.email',
+    phone: 'owner.phone',
+    name: 'display_name',
+  });
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
@@ -125,8 +132,14 @@ export function OrgRegisterForm({
       const key = treeErrorKey(result.error);
       setState(
         key
-          ? { status: 'error', ...result.error, title: t(key), detail: '' }
-          : { status: 'error', ...result.error },
+          ? {
+              status: 'error',
+              title: t(key),
+              detail: '',
+              code: result.error.code,
+              requestId: result.error.requestId,
+            }
+          : registrationError(result.error),
       );
       return;
     }
@@ -150,24 +163,20 @@ export function OrgRegisterForm({
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          setCanSubmit,
-          setState,
           handleSubmit,
-          formSchema,
+          fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
-          validationErrorTitle: t('validation_error_title'),
           personName: {
             path: 'owner.name',
             message: (symbols) => t('name_symbols', { symbols }),
           },
           customValidate,
         })}
-        transformErrors={(errors) => readableFormErrors(errors, formSchema)}
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting' || state.status === 'signing_in'}
-          canSubmit
+          onAttempt={fieldErrors.markAttempted}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

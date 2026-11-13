@@ -18,6 +18,12 @@ import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import { callApi } from '../../lib/upstream-client';
 import type { User } from '../../types';
 import { getConsoleActor } from '../../lib/console-actor';
+import { z } from 'zod';
+import { logger } from '@/lib/logger';
+import { summariseIssues } from '@/lib/response-shape-error';
+
+/** The body of `GET /v1/support/config`. */
+const SupportConfigSchema = z.object({ enabled: z.boolean() });
 
 /**
  * Fetches whether contact-support is enabled from `GET /v1/support/config`.
@@ -30,8 +36,15 @@ async function fetchSupportEnabled(): Promise<boolean> {
   try {
     const res = await callApi('/v1/support/config', { method: 'GET' });
     if (!res.ok) return false;
-    const data = (await res.json()) as { enabled?: unknown };
-    return Boolean(data.enabled);
+    const parsed = SupportConfigSchema.safeParse(await res.json());
+    if (parsed.success) return parsed.data.enabled;
+    logger.warn({
+      operation: 'protectedLayout.fetchSupportEnabled',
+      status: 'failure',
+      error: 'unexpected response shape',
+      issues: summariseIssues(parsed.error.issues),
+    });
+    return false;
   } catch {
     return false;
   }

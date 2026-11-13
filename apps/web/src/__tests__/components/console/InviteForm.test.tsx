@@ -13,7 +13,12 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
 import { fillTerms } from '@/i18n/terms';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
@@ -71,10 +76,11 @@ describe('<InviteForm />', () => {
     expect(screen.getByText('First Org')).toBeInTheDocument();
   });
 
-  it('shows a select defaulting to the first organisation when there are several', () => {
+  it('shows a select defaulting to the first organisation when there are several', async () => {
     renderForm();
-    expect(screen.getByRole('combobox')).toHaveValue('org-1');
-    expect(screen.getByRole('option', { name: 'Second Org' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('First Org');
+    fireEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByRole('option', { name: 'Second Org' })).toBeInTheDocument();
   });
 
   it('turns typed text into chips, flags invalid ones and lets a chip be removed', () => {
@@ -84,7 +90,8 @@ describe('<InviteForm />', () => {
     expect(screen.getAllByRole('button', { name: 'Remove a@x.org' })).toHaveLength(2);
     expect(screen.getByText(/1 invalid email. Fix or remove before sending./)).toBeInTheDocument();
     expect(screen.getByText('Fix the highlighted emails to continue.')).toBeInTheDocument();
-    expect(sendButton()).toBeDisabled();
+    expect(emailBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(sendButton()).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Remove not-an-email' }));
     expect(screen.queryByText(/invalid email/)).not.toBeInTheDocument();
     expect(sendButton()).toHaveTextContent('Send 1 invite');
@@ -151,10 +158,17 @@ describe('<InviteForm />', () => {
     expect(unloadBlocked()).toBe(false);
   });
 
-  it('asks for an address before anything is added', () => {
+  it('asks for an address before anything is added, and says so under the box on Send', () => {
+    global.fetch = vi.fn() as never;
     renderForm();
     expect(screen.getByText('Add at least one email to continue.')).toBeInTheDocument();
-    expect(sendButton()).toBeDisabled();
+    expect(sendButton()).toBeEnabled();
+    fireEvent.click(sendButton());
+    expect(
+      screen.getByText(`${messages.console.invite.recipients} is required.`),
+    ).toBeInTheDocument();
+    expect(emailBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('adds every address in pasted text', () => {
@@ -206,8 +220,9 @@ describe('<InviteForm />', () => {
         }),
       }),
     );
-    // The list clears for the next batch.
+    // The list clears for the next batch, without asking for an address again.
     expect(screen.queryByLabelText('Name for a@x.org')).not.toBeInTheDocument();
+    expect(screen.queryByText(/is required\./)).toBeNull();
   });
 
   it('sends text still in the box without pressing Enter first', async () => {
@@ -352,6 +367,20 @@ describe('<InviteForm />', () => {
     },
   );
 
+  it('says the reply could not be read when an OK body does not match', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = respond({ sent: 1 }, 200) as never;
+    renderForm();
+    typeAddresses('a@x.org');
+    fireEvent.click(sendButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.response_shape,
+    );
+    // The invites may have gone out: the list is cleared so a click does not resend them.
+    expect(screen.queryByLabelText('Name for a@x.org')).toBeNull();
+    expect(refresh).toHaveBeenCalled();
+  });
+
   it('says the server could not be reached when the request fails', async () => {
     global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as never;
     renderForm();
@@ -365,7 +394,7 @@ describe('<InviteForm />', () => {
   it('posts to the chosen organisation after switching the select', async () => {
     global.fetch = respond({ sent: 1, resent: 0, invalid: [], existing: [] }, 200) as never;
     renderForm();
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'org-2' } });
+    await chooseOption(screen.getByRole('combobox'), 'Second Org');
     typeAddresses('a@x.org');
     fireEvent.click(sendButton());
     await waitFor(() =>
@@ -378,9 +407,15 @@ describe('<InviteForm />', () => {
     );
   });
 
-  it('disables sending when there are no organisations', () => {
+  it('says why nothing is sent when there are no organisations', () => {
+    global.fetch = vi.fn() as never;
     renderForm([]);
-    expect(sendButton()).toBeDisabled();
+    typeAddresses('a@x.org');
+    fireEvent.click(sendButton());
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.org_unavailable,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

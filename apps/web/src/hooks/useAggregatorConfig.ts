@@ -10,193 +10,115 @@
 
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { z } from 'zod';
+import {
+  BrandAttributionSchema,
+  BrandLogoSchema,
+  BrandPaletteSchema,
+  BrandTypographySchema,
+  RegistrationModeSchema,
+  type BrandTypographyFaceSchema,
+  type GradientSchema,
+  type PaletteSwatchSchema,
+} from '@aggregator-dpg/network-config/interface';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 import { jsonFetch } from '../services/http';
 
+/** One dashboard tile: the rollup key to read and its label. Mirrors network-config `DashboardTileDef`. */
+const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() });
+export type DashboardTileDef = z.infer<typeof DashboardTileDefSchema>;
+
+/** Profile and user tiles for one domain's dashboard. Mirrors network-config `DashboardTiles`. */
+const DashboardTilesSchema = z.object({
+  profile: z.array(DashboardTileDefSchema).optional(),
+  user: z.array(DashboardTileDefSchema).optional(),
+  profile_title: z.string().optional(),
+  user_title: z.string().optional(),
+});
+export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
+
 /**
- * One dashboard tile: the rollup key to read and its label.
+ * Labels for the dashboard's status and action buckets, keyed by bucket.
+ * Mirrors network-config `DashboardBuckets`.
+ */
+const DashboardBucketsSchema = z.object({
+  by_status: z.record(z.string()).optional(),
+  by_initiated_action_status: z.record(z.string()).optional(),
+  by_received_action_status: z.record(z.string()).optional(),
+});
+export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;
+
+/** One status a domain's items can be in, with its label. Mirrors network-config `StatusRule`. */
+const StatusRuleSchema = z.object({
+  status: z.string(),
+  label: z.string().optional(),
+  description: z.string().optional(),
+});
+export type StatusRule = z.infer<typeof StatusRuleSchema>;
+
+const AggregatorConfigDomainSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  plural_label: z.string(),
+  item_type: z.string(),
+  guardian_consent_required: z.boolean().optional(),
+  go_live_required: z.array(z.string()).optional(),
+  dashboardTiles: DashboardTilesSchema.optional(),
+  status_rules: z.array(StatusRuleSchema).optional(),
+});
+export type AggregatorConfigDomain = z.infer<typeof AggregatorConfigDomainSchema>;
+
+/** A registration mode as the API serves it, with `signals_cta` resolved to a boolean. */
+const RegistrationModeConfigSchema = RegistrationModeSchema.extend({ signals_cta: z.boolean() });
+export type RegistrationModeConfig = z.infer<typeof RegistrationModeConfigSchema>;
+
+export type BrandPaletteSwatch = z.infer<typeof PaletteSwatchSchema>;
+export type BrandGradient = z.infer<typeof GradientSchema>;
+export type BrandPalette = z.infer<typeof BrandPaletteSchema>;
+export type BrandTypographyFace = z.infer<typeof BrandTypographyFaceSchema>;
+export type BrandTypography = z.infer<typeof BrandTypographySchema>;
+export type BrandLogo = z.infer<typeof BrandLogoSchema>;
+export type BrandAttribution = z.infer<typeof BrandAttributionSchema>;
+
+/**
+ * Response of `GET /api/aggregator-config`.
  *
- * Mirrors network-config `DashboardTileDef`.
+ * Brand parts reuse the network-config schemas, so the web reads the same
+ * shape the API validated at boot.
  */
-export interface DashboardTileDef {
-  field: string;
-  label: string;
-}
-
-/**
- * Per-domain dashboard tiles, split into profile and user groups.
- * Both are optional; the UI uses default tiles when absent.
- */
-export interface DashboardTiles {
-  profile?: DashboardTileDef[];
-  user?: DashboardTileDef[];
-  /** Optional group-heading overrides; UI falls back to localised "Profiles" / "Users". */
-  profile_title?: string;
-  user_title?: string;
-}
-
-/**
- * Network-wide bucket-label overrides from network.json.
- * Keys are Signals bucket names; values are the network's labels.
- */
-export interface DashboardBuckets {
-  by_status?: {
-    new?: string;
-    active?: string;
-    at_risk?: string;
-    inactive?: string;
-  };
-  by_initiated_action_status?: {
-    create?: string;
-    accept?: string;
-    reject?: string;
-    cancel?: string;
-  };
-  by_received_action_status?: {
-    create?: string;
-    accept?: string;
-    reject?: string;
-    cancel?: string;
-  };
-}
-
-/**
- * One entry of a domain's `status_rules` from network.json. `label` and
- * `description` are optional UI copy rendered on the dashboard status cards.
- */
-export interface StatusRule {
-  status: string;
-  label?: string;
-  description?: string;
-}
-
-export interface AggregatorConfigDomain {
-  id: string;
-  label: string;
-  plural_label: string;
-  item_type: string;
-  /**
-   * Mirrors network.json `guardian_consent_required`. When true, the
-   * registration form collects a birth year. Treated as `false` when absent.
-   */
-  guardian_consent_required?: boolean;
-  /**
-   * Mirrors network.json `go_live_required`. The registration form shows the
-   * consent step only if this includes `consent_required`. Treated as `[]` when absent.
-   */
-  go_live_required?: string[];
-  dashboardTiles?: DashboardTiles;
-  status_rules?: StatusRule[];
-}
-
-/**
- * One declared per-link registration mode from network config. `label_i18n_key`
- * names the admin dropdown label; `submission_shape` drives the public form;
- * `public_hint_i18n_key` (nullable) is rendered beneath the public form.
- */
-export interface RegistrationModeConfig {
-  label_i18n_key: string;
-  submission_shape: 'account_only' | 'account_and_profile';
-  public_hint_i18n_key: string | null;
-  /**
-   * Whether links in this mode offer the Signals UI hand-off. Resolved
-   * server-side, so the client reads it directly.
-   */
-  signals_cta?: boolean;
-}
-
-/**
- * Brand palette swatch. The brand types mirror `@aggregator-dpg/network-config/interface`.
- *
- * They are copied here to keep the Zod schemas out of the client bundle.
- * Keep them in sync with `BrandConfigSchema`.
- */
-export interface BrandPaletteSwatch {
-  name: string;
-  hex: string;
-}
-
-export interface BrandGradient {
-  name: string;
-  from: string;
-  to: string;
-}
-
-export interface BrandPalette {
-  primary?: BrandPaletteSwatch[];
-  secondary?: BrandPaletteSwatch[];
-  accent?: BrandPaletteSwatch[];
-  gradients?: BrandGradient[];
-}
-
-export interface BrandTypographyFace {
-  family: string;
-  weight: string;
-  sampleCopy?: string;
-}
-
-export interface BrandTypography {
-  primaryFont: string;
-  headings?: BrandTypographyFace;
-  body?: BrandTypographyFace;
-}
-
-export interface BrandLogo {
-  default?: string;
-  light?: string;
-  withStrapline?: string;
-  withStraplineLight?: string;
-  onBrand?: string;
-}
-
-/**
- * One "Owned by <party>" row on the login hero. Mirrors `BrandAttributionSchema`.
- * Each entry is a different organisation, unlike {@link BrandLogo}.
- */
-export interface BrandAttribution {
-  label: string;
-  name: string;
-  logo?: string;
-  /** Dark-mode variant of `logo`; falls back to `logo` when absent. */
-  logoLight?: string;
-}
-
-export interface AggregatorConfigPayload {
-  aggregator: {
-    name: string;
-    legal_name?: string;
-    contact_email?: string;
-  };
-  brand: {
-    short_name: string;
-    long_name: string;
-    tagline?: string;
-    strapline?: string;
-    url_slug: string;
-    primary_color?: string;
-    accent_color?: string;
-    logo_url?: string;
-    favicon_url?: string;
-    palette?: BrandPalette;
-    typography?: BrandTypography;
-    logo?: BrandLogo;
-    attribution?: BrandAttribution[];
-  };
-  network: {
-    id: string;
-    display_name?: string;
-  };
-  domains: AggregatorConfigDomain[];
-  /**
-   * Deploy-time capability flags from the api. `custom_roles` gates the
-   * console Roles admin UI and its BFF proxies.
-   */
-  features: { custom_roles: boolean };
-  dashboardBuckets?: DashboardBuckets;
+export const AggregatorConfigPayloadSchema = z.object({
+  aggregator: z.object({
+    name: z.string(),
+    legal_name: z.string().optional(),
+    contact_email: z.string().optional(),
+  }),
+  brand: z.object({
+    short_name: z.string(),
+    long_name: z.string(),
+    tagline: z.string().optional(),
+    strapline: z.string().optional(),
+    url_slug: z.string(),
+    primary_color: z.string().optional(),
+    accent_color: z.string().optional(),
+    logo_url: z.string().optional(),
+    favicon_url: z.string().optional(),
+    palette: BrandPaletteSchema.optional(),
+    typography: BrandTypographySchema.optional(),
+    logo: BrandLogoSchema.optional(),
+    attribution: z.array(BrandAttributionSchema).optional(),
+  }),
+  network: z.object({ id: z.string(), display_name: z.string().optional() }),
+  domains: z.array(AggregatorConfigDomainSchema),
+  features: z.object({ custom_roles: z.boolean() }),
+  dashboardBuckets: DashboardBucketsSchema.optional(),
   /** Per-link registration modes declared by the network (admin dropdown source). */
-  registration_modes?: Record<string, RegistrationModeConfig>;
+  registration_modes: z.record(RegistrationModeConfigSchema).optional(),
   /** Per-domain Signals UI login URLs. A domain without a URL has no Signals hand-off. */
-  signals_ui_urls?: Record<string, string>;
-}
+  signals_ui_urls: z.record(z.string()).optional(),
+  /** Largest bulk-upload CSV the api accepts, in bytes. */
+  bulk_upload_max_bytes: z.number().int().positive().optional(),
+});
+export type AggregatorConfigPayload = z.infer<typeof AggregatorConfigPayloadSchema>;
 
 /** Fallback config used while loading and after a failed fetch. */
 export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
@@ -220,7 +142,7 @@ export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
 export function useAggregatorConfig() {
   const query = useQuery({
     queryKey: ['aggregator-config'],
-    queryFn: () => jsonFetch<AggregatorConfigPayload>('/api/aggregator-config'),
+    queryFn: () => jsonFetch('/api/aggregator-config', AggregatorConfigPayloadSchema),
     // Config rarely changes between deploys.
     staleTime: 5 * 60 * 1000,
   });
@@ -235,6 +157,7 @@ export function useAggregatorConfig() {
         operation: 'aggregator-config.fetch',
         status: 'failure',
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ResponseShapeError ? { issues: error.issueSummary() } : {}),
       },
     );
   }, [error]);

@@ -4,6 +4,7 @@ import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { useFieldErrors } from '@/components/forms/useFieldErrors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
@@ -23,6 +24,7 @@ import {
   RegistrationSubmitButton,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
+  useRegistrationError,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -98,7 +100,7 @@ export function CoordinatorRegisterForm({
   lockedEmail,
 }: CoordinatorRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     name: lockedOrgName,
     contact: { email: lockedEmail },
@@ -120,6 +122,11 @@ export function CoordinatorRegisterForm({
     () => withoutOrgDetails(stripConsentBlock(stripFormChrome(schema))),
     [schema],
   );
+  const fieldErrors = useFieldErrors(formSchema);
+  const registrationError = useRegistrationError(fieldErrors, {
+    email: 'contact.email',
+    phone: 'contact.phone',
+  });
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
     const locked = withReadonlyField(
@@ -145,7 +152,7 @@ export function CoordinatorRegisterForm({
     delete payload['url'];
     const result = await submitRegistration('/api/invite/user/accept', payload);
     if (!result.ok) {
-      setState({ status: 'error', ...result.error });
+      setState(registrationError(result.error));
       return;
     }
     setState({ status: 'signing_in' });
@@ -168,13 +175,10 @@ export function CoordinatorRegisterForm({
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          setCanSubmit,
-          setState,
           handleSubmit,
-          formSchema,
+          fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
-          validationErrorTitle: t('validation_error_title'),
           personName: {
             path: 'contact.name',
             message: (symbols) => t('name_symbols', { symbols }),
@@ -183,7 +187,7 @@ export function CoordinatorRegisterForm({
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting' || state.status === 'signing_in'}
-          canSubmit
+          onAttempt={fieldErrors.markAttempted}
           label={t('submit')}
           submittingLabel={t('submitting')}
         />

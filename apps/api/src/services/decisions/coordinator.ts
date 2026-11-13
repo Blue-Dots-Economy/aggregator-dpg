@@ -14,6 +14,7 @@ import { getOrganisationStore } from '../organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
+import { servedDomains } from '../user-store/serves.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
 import { requestTokenRolesSync } from '../authz/token-roles.js';
 
@@ -24,6 +25,8 @@ export type ApprovalOutcome =
   | { kind: 'not_found' }
   /** The coordinator's org is no longer active. */
   | { kind: 'org_inactive' }
+  /** The coordinator serves no profile type of the network (approve only). */
+  | { kind: 'no_profile_types' }
   | { kind: 'unavailable'; dependency: 'signalstack' | 'idp' | 'db' };
 
 /** Inputs of {@link approveCoordinator}. */
@@ -99,21 +102,26 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     if (org.value?.status !== 'active') return { kind: 'org_inactive' };
   }
 
+  // A coordinator with no profile type in the network could act on nothing,
+  // so it is not approved until an owner sets its types.
+  const networkCfg = await getNetworkConfig();
+  const served = servedDomains(aggregator.serves, networkCfg.domainIds);
+  if (served.length === 0) {
+    log.info({ status: 'skipped', reason: 'no_profile_types' });
+    return { kind: 'no_profile_types' };
+  }
+
   // 1. Signals first. Until it succeeds the row stays pending; a retry is safe
   //    (idempotent on external_id).
   const signalstack = getSignalStackWriter();
   let signalstackOrgId: string | null = null;
   if (signalstack) {
     const started = Date.now();
-    const networkCfg = await getNetworkConfig();
-    // The coordinator's known domains; none (or `[]`) means all of them.
-    const served = aggregator.serves.filter((d) => networkCfg.domainIds.includes(d));
-    const domains = served.length > 0 ? served : networkCfg.domainIds;
     const upsert = await signalstack.upsertAggregator({
       external_id: aggregator.id,
       name: aggregator.name,
       slug: aggregator.orgSlug,
-      domains,
+      domains: served,
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
     if (!upsert.success) {

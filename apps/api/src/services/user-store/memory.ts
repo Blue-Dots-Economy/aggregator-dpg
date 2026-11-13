@@ -26,7 +26,7 @@ import {
 } from './interface.js';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { coordinatorLocations, renderOrgDetails, type OrgDetailColumns } from './org-details.js';
-import { servesOf } from './serves.js';
+import { servesForCreate, servesOf } from './serves.js';
 
 /** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
 export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';
@@ -135,7 +135,7 @@ export class InMemoryUserStore extends UserStoreBase {
     this.legacy.set(id, input.legacyOrgDetails ?? null);
     this.ownLocations.set(id, input.locations ?? []);
     const rendered = this.render(input.orgId, input.legacyOrgDetails ?? null, input.contact);
-    const serves = servesOf(input.type);
+    const serves = servesForCreate(input);
     const row: Coordinator = {
       id,
       orgSlug: input.orgSlug,
@@ -331,7 +331,7 @@ export class InMemoryUserStore extends UserStoreBase {
     if (filter.status) rows = rows.filter((r) => r.status === filter.status);
     if (filter.serves) {
       const d = filter.serves;
-      rows = rows.filter((r) => r.serves.length === 0 || r.serves.includes(d));
+      rows = rows.filter((r) => r.serves.includes(d));
     }
     // Newest first, id as the tie-break (descending), as Postgres orders.
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1));
@@ -390,5 +390,5 @@ export class InMemoryUserStore extends UserStoreBase {
 }
 
 function errResult<T>(code: StoreError['code'], message: string): StoreResult<T> {
-  return { ok: false, error: { code, message } as StoreError };
+  return { ok: false, error: { code, message } };
 }

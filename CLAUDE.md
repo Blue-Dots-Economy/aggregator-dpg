@@ -6,6 +6,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Aggregator DPG — the Aggregator-facing app of the Blue Dots / Signal Stack ecosystem. pnpm + Turbo monorepo, TypeScript-only. See `README.md` for the product spec and `SETUP.md` for the local-stack walkthrough.
 
+## Coding principles
+
+Behavioural guidelines to reduce common LLM coding mistakes (from [andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills)). They bias toward caution over speed; for trivial tasks, use judgment.
+
+### 1. Think before coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity first
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: every changed line should trace directly to the user's request.
+
+### 4. Goal-driven execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
 ## Toolchain
 
 Versions and ports are in `package.json` (`engines`, `packageManager`), `turbo.json`, and `docker-compose.yml`. Two things those files don't tell you:
@@ -26,6 +91,11 @@ pnpm --filter <pkg> test --coverage                # ≥ 70% line target
 Stack run modes, env layout, and the VM-deploy checklist live in the `local-stack` skill — including the footgun that `make reset` destroys data volumes. Note `make rebuild-web` is only needed for web **code** changes: the web image takes no `NEXT_PUBLIC_*` build args, so env changes apply on restart (see `apps/web/CLAUDE.md` for the server-resolve-then-pass-down pattern that keeps it that way).
 
 Commits run husky/lint-staged (`prettier --write` + `eslint --fix`) on staged files. Conventional Commits required; **do not bypass with `--no-verify`** (per `CONTRIBUTING.md`).
+
+Commit messages:
+
+- Keep them short: a single Conventional Commits subject line (e.g. `fix(api): reject expired approval tokens`), with a brief body only when the reason isn't obvious.
+- **No AI attribution.** Do not add `Co-Authored-By: Claude`, `Generated with Claude Code`, or any other AI/assistant trailer to commit messages or PR descriptions.
 
 ## Architecture
 
@@ -49,6 +119,7 @@ All cross-package consumption goes through **subpath exports** declared in each 
 - **`network-config`** — per-deployment binding that lets the aggregator run against ANY signalstack network (blue_dot, purple_dot, …) with no hardcoded domain ids / item types / field names. `NetworkConfigLoader` contract (`./interface`) + `./loader` / `./sniffer` / `./paths` / `./testing`, plus `./signals-cta` — the single shared `signals_cta` default rule that both the api and the web client import so the Signals hand-off flag can't drift between the two. Two more shared rules live alongside it (#904): `./uri-fields` (Signals' `URL_PATTERN`, copied verbatim, and `applyUrlRule`, which the loader applies so every `x-uri` and `format: "uri"` field validates exactly as Signals does — scheme optional) and `./field-errors` (Signals' per-field error wording, so the public form and bulk `errors.csv` name the field and never show a raw regex). The brand block also carries an optional `attribution` array (`{label, name, logo?}`, signals-dpg#720) — **opt-in per brand**: only a `brand.json` that declares it changes the `/v1/aggregator-config` payload, so every other deployment is byte-identical to before.
 - **`mailer`** — vendor-neutral email adapter shared by the api + worker. `MailerAdapter` contract (`./interface`) with SMTP (default; dev MailHog / customer SMTP) and AWS SES impls chosen by `MAIL_PROVIDER`; `getMailer()` returns a process-wide singleton so the SMTP pool is reused. Attachment-bearing mail is sent as raw MIME; `./testing` provides an in-memory fake.
 - **`voice-provider`** — provider-agnostic egress port for the campaign voice channel. `VoiceProviderBase` (`./interface`) with a concrete Raya impl + `./testing`; the worker's `campaign` voice handler dispatches through it behind a **fail-closed** Redis egress gate that bounds our outbound call rate against the provider's budget (unlike the api's fail-open public-submit limiter).
+- **`object-storage`** — provider-neutral object storage for bulk-upload CSVs, errors reports and campaign exports. `ObjectStorageBase` (`./interface`) with an S3-compatible impl chosen by `STORAGE_PROVIDER`, logical areas mapped to key prefixes (`./areas`), shared env fields (`./config`), `./testing` fake and a provider `./contract-suite`.
 - **`profile-csv`** — server-side CSV builder for the "Export profile data" action. Turns decrypted signalstack profiles into an RFC-4180 CSV (identity columns — name, then phone/mobile — first, remaining `item_state` keys alphabetical), every value neutralised against spreadsheet formula injection. Single default export, no subpaths.
 - **`tsconfig`** — `base.json`, `node.json`, `next.json` extends-targets.
 - **`_template`** — copy-paste scaffold for a new service package (interface + memory + testing).
@@ -73,7 +144,7 @@ Auto-loaded when working inside their subtree — read the relevant one before m
 
 Non-negotiable for any code change. Some load always; some are path-scoped and only enter context when you touch a matching file (frontmatter `paths:` — see each file):
 
-- **`error-handling.md`**, **`logging-observability.md`**, **`configuration-discipline.md`**, **`code-documentation.md`** — **always loaded**, genuinely repo-wide (external-call timeouts/retry/typed errors; structured pino logging; no hardcoded domain/env values; TSDoc on every public API).
+- **`error-handling.md`**, **`logging-observability.md`**, **`configuration-discipline.md`**, **`code-documentation.md`** — **always loaded**, genuinely repo-wide (external-call timeouts/retry/typed errors; structured pino logging; no hardcoded domain/env values, and every limit, duration, count or business rule a named, explained value; TSDoc on every public API).
 - **`pull-requests.md`** — **always loaded**. One PR per block (api, worker, web, infra/config), with package and doc changes in the PR of the block they belong to, linked as a GitHub stack with `gh stack`; a combined PR only for a small change and only with the user's explicit approval; CI started by hand on stacked PRs.
 - **`base-class-pattern.md`** + **`interfaces.md`** — **path-scoped** to `packages/*/src/**`, `apps/api/src/services/**`, `apps/web/src/lib/{oidc,session}/**` (the only places this repo authors an `interface.ts`-style abstract-class contract — `apps/worker` never does). Every cross-package contract is an `abstract class` (NOT a TS `interface`), schema/DTO naming (`<Entity>Schema`, `Create<Entity>Input`, etc.), `Result<T, BaseError>` returns, never throw across a service boundary.
 - **`testing.md`** — **path-scoped** to `packages/*/src/testing.ts`, `packages/*/src/testing/**`, `apps/api/src/services/**` (wherever the `./testing` fake-subpath convention actually lives). Fakes over `vi.mock()`, extend the in-memory impl, `seed()` + `build<Entity>()` helpers.
@@ -90,7 +161,7 @@ See `.github/workflows/ci.yml` for the job graph and `docs/ci-required-checks.md
 
 The split between the workflows is load-bearing: **`ci.yml` checks, `build-images.yml` publishes, and the two are connected by a gate rather than by `needs:`.**
 
-- **`ci.yml`** — `pull_request` into `main`/`develop`/`feature` and `push` to `main`/`develop`. The `ci` job lints, type-checks, tests, builds, runs the OpenAPI spec-drift and dep-cruiser checks, and scans with SonarCloud. A second job, `smoke-image`, builds `api`, `web` and `worker` on the PR path with `push: false` — build only, because `server.ts` awaits `runMigrations()`, `getNetworkConfig()` and `loadEmailMessageOverrides()` at startup, so a boot probe would need Postgres, Redis and config fixtures and would go red for a missing service rather than a real defect. There is **no `feature` push trigger and no tag trigger** (#756): both existed only to drive the `docker` matrix, which no longer lives here.
+- **`ci.yml`** — `pull_request` into `main`/`develop`/`feature` and `push` to `main`/`develop`. Lint, type-check, build (with the OpenAPI and RBAC route-table drift checks) and the unit tests with coverage (API, other packages, and the web suite in two shards) run as parallel jobs; the `CI` job waits for them and is the one required check. A `sonar` job scans the coverage afterwards and does not hold up `CI`. A second job, `smoke-image`, builds `api`, `web` and `worker` on the PR path with `push: false` — build only, because `server.ts` awaits `runMigrations()`, `getNetworkConfig()` and `loadEmailMessageOverrides()` at startup, so a boot probe would need Postgres, Redis and config fixtures and would go red for a missing service rather than a real defect. There is **no `feature` push trigger and no tag trigger** (#756): both existed only to drive the `docker` matrix, which no longer lives here.
 - **`build-images.yml`** — publishes `api`, `web` and `worker` to GHCR on a **release tag** (`v*.*.*`, `20*-s*-rc*`, and the per-app `api-v*.*.*` / `web-v*.*.*` / `worker-v*.*.*`) or a manual run. No branch push publishes (#756). `:latest` is gone with the branch triggers — it was gated on `{{is_default_branch}}`, so it tracked the main branch rather than the last release, and nothing pins it.
 - **`create-release.yml`** — the front door for cutting a release. Dispatch it with a tag name and a base branch (`base` is only for `v*.*.*`/extra tags. The `docs_only` input re-publishes an existing tag's notes to the docs PR.); it checks CI, creates the tag and the GitHub release with notes taken from the release PR sections (curated, not PR titles) in one API call, then dispatches the image build. `dry_run` previews the notes without creating anything. Its tag validation accepts the per-app prefixes as well as the org-wide patterns.
 - **`keycloak-theme-build.yaml`** (dispatch-only, parameterised by network and brand) and **`openapi-sync.yml`** / **`security.yml`** are unrelated to the release path. Note `release.yml` was deleted: it ran changesets, had never executed once, and the repo's release tags were always cut by hand.

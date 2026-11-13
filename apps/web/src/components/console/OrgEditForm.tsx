@@ -20,22 +20,26 @@ import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'rea
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type Form from '@rjsf/core';
-import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import { OrgSchema, type Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { RjsfThemedForm } from '../forms/RjsfThemed';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
-import { readableFormErrors } from '../../lib/readable-form-errors';
+import { withStableKeys } from '@/lib/list-keys';
+import { useFieldErrors, useFieldErrorCopy } from '../forms/useFieldErrors';
+import { FieldMessage, useHandFieldErrors } from '../forms/useHandFieldErrors';
 
 /** Longest description the API accepts. */
 const DESCRIPTION_MAX = 1000;
 
 type JsonRecord = Record<string, unknown>;
+
+const NO_SCHEMA: RJSFSchema = { type: 'object', properties: {} };
 
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
@@ -91,7 +95,11 @@ export function OrgEditForm({
   const [legalName, setLegalName] = useState(org.legal_name ?? '');
   const [description, setDescription] = useState(org.description ?? '');
   const [profileData, setProfileData] = useState<JsonRecord>(() => pick(org.profile, fields));
-  const [extraErrors, setExtraErrors] = useState<ErrorSchema | undefined>(undefined);
+  const fieldErrors = useFieldErrors(view?.schema ?? NO_SCHEMA);
+  const copy = useFieldErrorCopy();
+  const nameFe = useHandFieldErrors<'name'>('org', {
+    name: name.trim() ? null : { kind: 'required', message: copy.required(t('org.name')) },
+  });
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const schemaForm = useRef<Form<JsonRecord>>(null);
@@ -135,13 +143,17 @@ export function OrgEditForm({
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    setExtraErrors(undefined);
+    setMessage(null);
+    fieldErrors.markAttempted();
+    if (editing && !nameFe.validate()) return;
     // The schema section checks itself (patterns, choices, GSTIN check character).
     // Only a changed field blocks the save: a value stored before a rule existed
     // must not stop the owner saving something else.
     if (editing && view && view.updatable.length > 0 && blocksSave(Object.keys(profileChanges()))) {
       schemaForm.current?.validateForm();
-      setMessage(t('org.fix_fields'));
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('#org-schema-fields [aria-invalid="true"]')?.focus(),
+      );
       return;
     }
     const patch: JsonRecord = {};
@@ -157,7 +169,7 @@ export function OrgEditForm({
       return;
     }
     setBusy(true);
-    const r = await sendConsole<Org>(`/api/console/org/metadata/${org.id}`, 'PATCH', patch);
+    const r = await sendConsole(`/api/console/org/metadata/${org.id}`, 'PATCH', OrgSchema, patch);
     setBusy(false);
     if (r.ok) {
       // The page's copy catches up through the refresh below.
@@ -166,17 +178,14 @@ export function OrgEditForm({
       router.refresh();
       return;
     }
+    // The change may have been saved: reload the page's copy.
+    if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     const serverErrors = r.error.fields?.['field_errors'];
     if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
-      const mapped: JsonRecord = {};
-      for (const [field, text] of Object.entries(serverErrors as JsonRecord)) {
-        if (fields.includes(field)) mapped[field] = { __errors: [String(text)] };
-      }
-      if (Object.keys(mapped).length > 0) {
-        setExtraErrors(mapped as ErrorSchema);
-        setMessage(t('org.fix_fields'));
-        return;
-      }
+      const known = Object.fromEntries(
+        Object.entries(serverErrors as JsonRecord).filter(([field]) => fields.includes(field)),
+      );
+      if (fieldErrors.setServerErrors({ field_errors: known }).complete) return;
     }
     setMessage(t(errorKey(r)));
   }
@@ -246,7 +255,12 @@ export function OrgEditForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-name">{t('org.name')}</Label>
-            <Input id="org-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              {...nameFe.controlProps('name')}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <FieldMessage id={nameFe.errorId('name')} message={nameFe.message('name')} />
           </div>
           {knownAsPicked ? null : (
             <div className="flex flex-col gap-1.5">
@@ -265,26 +279,27 @@ export function OrgEditForm({
           </div>
         </div>
         {view && fields.length > 0 ? (
-          <RjsfThemedForm<JsonRecord>
-            ref={schemaForm}
-            tagName="div"
-            schema={view.schema}
-            uiSchema={
-              {
-                ...view.uiSchema,
-                'ui:layout': 'grid',
-                'ui:submitButtonOptions': { norender: true },
-              } as unknown as UiSchema<JsonRecord>
-            }
-            formData={profileData}
-            onChange={(ev) => {
-              setProfileData((ev.formData ?? {}) as JsonRecord);
-              setExtraErrors(undefined);
-            }}
-            transformErrors={(errors) => readableFormErrors(errors, view.schema)}
-            {...(customValidate ? { customValidate } : {})}
-            {...(extraErrors ? { extraErrors } : {})}
-          />
+          <div id="org-schema-fields">
+            <RjsfThemedForm<JsonRecord>
+              ref={schemaForm}
+              tagName="div"
+              schema={view.schema}
+              uiSchema={
+                {
+                  ...view.uiSchema,
+                  'ui:layout': 'grid',
+                  'ui:submitButtonOptions': { norender: true },
+                } as unknown as UiSchema<JsonRecord>
+              }
+              formData={profileData}
+              onChange={(ev, id) => {
+                setProfileData((ev.formData ?? {}) as JsonRecord);
+                fieldErrors.onFormChange(id, { before: profileData, after: ev.formData });
+              }}
+              {...fieldErrors.formProps}
+              {...(customValidate ? { customValidate } : {})}
+            />
+          </div>
         ) : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="org-description">{t('org.description')}</Label>
@@ -307,8 +322,8 @@ export function OrgEditForm({
           <span className="bd-label">{t('org.locations')}</span>
           {addresses.length ? (
             <ul className="flex flex-col gap-1">
-              {addresses.map((a, i) => (
-                <li key={`${a}-${i}`} className="flex items-start gap-2 text-ink-700">
+              {withStableKeys(addresses, (a) => a).map(({ item: a, key }) => (
+                <li key={key} className="flex items-start gap-2 text-ink-700">
                   <I.globe size={14} className="mt-0.5 shrink-0 text-ink-400" />
                   {a}
                 </li>

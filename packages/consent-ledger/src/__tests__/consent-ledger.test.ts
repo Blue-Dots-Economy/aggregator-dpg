@@ -393,6 +393,35 @@ describe('PostgresConsentLedger — typed links, valid_till and the caller trans
     if (!result.success) expect(result.error.code).toBe('CONSENT_INSERT_FAILED');
   });
 
+  it('keeps the message of a non-Error database rejection', async () => {
+    const rejecting = {
+      insert: () => ({
+        values: () => ({ returning: () => Promise.reject('socket hang up') }),
+      }),
+    } as unknown as ConstructorParameters<typeof PostgresConsentLedger>[0];
+    const result = await new PostgresConsentLedger(rejecting).recordRegistrationConsent(
+      makeInput(),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('CONSENT_INSERT_FAILED');
+      expect(result.error.message).toBe('consent record INSERT failed: socket hang up');
+    }
+  });
+
+  it.each([undefined, null])('withExecutor(%s) returns the same ledger', (executor) => {
+    const ledger = new PostgresConsentLedger(recordingDb().db);
+    expect(ledger.withExecutor(executor)).toBe(ledger);
+  });
+
+  it.each([{}, 'tx', { insert: 'not a function' }])(
+    'withExecutor rejects %j, which is not a Drizzle handle',
+    (executor) => {
+      const ledger = new PostgresConsentLedger(recordingDb().db);
+      expect(() => ledger.withExecutor(executor)).toThrow(TypeError);
+    },
+  );
+
   it('the in-memory ledger is its own executor-bound ledger', () => {
     const ledger = new InMemoryConsentLedger();
     expect(ledger.withExecutor({})).toBe(ledger);

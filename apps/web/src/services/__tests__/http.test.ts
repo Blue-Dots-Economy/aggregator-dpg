@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { jsonFetch } from '../http';
+import { z } from 'zod';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { HttpError, jsonFetch, retryUnlessShapeError } from '../http';
+
+/** The error `jsonFetch` threw, for asserting on its fields. */
+async function failure(promise: Promise<unknown>): Promise<HttpError> {
+  try {
+    await promise;
+  } catch (err) {
+    if (err instanceof HttpError) return err;
+    throw err;
+  }
+  throw new Error('expected jsonFetch to throw');
+}
+
+const HelloSchema = z.object({ hello: z.string() });
+const AnySchema = z.unknown();
 
 describe('jsonFetch', () => {
   const origFetch = globalThis.fetch;
@@ -31,7 +47,7 @@ describe('jsonFetch', () => {
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const data = await jsonFetch<{ hello: string }>('/api/thing');
+    const data = await jsonFetch('/api/thing', HelloSchema);
     expect(data).toEqual({ hello: 'world' });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.credentials).toBe('include');
@@ -43,21 +59,122 @@ describe('jsonFetch', () => {
   it('preserves caller-supplied headers alongside the defaults', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await jsonFetch('/api/thing', { headers: { 'X-Custom': 'abc' } });
+    await jsonFetch('/api/thing', AnySchema, { headers: { 'X-Custom': 'abc' } });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
     expect(headers['X-Custom']).toBe('abc');
   });
 
-  it('throws with status + text on a non-OK, non-401 response', async () => {
+  it('throws an HttpError with the status when the body is not JSON', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(
         new Response('boom', { status: 500, statusText: 'Server Error' }),
       ) as unknown as typeof fetch;
-    // CI on Node 24 / JSDOM 25 sometimes empties template-string error
-    // messages; assert that the call throws rather than match the text.
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    const err = await failure(jsonFetch('/api/thing', AnySchema));
+    expect(err.status).toBe(500);
+    expect(err.code).toBeUndefined();
+  });
+
+  it("carries the API's code, detail, request id and fields from a nested envelope", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const body = {
+      error: {
+        code: 'SCHEMA_VALIDATION',
+        title: 'Bad input',
+        detail: 'Phone: Please enter a valid Phone.',
+        requestId: 'req-42',
+        fields: { field_errors: { 'contact.phone': 'Please enter a valid Phone.' } },
+      },
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(body), { status: 400 }),
+      ) as unknown as typeof fetch;
+    const err = await failure(jsonFetch('/api/thing', AnySchema));
+    expect(err).toMatchObject({
+      status: 400,
+      code: 'SCHEMA_VALIDATION',
+      title: 'Bad input',
+      detail: 'Phone: Please enter a valid Phone.',
+      requestId: 'req-42',
+      fields: { field_errors: { 'contact.phone': 'Please enter a valid Phone.' } },
+    });
+  });
+
+  it('reads a flat error body and keeps a flat fields map', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 'INVALID_PHONE', message: 'bad', fields: { phone: 'x' } }),
+        {
+          status: 400,
+        },
+      ),
+    ) as unknown as typeof fetch;
+    const err = await failure(jsonFetch('/api/thing', AnySchema));
+    expect(err).toMatchObject({
+      status: 400,
+      code: 'INVALID_PHONE',
+      detail: 'bad',
+      fields: { phone: 'x' },
+    });
+  });
+
+  it('throws status 0 when the request never reaches the server', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new TypeError('Failed to fetch')) as unknown as typeof fetch;
+    const err = await failure(jsonFetch('/api/thing', AnySchema));
+    expect(err.status).toBe(0);
+  });
+
+  it('logs a failure without the response body', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: 'X', requestId: 'r1', fields: { email: 'a@b.c' } } }),
+        {
+          status: 503,
+        },
+      ),
+    ) as unknown as typeof fetch;
+    await failure(jsonFetch('/api/thing', AnySchema));
+    expect(JSON.stringify(log.mock.calls)).not.toContain('a@b.c');
+    expect(JSON.stringify(log.mock.calls)).toContain('r1');
+  });
+
+  it('throws an HttpError with the status and the API error code, without the body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'DOMAIN_NOT_SERVED',
+            detail: 'Your account does not serve this profile type.',
+          },
+        }),
+        { status: 403 },
+      ),
+    ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', AnySchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).toMatchObject({ status: 403, code: 'DOMAIN_NOT_SERVED' });
+    expect(String((err as Error).message)).not.toContain('profile type');
+  });
+
+  it('throws an HttpError with no code when the body is not the API error shape', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('<html>bad gateway</html>', { status: 502 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', AnySchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).toMatchObject({ status: 502, code: undefined });
+    expect(String((err as Error).message)).not.toContain('bad gateway');
   });
 
   it('force-logs-out on a 401 NO_ACTIVE_SESSION body and throws session expired', async () => {
@@ -66,7 +183,8 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ code: 'NO_ACTIVE_SESSION' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    const err = await failure(jsonFetch('/api/thing', AnySchema));
+    expect(err).toMatchObject({ status: 401, code: 'NO_ACTIVE_SESSION' });
     expect(window.location.href).toContain('/api/auth/logout?reason=expired');
   });
 
@@ -76,7 +194,7 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ error: 'nope' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
     expect(window.location.href).toBe('');
   });
 
@@ -84,7 +202,7 @@ describe('jsonFetch', () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('not json', { status: 401 })) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
   });
 
   it('skips the forced logout when already on the login/auth flow', async () => {
@@ -98,7 +216,63 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ code: 'NO_ACTIVE_SESSION' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
     expect(window.location.href).toBe('');
+  });
+
+  it('drops fields the schema does not declare', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ hello: 'world', extra: 1 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(jsonFetch('/api/thing', HelloSchema)).resolves.toEqual({ hello: 'world' });
+  });
+
+  it('throws ResponseShapeError when a required field is missing', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ other: 1 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', HelloSchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect(err).toMatchObject({ url: '/api/thing' });
+    expect(err instanceof ResponseShapeError && err.issues[0]?.path).toEqual(['hello']);
+  });
+
+  it('throws ResponseShapeError when an OK body is not JSON', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('<html>', { status: 200 })) as unknown as typeof fetch;
+    await expect(jsonFetch('/api/thing', HelloSchema)).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('summarises shape issues by field path and code, without the received values', async () => {
+    const StatusSchema = z.object({ status: z.enum(['draft', 'live']), count: z.number() });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ status: 'secret-value', count: 'x' }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', StatusSchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    const summary = err instanceof ResponseShapeError ? err.issueSummary() : [];
+    expect(summary).toEqual([
+      { path: 'status', code: 'invalid_enum_value' },
+      { path: 'count', code: 'invalid_type' },
+    ]);
+    expect(JSON.stringify(summary)).not.toContain('secret-value');
+  });
+});
+
+describe('retryUnlessShapeError', () => {
+  it('retries a failed request once', () => {
+    expect(retryUnlessShapeError(0, new Error('network down'))).toBe(true);
+    expect(retryUnlessShapeError(1, new Error('network down'))).toBe(false);
+  });
+
+  it('never retries a shape error, which would fail again', () => {
+    expect(retryUnlessShapeError(0, new ResponseShapeError('/api/thing', []))).toBe(false);
   });
 });

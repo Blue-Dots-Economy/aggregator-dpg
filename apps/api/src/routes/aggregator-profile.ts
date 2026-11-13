@@ -19,6 +19,7 @@
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ConsentRecordSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -32,6 +33,7 @@ import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
@@ -71,6 +73,8 @@ const ProfileCommonResponseShape = {
   org_slug: z.string(),
   actor_type: z.string(),
   type: z.string().nullable(),
+  // The profile types served; empty means none. `type` is its first entry.
+  serves: z.array(z.string()),
   url: z.string().nullable(),
   contact: BecknContactSchema,
   locations: z.array(BecknLocationSchema),
@@ -96,7 +100,8 @@ const ProfileUpdateResponseSchema = z
   })
   .passthrough();
 
-export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
+export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregators/profile/me',
     {
@@ -142,6 +147,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         org_name: aggregator.value.name || aggregator.value.orgSlug,
         actor_type: aggregator.value.actorType,
         type: aggregator.value.type,
+        serves: aggregator.value.serves,
         url: aggregator.value.url,
         contact: aggregator.value.contact,
         locations: aggregator.value.locations,
@@ -190,7 +196,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       const start = Date.now();
 
       // Already validated and parsed by the route schema.
-      const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
+      const body = req.body;
 
       const userStore = getUserStore();
 
@@ -241,7 +247,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
-        const phoneR = normalisePhone(raw.phone);
+        const phoneR = await checkedPhone(userStore, auth.aggregatorId, raw.phone);
         if (!phoneR.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneR.error.message,
@@ -326,6 +332,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         name: aggregator.value.name,
         actor_type: aggregator.value.actorType,
         type: aggregator.value.type,
+        serves: aggregator.value.serves,
         url: aggregator.value.url,
         contact: aggregator.value.contact,
         locations: aggregator.value.locations,
@@ -350,7 +357,7 @@ async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promi
     log.warn(
       {
         sub_operation: 'fetchKcUser',
-        cause: err instanceof Error ? err.message : String(err),
+        cause: errorMessage(err),
       },
       'failed to load KC user (threw)',
     );
@@ -405,6 +412,33 @@ function mapAggregatorUpdateError(
     default:
       return 'DB_UNAVAILABLE';
   }
+}
+
+/**
+ * The phone to save: a value equal to the stored one is kept as it is, so a
+ * number saved before the current rule never blocks an unrelated edit; a new
+ * value must pass {@link normalisePhone}.
+ *
+ * @param store - The user store.
+ * @param selfId - The caller's coordinator id.
+ * @param sent - The phone in the request.
+ * @throws {HttpError} DB_UNAVAILABLE when the stored record cannot be read.
+ */
+async function checkedPhone(
+  store: ReturnType<typeof getUserStore>,
+  selfId: string,
+  sent: string,
+): Promise<ReturnType<typeof normalisePhone>> {
+  const current = await store.findById(selfId);
+  if (!current.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(current.error.message),
+      fields: { sub_operation: 'userStore.findById' },
+    });
+  }
+  const stored = current.value?.contactPhone;
+  if (stored && sent.replace(/[^\d+]/g, '') === stored) return { ok: true, value: stored };
+  return normalisePhone(sent);
 }
 
 /**

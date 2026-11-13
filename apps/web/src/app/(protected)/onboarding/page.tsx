@@ -7,8 +7,8 @@ import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../hooks/useProfile';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { useActiveDomain } from '../../../hooks/useActiveDomain';
+import { DomainAccessGate } from '../../../components/access/DomainAccessGate';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 import { OnboardingMetrics } from './_components/OnboardingMetrics';
@@ -33,10 +33,12 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      {/* Onboarding summary and joins by entry mode. */}
-      <OnboardingMetrics />
-      <BulkUploadCard />
-      <RegistrationLinkCard />
+      <DomainAccessGate>
+        {/* Onboarding summary and joins by entry mode. */}
+        <OnboardingMetrics />
+        <BulkUploadCard />
+        <RegistrationLinkCard />
+      </DomainAccessGate>
     </div>
   );
 }
@@ -95,16 +97,14 @@ function BulkUploadCard() {
 /**
  * Summary card for registration links, linking to /onboarding/links.
  *
- * Counts come from the links list for the aggregator's type.
+ * Counts come from the links list for the active domain.
  */
 function RegistrationLinkCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
-  const rawProfile = useProfileRaw();
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Use the network's first domain until the profile's type loads.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
-  const links = useRegistrationLinks(aggregatorType);
+  // Counts follow the active domain.
+  const { active } = useActiveDomain();
+  const links = useRegistrationLinks(active ?? '');
   const metrics = useMemo(() => {
     const items = links.data ?? [];
     let total = 0;

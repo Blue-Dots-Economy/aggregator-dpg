@@ -15,9 +15,16 @@
  *   skipped = not produced on this path
  */
 
+import {
+  adviceForMissingContact,
+  adviceForPhone,
+  adviceForRejection,
+  adviceForSchemaIssue,
+} from './bulk-fix-advice.js';
 import { describeSchemaIssue } from '@aggregator-dpg/network-config/field-errors';
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   runBulkRowCommit,
   type BulkFinaliseJob,
@@ -28,6 +35,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
@@ -64,6 +72,8 @@ interface RowOutcome {
   outcome: 'passed' | 'skipped' | 'failed';
   category: ErrorCategory | null;
   reasons: string[];
+  /** What the coordinator should do, for errors.csv; defaults by category. */
+  advice?: string[];
 }
 
 const PROGRESS_FLUSH_EVERY = 500;
@@ -113,7 +123,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // property, so it would fail `additionalProperties: false` and would leak
   // into `item_state`. If the schema declares the column itself, leave it.
   const schemaOwnsGeo = schemaOwnsColumn(
-    schemaResult.success ? (schemaResult.value as Record<string, unknown>) : null,
+    schemaResult.success ? schemaResult.value : null,
     GEO_LOCATION_COLUMN,
   );
   const geoRaw = schemaOwnsGeo ? undefined : job.payload[GEO_LOCATION_COLUMN];
@@ -147,17 +157,21 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // Signals would reject them too.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
-    const reasons = blockingValidationReasons(
-      validate.errors ?? [],
-      schemaResult.success ? schemaResult.value : undefined,
-    );
-    if (reasons.length > 0) {
+    const rowSchema = schemaResult.success ? schemaResult.value : undefined;
+    const issues = blockingIssues(validate.errors ?? []);
+    if (issues.length > 0) {
+      const delimiter = (await getNetworkConfig()).aggregator.network.csv_array_delimiter;
+      // Reason and advice come from the same described issue, so they name the same column.
+      const described = issues.map((e) => ({ e, d: describeSchemaIssue(e, rowSchema) }));
       return await commit(
         job,
         {
           outcome: 'failed',
           category: 'validation',
-          reasons,
+          reasons: described.map(({ e, d }) => reasonLine(e, d)),
+          advice: described.map(({ e, d }) =>
+            adviceForSchemaIssue(e, d.field.split('.')[0] ?? '', rowSchema, delimiter),
+          ),
         },
         log,
       );
@@ -185,8 +199,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   }
   const phoneSourceKey = domainCfg.identity.phone;
   const emailSourceKey = domainCfg.identity.email;
-  const phoneRaw =
-    typeof job.payload[phoneSourceKey] === 'string' ? (job.payload[phoneSourceKey] as string) : '';
+  const phoneRaw = stringCell(job.payload, phoneSourceKey) ?? '';
   let phoneNormalised: string | null = null;
   if (phoneRaw) {
     const phone = normalisePhone(phoneRaw);
@@ -197,6 +210,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
           outcome: 'failed',
           category: 'normalisation',
           reasons: [`phone: ${phone.error.message}`],
+          advice: [adviceForPhone(phoneSourceKey)],
         },
         log,
       );
@@ -205,10 +219,21 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   }
   // Some domains have no email field.
   const emailNormalised = normaliseEmail(
-    emailSourceKey && typeof job.payload[emailSourceKey] === 'string'
-      ? (job.payload[emailSourceKey] as string)
-      : null,
+    emailSourceKey ? (stringCell(job.payload, emailSourceKey) ?? null) : null,
   );
+  // Signals needs a phone or an email to identify the person; the row's data is at fault.
+  if (!phoneNormalised && !emailNormalised) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'validation',
+        reasons: [`${phoneSourceKey}: is required`],
+        advice: [adviceForMissingContact(phoneSourceKey, emailSourceKey)],
+      },
+      log,
+    );
+  }
 
   // 3. Push to Signals. Its response decides the row outcome. There is no
   // local duplicate check.
@@ -226,7 +251,12 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   } else {
     // Data rejections are row errors; platform faults are `system_error`.
     const category = categoriseSignalsRejection(push);
-    outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
+    outcome = {
+      outcome: 'failed',
+      category,
+      reasons: signalsRejectionReasons(push, category),
+      advice: adviceForRejection(category, push.upstreamCode, push.signalsFields),
+    };
   }
 
   return await commit(job, outcome, log);
@@ -248,6 +278,8 @@ async function commit(
           row_index: job.rowIndex,
           reasons: outcome.reasons,
           error_category: outcome.category,
+          advice:
+            outcome.advice ?? adviceForRejection(outcome.category ?? '', undefined, undefined),
         })
       : '';
 
@@ -270,7 +302,12 @@ async function commit(
   // detect stalled jobs. Counters live in Redis only.
   if (result.processed % PROGRESS_FLUSH_EVERY === 0 || result.processed === result.total) {
     await bumpHeartbeat(job.uploadId).catch((err) => {
-      log.warn({ status: 'warn', sub: 'heartbeat', error: (err as Error).message });
+      log.warn({
+        status: 'warn',
+        sub: 'heartbeat',
+        error: errorMessage(err),
+        error_type: errorType(err),
+      });
     });
   }
 
@@ -342,7 +379,10 @@ function categoriseSignalsRejection(
   push: Extract<SignalStackPushResult, { success: false }>,
 ): ErrorCategory {
   if (push.ownedElsewhere) return 'owned_elsewhere';
-  const byUpstream = push.upstreamCode ? SIGNALS_REJECTION_CATEGORY[push.upstreamCode] : undefined;
+  const byUpstream =
+    push.upstreamCode && Object.hasOwn(SIGNALS_REJECTION_CATEGORY, push.upstreamCode)
+      ? SIGNALS_REJECTION_CATEGORY[push.upstreamCode]
+      : undefined;
   if (byUpstream) return byUpstream;
   if (push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') return 'limit_reached';
   if (push.code === 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY') return 'validation';
@@ -407,6 +447,30 @@ function deriveAgeAndConsent(
 }
 
 /**
+ * Signals' per-field messages. Entries whose message is not a string are
+ * dropped, as the writer does; an empty result is treated as absent.
+ */
+const SignalsFieldsSchema = z.record(z.unknown()).transform((fields) => {
+  const out: Record<string, string> = {};
+  for (const [field, msg] of Object.entries(fields)) {
+    if (typeof msg === 'string') out[field] = msg;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+});
+
+/**
+ * The Signals details the writer attaches to a failed onboard.
+ *
+ * Each field is dropped on its own when it has the wrong shape, so one bad
+ * field does not hide the others.
+ */
+const SignalsFailureDetailsSchema = z.object({
+  signalsMessage: z.string().optional().catch(undefined),
+  upstreamCode: z.string().optional().catch(undefined),
+  signalsFields: SignalsFieldsSchema.optional().catch(undefined),
+});
+
+/**
  * Maps a failed signalstack onboard into the row's push result.
  *
  * Keeps Signals' message, error code and per-field messages when present.
@@ -419,20 +483,15 @@ function onboardFailure(error: {
   message: string;
   details?: unknown;
 }): SignalStackPushResult {
-  const { signalsMessage, upstreamCode, signalsFields } = (error.details ?? {}) as {
-    signalsMessage?: unknown;
-    upstreamCode?: unknown;
-    signalsFields?: unknown;
-  };
+  const parsed = SignalsFailureDetailsSchema.safeParse(error.details);
+  const { signalsMessage, upstreamCode, signalsFields } = parsed.success ? parsed.data : {};
   return {
     success: false,
     code: error.code,
     message: error.message,
-    ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
-    ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
-    ...(signalsFields && typeof signalsFields === 'object'
-      ? { signalsFields: signalsFields as Record<string, string> }
-      : {}),
+    ...(signalsMessage ? { signalsMessage } : {}),
+    ...(upstreamCode ? { upstreamCode } : {}),
+    ...(signalsFields ? { signalsFields } : {}),
   };
 }
 
@@ -493,14 +552,8 @@ export async function pushToSignalStack(
   }
   const nameSourceKey = domainCfg.identity.name;
   const phoneSourceKey = domainCfg.identity.phone;
-  const name =
-    typeof job.payload[nameSourceKey] === 'string'
-      ? (job.payload[nameSourceKey] as string)
-      : participantId;
-  const phoneFromBody =
-    typeof job.payload[phoneSourceKey] === 'string'
-      ? (job.payload[phoneSourceKey] as string)
-      : phone;
+  const name = stringCell(job.payload, nameSourceKey) ?? participantId;
+  const phoneFromBody = stringCell(job.payload, phoneSourceKey) ?? phone;
   const pushPhone = phone ?? phoneFromBody;
   // The bulk CSV has no per-row consent column. Consent is sent only via
   // `compliance`, which Signals treats as accept-only: a `false` value is
@@ -574,9 +627,9 @@ function preprocessArrayCells(
   delimiter: string,
 ): void {
   const props = jsonSchema['properties'];
-  if (!props || typeof props !== 'object') return;
-  for (const [field, def] of Object.entries(props as Record<string, Record<string, unknown>>)) {
-    if (def?.['type'] !== 'array') continue;
+  if (!isRecord(props)) return;
+  for (const [field, def] of Object.entries(props)) {
+    if (!isRecord(def) || def['type'] !== 'array') continue;
     const cell = payload[field];
     if (typeof cell !== 'string') continue;
     payload[field] = cell
@@ -593,6 +646,13 @@ export interface SchemaValidationError {
   schemaPath?: string;
   params?: Record<string, unknown>;
   message?: string;
+}
+
+/** Errors that fail a row: a top-level missing field only makes a draft. */
+function blockingIssues(errors: readonly SchemaValidationError[]): SchemaValidationError[] {
+  return errors.filter(
+    (e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)),
+  );
 }
 
 /** A `required` error raised inside a conditional branch (`if` … `then`). */
@@ -618,15 +678,15 @@ export function blockingValidationReasons(
   errors: readonly SchemaValidationError[],
   schema?: unknown,
 ): string[] {
-  return errors
-    .filter((e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)))
-    .map((e) => {
-      // Signals' wording, keyed by dot path — the same `field: message` shape
-      // errors.csv already uses for a Signals rejection (#904). A failed
-      // pattern reads "Please enter a valid web address.", never the regex.
-      const d = describeSchemaIssue(e, schema);
-      return `${d.field || e.schemaPath || 'row'}: ${d.message}`;
-    });
+  return blockingIssues(errors).map((e) => reasonLine(e, describeSchemaIssue(e, schema)));
+}
+
+/**
+ * One errors.csv reason in Signals' `field: message` shape (#904); a failed
+ * pattern reads "Please enter a valid web address.", never the regex.
+ */
+function reasonLine(e: SchemaValidationError, d: { field: string; message: string }): string {
+  return `${d.field || e.schemaPath || 'row'}: ${d.message}`;
 }
 
 /**
@@ -664,4 +724,19 @@ async function bumpHeartbeat(uploadId: string): Promise<void> {
       updatedAt: sql`NOW()`,
     })
     .where(eq(schema.bulkUploads.id, uploadId));
+}
+
+/**
+ * Returns a row cell when it holds a string.
+ *
+ * @returns The cell value, or `undefined` when it is missing or not a string.
+ */
+function stringCell(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** True for a plain JSON object (not null, not an array). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

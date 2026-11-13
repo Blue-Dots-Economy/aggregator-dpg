@@ -34,12 +34,14 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   typedRoutes: false,
-  async headers() {
-    return [
+  // pino-pretty runs in a worker thread that thread-stream loads by file path.
+  // Bundled, that path does not exist, so these load from node_modules.
+  serverExternalPackages: ['pino', 'pino-pretty', 'thread-stream'],
+  headers: () =>
+    Promise.resolve([
       { source: '/:path*', headers: BASE_HEADERS },
       ...SIGNED_IN_PATHS.map((source) => ({ source, headers: NO_FRAME_HEADERS })),
-    ];
-  },
+    ]),
 };
 
 export default withNextIntl(nextConfig);

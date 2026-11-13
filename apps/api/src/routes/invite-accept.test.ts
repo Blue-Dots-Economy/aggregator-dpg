@@ -251,6 +251,36 @@ describe('invite read and accept routes', () => {
       expect(mailer.outbox).toHaveLength(0);
     });
 
+    it('stores every profile type picked and writes them all to Keycloak', async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        type: ['seeker', 'provider'],
+        invite: token,
+      });
+      expect(res.statusCode).toBe(201);
+      const { aggregator_id } = res.json() as { aggregator_id: string };
+      const stored = await userStore.findById(aggregator_id);
+      expect(stored.ok && stored.value?.serves).toEqual(['seeker', 'provider']);
+      const kc = await idp.findByEmail(COORD_EMAIL);
+      expect(kc.ok && kc.value?.attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual([
+        'seeker',
+        'provider',
+      ]);
+    });
+
+    it('refuses a picked profile type the network does not have with 400', async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        type: ['seeker', 'learner'],
+        invite: token,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
+      expect(await inviteStatus('inv-coordinator')).toBe('pending');
+    });
+
     it('refuses another email with 400 INVITE_EMAIL_MISMATCH and keeps the invite', async () => {
       const token = await inviteToken('coordinator');
       const res = await accept('/v1/user/invite/accept', {

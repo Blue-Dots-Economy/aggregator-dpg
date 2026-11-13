@@ -22,6 +22,7 @@
  *
  * Never logs contact PII; only counts and item ids.
  */
+import { z } from 'zod';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   AuthError,
@@ -35,7 +36,8 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { VoiceContact, VoiceProviderBase } from '@aggregator-dpg/voice-provider/interface';
 import { TERMINAL_ITEM_STATUSES, type ProcessingJob } from '../campaign-job-client.js';
-import { chunkArray, truncateReason, type CampaignJobDeps } from './index.js';
+import type { CampaignJobDeps } from './index.js';
+import { chunkArray, truncateReason } from './util.js';
 
 /** Voice collaborators (decrypt + provider). */
 export interface VoiceCollaborators {
@@ -48,19 +50,21 @@ export interface VoiceCollaborators {
 /**
  * The voice job content fields this handler reads.
  *
- * Copy of the API's `VoiceContent`, since apps do not import each other.
- * The API validates `job.content` when the job is created.
+ * Mirrors the field types of the API's `voiceContentSchema`, since apps do not
+ * import each other. The API applies the full checks when the job is created.
  */
-interface VoiceJobContent {
-  agent_id: string;
-  batch_name?: string;
-  variables?: string[];
-  schedule?: unknown;
-  max_retries?: number;
-  retry_after_hrs?: number;
-  max_concurrent_calls?: number;
-  selected_statuses?: string[];
-}
+const VoiceJobContentSchema = z.object({
+  agent_id: z.string().min(1),
+  batch_name: z.string().optional(),
+  variables: z.array(z.string()).optional(),
+  schedule: z.unknown().optional(),
+  max_retries: z.number().optional(),
+  retry_after_hrs: z.number().optional(),
+  max_concurrent_calls: z.number().optional(),
+  selected_statuses: z.array(z.string()).optional(),
+});
+
+type VoiceJobContent = z.infer<typeof VoiceJobContentSchema>;
 
 /** Raya start-option keys passed through. Matches the API's `START_KEYS`. */
 const START_OPTION_KEYS = [
@@ -87,18 +91,21 @@ function voiceStartOptions(content: VoiceJobContent): Record<string, unknown> {
 }
 
 /**
- * Reads + minimally validates the voice job's `content` JSONB.
+ * Validates the voice job's `content` JSONB.
  *
  * @param content - The job's raw `content` column.
  * @returns The typed voice content.
- * @throws {Error} If `agent_id` is missing.
+ * @throws {Error} If `agent_id` is missing or a field has the wrong type. The message names the fields only.
  */
 function parseVoiceContent(content: Record<string, unknown>): VoiceJobContent {
-  const agentId = content['agent_id'];
-  if (typeof agentId !== 'string' || agentId.length === 0) {
-    throw new Error('campaign voice job content missing agent_id');
+  const parsed = VoiceJobContentSchema.safeParse(content);
+  if (!parsed.success) {
+    const fields = parsed.error.issues
+      .map((issue) => (issue.path.length > 0 ? issue.path.join('.') : '(root)'))
+      .join(', ');
+    throw new Error(`campaign voice job content invalid: ${fields}`);
   }
-  return content as unknown as VoiceJobContent;
+  return parsed.data;
 }
 
 /**
@@ -123,24 +130,16 @@ function flattenVariables(itemState: Record<string, unknown>): Record<string, st
 /**
  * Builds the item failure reason for a rejected dispatch.
  *
- * Adds the top-level `message` from Raya's JSON body when present. Never
- * includes the raw body, which can contain contact PII.
+ * Adds the provider's `message` from the error details when present. Never
+ * reads any other detail, which can contain contact PII.
  *
  * @param error - The typed error from `VoiceProviderBase.dispatch`.
  * @returns A reason string for `campaign_job_item.error_reason`, bounded by {@link truncateReason}.
  */
 function describeDispatchFailure(error: BaseError): string {
-  const body = error.details?.['body'];
-  if (typeof body === 'string' && body.length > 0) {
-    try {
-      const parsed = JSON.parse(body) as Record<string, unknown>;
-      const parsedMessage = parsed['message'];
-      if (typeof parsedMessage === 'string' && parsedMessage.length > 0) {
-        return truncateReason(`${error.message}: ${parsedMessage}`);
-      }
-    } catch {
-      // Not JSON. Do not store the raw body; it can contain PII.
-    }
+  const providerMessage = error.details?.['message'];
+  if (typeof providerMessage === 'string' && providerMessage.length > 0) {
+    return truncateReason(`${error.message}: ${providerMessage}`);
   }
   return truncateReason(error.message);
 }

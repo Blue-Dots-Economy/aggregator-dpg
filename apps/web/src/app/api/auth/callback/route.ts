@@ -144,6 +144,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     refreshTokenExp: tokens.refreshTokenExp,
     createdAt: now,
     lastSeenAt: now,
+    ...(claims.sid ? { idpSid: claims.sid } : {}),
   };
   const sid = await getSessionStore().create(sessionData);
 

@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 import { ThemeModeProvider, useThemeMode, THEME_STORAGE_KEY } from '@/lib/theme-mode';
 
 function Consumer() {
@@ -38,6 +40,36 @@ describe('ThemeModeProvider / useThemeMode', () => {
     );
     expect(screen.getByTestId('mode')).toHaveTextContent('dark');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
+  });
+
+  it('keeps a stored dark choice through hydration of server markup', async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    const tree = (
+      <ThemeModeProvider>
+        <Consumer />
+      </ThemeModeProvider>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(tree);
+    document.body.appendChild(container);
+    const root = await act(async () => hydrateRoot(container, tree));
+    try {
+      expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+      expect(container.querySelector('[data-testid="mode"]')?.textContent).toBe('dark');
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('does not write storage until the user picks a theme', () => {
+    render(
+      <ThemeModeProvider>
+        <Consumer />
+      </ThemeModeProvider>,
+    );
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
   });
 
   it('ignores a corrupt stored value', () => {

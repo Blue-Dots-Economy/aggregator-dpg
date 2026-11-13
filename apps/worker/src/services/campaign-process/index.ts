@@ -5,7 +5,7 @@
  * `processing`, runs the channel handler, and rolls the job status up from
  * item statuses.
  *
- * The export channel lives here (decrypt, CSV, private S3, email a signed
+ * The export channel lives here (decrypt, CSV, private storage, email a signed
  * link). Voice and email live in `./voice.ts` and `./email.ts`.
  *
  * Transient failures re-throw so BullMQ retries; the job stays `processing`
@@ -23,7 +23,7 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
-import type { SignedDownloadUrl } from '../../object-storage.js';
+import { buildKey, type DownloadUrl } from '@aggregator-dpg/object-storage';
 import { TERMINAL_JOB_STATUSES, toAuditCounts } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
@@ -36,6 +36,7 @@ import type {
 import { safeAudit } from '../campaign-audit.js';
 import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
 import { runEmailForJob, type EmailCollaborators } from './email.js';
+import { chunkArray, truncateReason } from './util.js';
 
 /** Minimal structured logger surface (satisfied by the worker's pino child). */
 export interface CampaignLogger {
@@ -80,7 +81,7 @@ export interface ExportCollaborators {
     q: SignalStackFetchDecryptedProfilesQuery,
   ) => Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
   putObject: (key: string, body: Buffer, contentType: string) => Promise<void>;
-  signDownloadUrl: (key: string) => Promise<SignedDownloadUrl>;
+  signDownloadUrl: (key: string) => Promise<DownloadUrl>;
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
 }
 
@@ -134,7 +135,7 @@ export function resolveExportRecipient(
 }
 
 /**
- * Returns the fixed S3 key for a job's export CSV.
+ * Returns the fixed storage key for a job's export CSV.
  *
  * Fixed per job so a retry overwrites the same object.
  *
@@ -143,14 +144,7 @@ export function resolveExportRecipient(
  * @returns The object key, e.g. `campaign-exports/org-1/job-1.csv`.
  */
 export function exportObjectKey(orgId: string, jobId: string): string {
-  return `campaign-exports/${orgId}/${jobId}.csv`;
-}
-
-/**
- * Truncates an error reason to 500 characters.
- */
-export function truncateReason(reason: string): string {
-  return reason.length > 500 ? `${reason.slice(0, 497)}...` : reason;
+  return buildKey('exports', orgId, `${jobId}.csv`);
 }
 
 /**
@@ -330,7 +324,7 @@ async function finalizeFailedJob(
 }
 
 /**
- * Returns the export-only audit fields: recipient and S3 destination.
+ * Returns the export-only audit fields: recipient and storage destination.
  *
  * Used by every terminal audit write, including the watchdog. Returns `{}`
  * for other channels.
@@ -403,7 +397,7 @@ async function decryptAndMarkItems(
   return resolvedRows;
 }
 
-/** Runs the export channel: decrypt, mark items, build CSV, upload to S3, email the link. */
+/** Runs the export channel: decrypt, mark items, build CSV, upload to storage, email the link. */
 async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promise<void> {
   const contactOnly = deps.config.fieldSet === 'contact';
   const resolvedRows = await decryptAndMarkItems(job, deps, contactOnly);
@@ -464,30 +458,20 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
   });
   if (!sent.ok) {
     // Throw so BullMQ retries the job; decrypt and upload run again against the
-    // same S3 key.
+    // same storage key.
     throw new Error(`campaign export email failed: ${sent.error.code}: ${sent.error.message}`);
   }
 
   // Stamp before returning so a retry after this point cannot re-send.
   await deps.client.setNotifiedAt(job.id);
 
-  deps.log.info({ ...base, status: 'success', exported: resolvedRows.length, s3_key: key });
+  deps.log.info({ ...base, status: 'success', exported: resolvedRows.length, storage_key: key });
 }
 
 /** Reads the `purpose` metadata pair off a job, if present. */
 function purposeOf(job: ProcessingJob): string | undefined {
   const p = job.metadata.find((m) => m.key === 'purpose')?.value;
   return p?.trim() ? p : undefined;
-}
-
-/**
- * Splits an array into chunks of `size`; the last chunk may be shorter.
- */
-export function chunkArray<T>(items: T[], size: number): T[][] {
-  if (items.length === 0) return [];
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
 }
 
 interface ExportEmailInput {

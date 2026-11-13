@@ -30,6 +30,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   private exchanges = new Map<string, SeededExchange>();
   private refreshResponses = new Map<string, OidcResult<TokenSet>>();
   private failNextExchange: { code: string; message: string } | null = null;
+  private logoutTokens = new Map<string, string>();
 
   /** Seeds a code-to-token mapping that the next `exchangeCode()` will return. */
   seedExchange(entry: SeededExchange): void {
@@ -39,6 +40,11 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   /** Seeds a refresh-token-to-token mapping. */
   seedRefresh(refreshToken: string, response: OidcResult<TokenSet>): void {
     this.refreshResponses.set(refreshToken, response);
+  }
+
+  /** Seeds a logout token that `verifyLogoutToken()` accepts, naming `sid`. */
+  seedLogoutToken(logoutToken: string, sid: string): void {
+    this.logoutTokens.set(logoutToken, sid);
   }
 
   /** Forces the next exchangeCode call to fail. */
@@ -95,6 +101,14 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
     else url.searchParams.set('client_id', 'fake-client');
     url.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
     return url.toString();
+  }
+
+  async verifyLogoutToken(logoutToken: string): Promise<OidcResult<{ sid: string }>> {
+    const sid = this.logoutTokens.get(logoutToken);
+    if (!sid) {
+      return { ok: false, error: { code: 'LOGOUT_TOKEN_INVALID', message: 'not a seeded token' } };
+    }
+    return { ok: true, value: { sid } };
   }
 }
 

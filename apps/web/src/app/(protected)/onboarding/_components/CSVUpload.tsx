@@ -8,15 +8,30 @@ import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
 import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../../hooks/useProfile';
-import {
-  useAggregatorConfig,
-  DEFAULT_AGGREGATOR_CONFIG,
-} from '../../../../hooks/useAggregatorConfig';
+import { useActiveDomain } from '../../../../hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
+import { useAggregatorConfig } from '@/hooks/useAggregatorConfig';
+import { HttpError } from '@/services/http';
+import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
-import { onboardingService } from '../../../../services/onboarding.service';
+import {
+  BulkUploadEmptyError,
+  BulkUploadStartUnreadError,
+  BulkUploadTooLargeError,
+  onboardingService,
+} from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 import { useCan } from '../../../../lib/auth-context';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { requestErrorCode, requestErrorFields } from '@/lib/request-errors';
+import { bulkReasonText, bulkStatusText } from '@/lib/bulk-upload-text';
+import {
+  FieldMessage,
+  useHandFieldErrors,
+  type HandFieldError,
+} from '@/components/forms/useHandFieldErrors';
+import { useFieldErrorCopy } from '@/components/forms/useFieldErrors';
+import { useRequestErrorMessage } from '@/components/forms/useRequestErrorMessage';
 
 // Defined at module level so re-renders of CSVUpload do not remount the toast.
 function UploadToast({ message, onDone }: { message: string; onDone: () => void }) {
@@ -43,29 +58,48 @@ export interface CSVUploadProps {
   /**
    * Operator attestation text, loaded on the server.
    *
-   * `null` shows a generic checkbox label. The checkbox must be ticked before
-   * Upload is enabled; `attestation: true` is sent to `/start`.
+   * `null` shows a generic checkbox label. The checkbox must be ticked to
+   * upload; `attestation: true` is sent to `/start`.
    */
   attestation?: BulkAttestationContent | null;
 }
 
 export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const t = useTranslations('onboarding');
+  const tAccess = useTranslations('access');
+  const aggregatorConfig = useAggregatorConfig();
   const [attested, setAttested] = useState(false);
-  const rawProfile = useProfileRaw();
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Participant type from the `aggregator_type` claim. Uses the network's first
-  // domain while the profile loads; the API checks the type on upload.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
-  // Plural label for the scoped domain, sourced from network config.
-  const aggregatorTypeLabel =
-    cfg.domains.find((d) => d.id === aggregatorType)?.plural_label ?? aggregatorType;
-  const [participantType, setParticipantType] = useState<string>(aggregatorType);
-  useEffect(() => {
-    if (rawProfile.data?.type) setParticipantType(rawProfile.data.type);
-  }, [rawProfile.data?.type]);
+  // Participant type: the active domain. Empty until the profile loads; the
+  // API checks it against the domains the coordinator serves.
+  const { domains: servedDomains, active, setActive } = useActiveDomain();
+  const participantType = active ?? '';
+  // Plural label for the active domain, sourced from network config.
+  const participantTypeLabel =
+    servedDomains.find((d) => d.id === participantType)?.plural_label ?? participantType;
   const [pickedFile, setPickedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const copy = useFieldErrorCopy();
+  const requestMessage = useRequestErrorMessage({
+    DOMAIN_NOT_SERVED: tAccess('domain_not_served'),
+    RATE_LIMITED: t('csv.rate_limited'),
+    BULK_UPLOAD_NOT_READY: t('csv.error_not_ready'),
+    STORAGE_UPLOAD_TOO_LARGE: t('csv.error_too_large'),
+    STORAGE_UPLOAD_LINK_EXPIRED: t('csv.error_link_expired'),
+    STORAGE_UPLOAD_FAILED: t('csv.error_storage'),
+  });
+  // `/start` names why a stored file was refused.
+  const startReasonMessage: Readonly<Record<string, string>> = {
+    upload_missing: t('csv.error_not_ready'),
+    empty: t('csv.error_empty'),
+    too_large: t('csv.error_too_large'),
+  };
+  const fe = useHandFieldErrors<'file' | 'attestation'>('csv-upload', {
+    file: fileFieldError(fileError, pickedFile !== null, copy.required(t('csv.file_label'))),
+    attestation: attested
+      ? null
+      : { kind: 'required', message: copy.required(t('csv.attestation_label')) },
+  });
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,17 +108,16 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const router = useRouter();
 
   const acceptFile = (f: File) => {
+    fe.touch('file');
     if (!/\.csv$/i.test(f.name)) {
-      // Tell the user how to fix it; uploading the .xlsx template directly is a
-      // common mistake.
-      setUploadError(
-        /\.xlsx?$/i.test(f.name)
-          ? 'This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.'
-          : 'Only .csv files are accepted.',
+      setPickedFile(null);
+      setFileError(
+        copy.invalid(/\.xlsx?$/i.test(f.name) ? t('csv.error_excel') : t('csv.error_not_csv')),
       );
       return;
     }
     setPickedFile(f);
+    setFileError(null);
     setUploadError(null);
     setUploadNotice(null);
   };
@@ -100,21 +133,21 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   };
 
   const onUpload = async () => {
-    if (!pickedFile) return;
     setUploadError(null);
+    if (!fe.validate() || !pickedFile || !participantType) return;
     setUploadNotice(null);
     try {
       const result = await upload.mutateAsync({
         file: pickedFile,
         participantType,
         attestation: true,
+        maxBytes: aggregatorConfig.data?.bulk_upload_max_bytes,
       });
       setPickedFile(null);
+      fe.reset();
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (result.duplicate) {
-        setUploadNotice(
-          result.message ?? 'This CSV was already uploaded earlier — showing the existing run.',
-        );
+        setUploadNotice(t('csv.duplicate_notice'));
         recent.refetch();
         return;
       }
@@ -124,7 +157,34 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       // Return to the onboarding overview after the toast has been shown.
       setTimeout(() => router.push('/onboarding'), 2500);
     } catch (err) {
-      setUploadError((err as Error).message);
+      if (err instanceof BulkUploadStartUnreadError) {
+        // The upload started: clear the file so it is not uploaded twice.
+        setPickedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setUploadNotice(t('csv.start_unconfirmed'));
+        recent.refetch();
+        return;
+      }
+      if (requestErrorCode(err) === 'CONSENT_REQUIRED') {
+        setAttested(false);
+        fe.validate();
+        return;
+      }
+      if (err instanceof BulkUploadEmptyError) {
+        setUploadError(t('csv.empty'));
+        return;
+      }
+      if (err instanceof BulkUploadTooLargeError) {
+        setUploadError(
+          t('csv.too_large', { maxMb: Math.round((err.maxBytes / 1048576) * 10) / 10 }),
+        );
+        return;
+      }
+      setUploadError(
+        uploadFailureText(err, startReasonMessage, t('csv.reply_unreadable'), (e) =>
+          requestMessage(e, t('csv.upload_failed')),
+        ),
+      );
     }
   };
 
@@ -142,20 +202,25 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           <div className="text-[12.5px] text-ink-400 mt-0.5">{t('csv.subtitle')}</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Aggregators have one participant type, so this is a read-only label. */}
-          <div
-            className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
-            aria-label={`Participant type: ${aggregatorTypeLabel}`}
-          >
-            {aggregatorTypeLabel && (
-              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
-                {aggregatorTypeLabel}
-              </div>
-            )}
-          </div>
+          {servedDomains.length > 1 ? (
+            <DomainSelect domains={servedDomains} value={active} onChange={setActive} />
+          ) : (
+            // One participant type, so this is a read-only label.
+            <div
+              className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
+              aria-label={`Participant type: ${participantTypeLabel}`}
+            >
+              {participantTypeLabel && (
+                <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
+                  {participantTypeLabel}
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={downloadTemplate}
+            disabled={!participantType}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
             <I.download size={14} /> {t('csv.download_template_xlsx')}
@@ -163,64 +228,74 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         </div>
       </div>
 
-      <Dropzone onFiles={onDropFiles}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          onChange={onPick}
-          className="hidden"
-          id="csv-file-input"
-        />
-        {pickedFile ? (
-          // Selected-file chip. Dismissing it also resets the input so the same
-          // file can be picked again.
-          <div className="flex items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
-              <I.upload size={14} className="text-primary-600 shrink-0" />
-              <span className="text-[13.5px] font-semibold text-primary-700 truncate">
-                {pickedFile.name}
-              </span>
-              <span className="text-[11.5px] text-ink-400 shrink-0">
-                {(pickedFile.size / 1024).toFixed(1)} KB
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setPickedFile(null);
-                  setUploadError(null);
-                  setUploadNotice(null);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
-                }}
-                title={t('csv.remove_file')}
-                aria-label={t('csv.remove_file')}
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-              >
-                <I.x size={13} />
-              </button>
+      <fieldset
+        {...fe.controlProps('file')}
+        aria-label={t('csv.file_label')}
+        tabIndex={-1}
+        className="rounded-[14px] outline-none focus-visible:ring-2 focus-visible:ring-(--bd-primary-100)"
+      >
+        <Dropzone onFiles={onDropFiles}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={onPick}
+            className="hidden"
+            id="csv-file-input"
+          />
+          {pickedFile ? (
+            // Selected-file chip. Dismissing it also resets the input so the same
+            // file can be picked again.
+            <div className="flex items-center justify-center gap-2">
+              <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
+                <I.upload size={14} className="text-primary-600 shrink-0" />
+                <span className="text-[13.5px] font-semibold text-primary-700 truncate">
+                  {pickedFile.name}
+                </span>
+                <span className="text-[11.5px] text-ink-400 shrink-0">
+                  {(pickedFile.size / 1024).toFixed(1)} KB
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPickedFile(null);
+                    setFileError(null);
+                    setUploadError(null);
+                    setUploadNotice(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                  title={t('csv.remove_file')}
+                  aria-label={t('csv.remove_file')}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-full text-ink-500 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+                >
+                  <I.x size={13} />
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-white border border-(--bd-border) flex items-center justify-center text-primary-600 mb-3 bd-shadow">
-              <I.upload size={20} />
-            </div>
-            <div className="text-[14px] font-semibold text-ink-700">
-              {t('csv.drag_prompt')}{' '}
-              <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
-            </div>
-            <div className="text-[12px] text-ink-400 mt-1">
-              {t('csv.hint', { type: participantType })}
-            </div>
-          </label>
-        )}
-      </Dropzone>
+          ) : (
+            <label htmlFor="csv-file-input" className="cursor-pointer block text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-white border border-(--bd-border) flex items-center justify-center text-primary-600 mb-3 bd-shadow">
+                <I.upload size={20} />
+              </div>
+              <div className="text-[14px] font-semibold text-ink-700">
+                {t('csv.drag_prompt')}{' '}
+                <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
+              </div>
+              <div className="text-[12px] text-ink-400 mt-1">
+                {t('csv.hint', { type: participantType })}
+              </div>
+            </label>
+          )}
+        </Dropzone>
+      </fieldset>
+      <FieldMessage id={fe.errorId('file')} message={fe.message('file')} />
 
       <label className="mt-4 flex items-start gap-2.5 rounded-[10px] border border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-800 cursor-pointer">
         <input
           type="checkbox"
+          {...fe.controlProps('attestation')}
           checked={attested}
           onChange={(e) => setAttested(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border-(--bd-border) accent-(--bd-primary-600)"
@@ -228,15 +303,19 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         />
         <span>{attestation ? attestation.content : t('csv.attestation_fallback')}</span>
       </label>
+      <FieldMessage id={fe.errorId('attestation')} message={fe.message('attestation')} />
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={!pickedFile || upload.isPending || !attested}>
+        <Button onClick={onUpload} disabled={upload.isPending}>
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
 
       {uploadError && (
-        <div className="mt-3 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+        <div
+          role="alert"
+          className="mt-3 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+        >
           {uploadError}
         </div>
       )}
@@ -257,9 +336,10 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
  */
 export function RecentUploadsBody() {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   const recent = useRecentBulkUploads(10);
   const items = recent.data?.items ?? [];
-  const error = recent.error as Error | null;
+  const error = recent.error;
   const loading = recent.isLoading;
 
   return (
@@ -297,7 +377,11 @@ export function RecentUploadsBody() {
             {error && (
               <tr>
                 <td colSpan={8} className="text-rose-600 text-[13px] py-6 text-center">
-                  {error.message}
+                  {uploadErrorText(
+                    error,
+                    t('csv.reply_unreadable'),
+                    requestErrorText(error, t('csv.recent.load_failed')),
+                  )}
                 </td>
               </tr>
             )}
@@ -322,15 +406,23 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
   const t = useTranslations('onboarding');
   const format = useFormatter();
   const can = useCan();
+  const tRecent = useTranslations('onboarding.csv.recent');
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const onDownloadErrors = async () => {
     setDownloading(true);
+    setDownloadError(null);
     try {
       const res = await onboardingService.errorsCsvUrl(upload.upload_id);
       window.open(res.url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.warn('errors download failed', err);
+      setDownloadError(
+        err instanceof HttpError && err.status === 404
+          ? t('csv.recent.errors_unavailable')
+          : t('csv.recent.errors_download_failed'),
+      );
     } finally {
       setDownloading(false);
     }
@@ -362,7 +454,7 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
         </span>
       </td>
       <td style={{ textAlign: 'center' }}>
-        <UploadStatusBadge status={upload.status} />
+        <UploadStatusBadge status={upload.status} label={bulkStatusText(upload.status, tRecent)} />
       </td>
       <td style={{ textAlign: 'center' }} className="tabular-nums font-semibold">
         {upload.total_rows ?? '—'}
@@ -377,36 +469,106 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
         {upload.skipped}
       </td>
       <td className="text-[12px]">
-        {upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key ? (
-          // The report carries submitted contact data: PII Access only.
-          can('profiles.view_pii') ? (
-            <button
-              type="button"
-              onClick={onDownloadErrors}
-              disabled={downloading}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
-            >
-              <I.download size={12} />
-              {downloading ? t('csv.recent.signing') : 'errors.csv'}
-            </button>
-          ) : (
-            <span className="text-ink-300">—</span>
-          )
-        ) : upload.status === 'completed' ? (
-          <span className="text-emerald-600">{t('csv.recent.all_rows_passed')}</span>
-        ) : upload.status_reason ? (
-          <span
-            title={upload.status_reason}
-            className="text-rose-600 block whitespace-pre-line wrap-break-word max-w-[240px] align-middle leading-snug"
-          >
-            {upload.status_reason.replace(/,\s*/g, ',\n')}
-          </span>
-        ) : (
-          <span className="text-ink-300">—</span>
-        )}
+        <UploadErrorsCell
+          upload={upload}
+          canDownload={can('profiles.view_pii')}
+          downloading={downloading}
+          downloadError={downloadError}
+          onDownload={onDownloadErrors}
+        />
       </td>
     </tr>
   );
+}
+
+/**
+ * Text to show for a failed upload call. Never the error's own message, which
+ * can hold a response body.
+ *
+ * @param err - The failure.
+ * @param unreadable - The message for a reply that could not be read.
+ * @param otherwise - The message for any other failure.
+ * @returns `unreadable` for an unreadable reply, else `otherwise`.
+ */
+function uploadErrorText(err: unknown, unreadable: string, otherwise: string): string {
+  return err instanceof ResponseShapeError ? unreadable : otherwise;
+}
+
+/** Props for {@link UploadErrorsCell}. */
+interface UploadErrorsCellProps {
+  upload: BulkUploadStatus;
+  /** The report carries submitted contact data, so only PII Access may download it. */
+  canDownload: boolean;
+  downloading: boolean;
+  downloadError: string | null;
+  onDownload: () => void;
+}
+
+/** The "Reason / errors" cell of an upload row. */
+function UploadErrorsCell({
+  upload,
+  canDownload,
+  downloading,
+  downloadError,
+  onDownload,
+}: Readonly<UploadErrorsCellProps>) {
+  const t = useTranslations('onboarding');
+  const tRecent = useTranslations('onboarding.csv.recent');
+  const none = <span className="text-ink-300">—</span>;
+  if (upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key) {
+    if (!canDownload) return none;
+    return (
+      <>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading}
+          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
+        >
+          <I.download size={12} />
+          {downloading ? t('csv.recent.signing') : 'errors.csv'}
+        </button>
+        {downloadError ? (
+          <span role="alert" className="mt-1 block whitespace-normal text-rose-600 max-w-[240px]">
+            {downloadError}
+          </span>
+        ) : null}
+      </>
+    );
+  }
+  if (upload.status === 'completed') {
+    return <span className="text-emerald-600">{t('csv.recent.all_rows_passed')}</span>;
+  }
+  if (!upload.status_reason) return none;
+  return (
+    <span className="text-rose-600 block whitespace-normal wrap-break-word max-w-[240px] align-middle leading-snug">
+      {bulkReasonText(upload.status_reason, tRecent)}
+    </span>
+  );
+}
+
+/** The message for a failed upload: an unreadable reply, a refused file, else the request's own message. */
+function uploadFailureText(
+  err: unknown,
+  byReason: Readonly<Record<string, string>>,
+  unreadable: string,
+  requestMessage: (err: unknown) => string,
+): string {
+  if (err instanceof ResponseShapeError) return unreadable;
+  const reason = requestErrorFields(err)?.['reason'];
+  if (typeof reason === 'string' && Object.hasOwn(byReason, reason))
+    return byReason[reason] ?? unreadable;
+  return requestMessage(err);
+}
+
+/** The file box's error: a refused file, else "required" until one is picked. */
+function fileFieldError(
+  refused: string | null,
+  picked: boolean,
+  requiredMessage: string,
+): HandFieldError | null {
+  if (refused) return { kind: 'invalid', message: refused };
+  return picked ? null : { kind: 'required', message: requiredMessage };
 }
 
 function formatRelative(iso: string): string {
@@ -418,7 +580,7 @@ function formatRelative(iso: string): string {
   return `${Math.round(diffSec / 86400)}d ago`;
 }
 
-function UploadStatusBadge({ status }: { status: string }) {
+function UploadStatusBadge({ status, label }: Readonly<{ status: string; label: string }>) {
   const map: Record<string, { bg: string; tone: string }> = {
     pending: { bg: 'bg-ink-50', tone: 'text-ink-600' },
     uploaded: { bg: 'bg-sky-50', tone: 'text-sky-700' },
@@ -434,7 +596,7 @@ function UploadStatusBadge({ status }: { status: string }) {
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11.5px] ${cfg.bg} ${cfg.tone}`}
     >
-      {status}
+      {label}
     </span>
   );
 }

@@ -28,7 +28,9 @@ export function refusedNameCharacters(name: string): string[] {
   for (const match of name.matchAll(REFUSED)) {
     const ch = match[0];
     const code = ch.codePointAt(0) ?? 0;
-    seen.add(code < 0x20 || code === 0x7f ? `\\u${code.toString(16).padStart(4, '0')}` : ch);
+    seen.add(
+      code < 0x20 || code === 0x7f ? String.raw`\u${code.toString(16).padStart(4, '0')}` : ch,
+    );
   }
   return [...seen];
 }

@@ -7,29 +7,17 @@
  * hides "Contact support" when `enabled` is `false`.
  */
 
-import { NextResponse } from 'next/server';
+import { type NextResponse } from 'next/server';
 import { callApi } from '../../../../lib/upstream-client';
-import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../lib/bff-errors';
+import { passthrough, proxyFailureResponse } from '../../../../lib/bff-proxy';
 
 export const runtime = 'nodejs';
 
 export async function GET(): Promise<NextResponse> {
   try {
     const upstream = await callApi('/v1/support/config', { method: 'GET' });
-    const ct = upstream.headers.get('content-type') ?? '';
-    if (ct.includes('application/json')) {
-      const data = (await upstream.json()) as unknown;
-      return NextResponse.json(data, { status: upstream.status });
-    }
-    const text = await upstream.text();
-    return new NextResponse(text, {
-      status: upstream.status,
-      headers: { 'Content-Type': ct || 'text/plain' },
-    });
+    return await passthrough(upstream);
   } catch (err) {
-    if (err instanceof Error && err.message === 'no active session') {
-      return unauthorizedResponse();
-    }
-    return serviceUnavailableResponse('support', err instanceof Error ? err.message : undefined);
+    return proxyFailureResponse(err, 'support');
   }
 }

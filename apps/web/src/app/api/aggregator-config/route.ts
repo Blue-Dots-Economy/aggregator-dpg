@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     });
     const ct = upstream.headers.get('content-type') ?? '';
     if (ct.includes('application/json')) {
-      const data = (await upstream.json()) as unknown;
+      const data: unknown = await upstream.json();
       return NextResponse.json(data, { status: upstream.status });
     }
     const text = await upstream.text();

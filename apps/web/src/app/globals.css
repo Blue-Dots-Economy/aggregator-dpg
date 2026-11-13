@@ -125,13 +125,13 @@
 /* Bulk dark overrides for Tailwind colour utilities used across the
    app. Avoids per-component `dark:` variant churn. */
 .dark .bg-white {
-  background-color: var(--bd-card) !important;
+  background-color: var(--bd-card);
 }
 .dark .from-white {
-  --tw-gradient-from: var(--bd-card) !important;
+  --tw-gradient-from: var(--bd-card);
 }
 .dark .to-white {
-  --tw-gradient-to: var(--bd-card) !important;
+  --tw-gradient-to: var(--bd-card);
 }
 .dark .border-white {
   border-color: var(--bd-card);
@@ -257,13 +257,13 @@
   color: var(--bd-fg);
 }
 .dark .bd-public-light .bg-white {
-  background-color: #ffffff !important;
+  background-color: #ffffff;
 }
 .dark .bd-public-light .from-white {
-  --tw-gradient-from: #ffffff !important;
+  --tw-gradient-from: #ffffff;
 }
 .dark .bd-public-light .to-white {
-  --tw-gradient-to: #ffffff !important;
+  --tw-gradient-to: #ffffff;
 }
 .dark .bd-public-light .text-ink-900 {
   color: #0b1020;
@@ -580,6 +580,14 @@ body {
   border-color: var(--bd-primary);
   box-shadow: 0 0 0 4px var(--bd-primary-50);
 }
+/* Plain CSS outranks Tailwind's layered utilities, so the invalid border lives here. */
+.bd-input[aria-invalid='true'],
+.bd-input[aria-invalid='true']:focus {
+  border-color: var(--color-rose-400, #fb7185);
+}
+.bd-input[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 4px var(--color-rose-100, #ffe4e6);
+}
 
 /* A native <select> honours almost none of .bd-input: the UA draws its own
    compact control, so the field renders visibly shorter than the <input>s
@@ -664,6 +672,9 @@ select.bd-input:focus {
 .dropzone:hover {
   border-color: var(--bd-primary);
   background: var(--bd-tint-primary);
+}
+[aria-invalid='true'] > .dropzone {
+  border-color: var(--color-rose-400, #fb7185);
 }
 
 @keyframes pulseDot {

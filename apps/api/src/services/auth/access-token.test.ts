@@ -2,7 +2,7 @@
  * Tests for the approval gate + signalstack login-time backfill.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { requireApproved, _setAccessTokenVerifier, _resetJwks } from './access-token.js';
 import { getIdentityStore } from '../identity-store/index.js';
@@ -147,6 +147,90 @@ describe('requireApproved + signalstack backfill', () => {
     if (result.ok) {
       expect(result.context.signalstackOrgId).toBe(aggregators[0]?.org_id);
     }
+  });
+
+  /** Re-seeds the coordinator so it serves `serves`; `type` is its first entry, as stored. */
+  function seedServes(serves: string[]): void {
+    store.seed([
+      buildCoordinator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        name: 'TRRAIN',
+        status: 'active',
+        type: serves[0] ?? null,
+        serves,
+      }),
+    ]);
+  }
+
+  /** Runs one approved request without the org claim and returns the domains sent. */
+  async function backfilledDomains(): Promise<string[] | undefined> {
+    const spy = vi.spyOn(writer, 'upsertAggregator');
+    await requireApproved(
+      makeReq({ sub: kcUserId, aggregator_id: aggregatorId, decision_made: 'approved' }),
+    );
+    return spy.mock.calls[0]?.[0].domains;
+  }
+
+  it('backfill sends every served domain of a multi-domain coordinator', async () => {
+    seedServes(['seeker', 'provider']);
+    expect(await backfilledDomains()).toEqual(['seeker', 'provider']);
+  });
+
+  it('backfill sends the one domain a single-domain coordinator serves', async () => {
+    seedServes(['provider']);
+    expect(await backfilledDomains()).toEqual(['provider']);
+  });
+
+  it('backfill sends no domains when the coordinator serves no profile type', async () => {
+    seedServes([]);
+    expect(await backfilledDomains()).toBeUndefined();
+  });
+
+  it('backfill sends no domains when no stored profile type is in the network', async () => {
+    seedServes(['retired']);
+    expect(await backfilledDomains()).toBeUndefined();
+  });
+
+  it('reads a multivalued aggregator_type claim into serves', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        aggregator_id: aggregatorId,
+        aggregator_type: ['seeker', 'provider', 'seeker', ''],
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual(['seeker', 'provider']);
+  });
+
+  it('reads a single-string aggregator_type claim as a one-item list', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        aggregator_id: aggregatorId,
+        aggregator_type: 'seeker',
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual(['seeker']);
+  });
+
+  it('reads a missing aggregator_type claim as no profile type', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        aggregator_id: aggregatorId,
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual([]);
   });
 
   it('soft-fails when signalstack upsert returns an error', async () => {

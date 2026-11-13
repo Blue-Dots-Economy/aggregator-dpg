@@ -23,7 +23,7 @@ import {
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
-import { errorKey, setOrgKnownAsValues } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAsValues } from '../../lib/console-client';
 
 /** One row of the editor. `key` is set for a saved value only. */
 interface Row {
@@ -131,6 +131,10 @@ export function KnownAsValuesEditor({
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  // Set when a save's reply could not be read. The save may have given new
+  // rows keys; sending them again without keys would add copies, so saving
+  // stays off until the page passes a different list.
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const { rows, defaultId } = state;
 
   // A list from the page with different keys, names or default replaces the
@@ -140,7 +144,11 @@ export function KnownAsValuesEditor({
     setSeen(values);
     setSaved(values);
     setState(rowsOf(values));
+    setUnconfirmed(false);
   }
+
+  // While saving is off, the reason stays on screen after further edits.
+  const shownMessage = message ?? (unconfirmed ? t('errors.response_shape') : null);
 
   const dirty =
     JSON.stringify(toRequest(rows, defaultId)) !== JSON.stringify(requestOfSaved(saved));
@@ -218,10 +226,14 @@ export function KnownAsValuesEditor({
       router.refresh();
       return;
     }
+    if (r.error.code === RESPONSE_SHAPE_CODE) {
+      setUnconfirmed(true);
+      router.refresh();
+    }
     setMessage(t(errorKey(r)));
   }
 
-  let status = message;
+  let status = shownMessage;
   if (!status)
     status = dirty ? t('org.known_as_values_unsaved') : t('org.known_as_values_unchanged');
 
@@ -376,10 +388,10 @@ export function KnownAsValuesEditor({
           <output
             className={cn(
               'mr-auto inline-flex items-center gap-2 text-[13px]',
-              dirty && !message ? 'font-semibold text-amber-700' : 'text-ink-500',
+              dirty && !shownMessage ? 'font-semibold text-amber-700' : 'text-ink-500',
             )}
           >
-            {dirty && !message ? (
+            {dirty && !shownMessage ? (
               <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-amber-500" />
             ) : null}
             {status}
@@ -389,7 +401,7 @@ export function KnownAsValuesEditor({
               {t('org.known_as_values_discard')}
             </Button>
           ) : null}
-          <Button type="submit" disabled={busy || !dirty}>
+          <Button type="submit" disabled={busy || !dirty || unconfirmed}>
             {t('org.known_as_values_save')}
           </Button>
         </footer>

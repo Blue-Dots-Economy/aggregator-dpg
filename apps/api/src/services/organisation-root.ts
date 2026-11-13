@@ -38,6 +38,7 @@ import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from './idp-admin/index.js';
 import { getIdentityStore } from './identity-store/index.js';
 import { revokeRolesOnLeave } from './authz/roles.js';
+import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** The placeholder owner address 0028 seeds; never mirrored to the IdP. */
 export const PLACEHOLDER_OWNER_EMAIL = 'network-admin@nf.invalid';
@@ -680,7 +681,7 @@ export async function ensureRootOrganisation(cfg: RootConfig): Promise<RootState
       status: 'failure',
       // Never log the driver message; it includes query parameters (emails).
       error: pgErrorCode(err) ? `database error ${pgErrorCode(err)}` : 'reconcile failed',
-      error_type: (err as Error | undefined)?.constructor?.name ?? 'unknown',
+      error_type: errorType(err),
       latency_ms: Date.now() - start,
     });
     return null;
@@ -712,7 +713,7 @@ export async function mirrorRootOrganisations(
       operation: 'ensureRootOrganisation.idp',
       status: 'failure',
       error: pgErrorCode(err) ? `database error ${pgErrorCode(err)}` : 'mirror failed',
-      error_type: (err as Error | undefined)?.constructor?.name ?? 'unknown',
+      error_type: errorType(err),
       latency_ms: Date.now() - start,
     });
   }

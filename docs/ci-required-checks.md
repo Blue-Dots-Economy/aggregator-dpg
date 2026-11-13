@@ -17,6 +17,13 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 > The check name comes from the `name:` field of the `ci` job in `ci.yml`.
 > If the job name ever changes, update this doc and re-pin the checks.
 
+`CI` is a small job that runs last. It needs the jobs that do the work, which run
+at the same time: `lint`, `typecheck`, `build`, `test / api`, `test / packages`,
+`test / web 1/2`, `test / web 2/2` and `test / web` (which merges the two web
+shards). It passes only when every one of them succeeded; a failed, cancelled or
+skipped job fails it. Require `CI` only — not the individual jobs — so the job
+layout can change without touching branch protection.
+
 ## Advisory checks (not required)
 
 | Check name                 | What it reports                                                                                                                                                                                                                                                                   |
@@ -30,7 +37,7 @@ migrations and the database triggers for real.
 
 This check is **deliberately not in the required list**. It is posted by SonarCloud
 (project `Blue-Dots-Economy_aggregator-dpg`, org `blue-dots-economy`) after the
-`SonarCloud scan` step in the `ci` job, and currently fails its gate — so requiring
+`sonar` job in `ci.yml`, and currently fails its gate — so requiring
 it would block every merge. Treat it as a signal to act on, not a merge blocker,
 until coverage and the security rating are green.
 
@@ -40,19 +47,22 @@ until coverage and the security rating are green.
   (both cannot run against one project).
 - `sonar-project.properties` at the repo root holds the project/org keys, source and
   test inclusions, and one `lcov.info` path per app/package.
-- The `Generate coverage reports (for SonarCloud)` step runs `pnpm -w test:coverage`
-  and is `continue-on-error: true` **on purpose**: a few packages sit below their own
-  local vitest thresholds, and that must not fail the build. The separate `Test` step
-  is what actually gates. Do not "tidy" these into one step — that re-introduces the
-  coupling.
-- The `SonarCloud scan` step is **also** `continue-on-error: true`, for a different
-  reason: `CI` is the one required check, so a scan that fails for reasons unrelated
-  to the code — a SonarCloud outage, an expired token, the quality gate — must not
-  redden it. Scan failures show up in the run log and in SonarCloud's own commit
-  check instead. (This used to be justified by the `docker` matrix depending on the
-  `ci` job; that matrix now lives in `build-images.yml` and no longer depends on CI.)
-- `SONAR_TOKEN` lives in repo Actions secrets. Checkout uses `fetch-depth: 0` so
-  Sonar can attribute new code to the right commits.
+- The tests run once, with coverage (`test:coverage`), and that run gates `CI`. Every
+  package's own vitest coverage thresholds are enforced: a package that drops below
+  them fails `CI`.
+- The web suite runs in two shards. Each shard writes a vitest blob report with its
+  thresholds switched off, because a shard covers only part of the code; the
+  `test / web` job merges the two, applies the web thresholds to the whole suite and
+  writes the web `lcov.info`.
+- Each test job uploads its `lcov.info` files as an artifact. The `sonar` job
+  downloads them to their package folders and scans. It runs after the tests, even
+  when a test failed, and `CI` does not wait for it.
+- The `SonarCloud scan` step is `continue-on-error: true`: a scan that fails for
+  reasons unrelated to the code — a SonarCloud outage, an expired token, the quality
+  gate — must not affect the run. Scan failures show up in the run log and in
+  SonarCloud's own commit check instead.
+- `SONAR_TOKEN` lives in repo Actions secrets. Only the `sonar` job checks out with
+  `fetch-depth: 0`, so Sonar can attribute new code to the right commits.
 - The token is exposed as a **job-level** `env` so the scan step can gate on it with
   `if: env.SONAR_TOKEN != ''` (the `secrets` context is not available in a step `if:`,
   and a step's own `env:` block is not in scope for its own `if:`). Runs without the

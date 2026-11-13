@@ -21,6 +21,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   OrgHierarchyQuerySchema,
   OrgHierarchyResponseSchema,
@@ -42,10 +43,8 @@ import {
   type KnownAsValues,
   type KnownAsValuesRequest,
   type OrgReadParent,
-  type OrgKnownAsUpdateRequest,
   type OrgHierarchyQuery,
   type OrgHierarchyResponse,
-  type OrgReadQuery,
   type OrgReadResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
@@ -90,7 +89,6 @@ import {
 } from './console-shared.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
-type IdParams = z.infer<typeof IdParamsSchema>;
 
 /** Throws `DB_UNAVAILABLE` naming the failed store call. */
 function dbDown(subOperation: string, message: string): never {
@@ -392,6 +390,7 @@ async function childCountsOf(ids: string[]): Promise<Record<string, number>> {
  *
  * @param found - The org, already in the actor's view reach.
  * @param values - The new list from the request.
+ * @returns The 200 body: the org with the saved list.
  * @throws {HttpError} CONFLICT for the Default org, FORBIDDEN for a non-owner, and the store refusals.
  */
 async function setKnownAsValues(
@@ -400,7 +399,7 @@ async function setKnownAsValues(
   actor: Actor,
   { org, orgType }: FoundOrg,
   values: KnownAsValuesRequest,
-): Promise<FastifyReply> {
+): Promise<z.input<typeof OrgKnownAsUpdateResponseSchema>> {
   if (orgType === 'aggregator') {
     if (org.isDefault) {
       throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
@@ -419,11 +418,11 @@ async function setKnownAsValues(
     value_count: updated.value.values.length,
     reset_count: updated.value.resetCount,
   });
-  return reply.status(200).send({
+  return {
     ...toWireOrg(updated.value.org, orgType),
     known_as_values: updated.value.values,
     reset_count: updated.value.resetCount,
-  });
+  };
 }
 
 /**
@@ -431,7 +430,8 @@ async function setKnownAsValues(
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerV1OrgRoutes(app: FastifyInstance): void {
+export function registerV1OrgRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/org/read/:id',
     {
@@ -446,10 +446,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const { fields } = req.query as OrgReadQuery;
+      const { id } = req.params;
+      const { fields } = req.query;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       const below = orgType === 'aggregator' && isOnlyViewed(actor, org.id);
       const counts = await getUserStore().countByOrg([org.id]);
@@ -504,9 +504,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof OrgSearchRequestSchema>;
+      const body = req.body;
       const { descendants_of: below, parent_id: parentId } = body.filter;
       // The result is always limited to the caller's view reach; a filter only
       // narrows it. A filter on an org out of reach gives an empty page.
@@ -551,10 +551,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgMetadataUpdateRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       // A direct child is visible, so editing it answers 403 rather than 404.
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if (orgType !== 'aggregator' || org.isDefault) {
@@ -622,13 +622,20 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as OrgKnownAsUpdateRequest;
+      const { id } = req.params;
+      const body = req.body;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if ('known_as_values' in body) {
-        return setKnownAsValues(req, reply, actor, { org, orgType }, body.known_as_values);
+        const saved = await setKnownAsValues(
+          req,
+          reply,
+          actor,
+          { org, orgType },
+          body.known_as_values,
+        );
+        return reply.status(200).send(saved);
       }
       if (orgType !== 'aggregator' || org.isDefault || org.status === 'inactive') {
         throw httpError('CONFLICT', {
@@ -673,11 +680,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgParentUpdateRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       // The org and its new parent must both be within the admin's view reach.
       const view = await viewable(actor);
       if (!view.includes(id) || !view.includes(body.parent_id)) throw httpError('NOT_FOUND');
@@ -725,10 +732,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgParentOptionsResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       // Only orgs within the admin's view reach are moved or offered as parents.
       const view = await viewable(actor);
       if (!view.includes(id)) throw httpError('NOT_FOUND');
@@ -767,9 +774,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof OrgInviteRequestSchema>;
+      const body = req.body;
       if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
@@ -843,9 +850,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if (orgType === 'aggregator' && !(await decidesFor(req, actor, org))) {
         throw httpError('NOT_FOUND');
@@ -878,10 +885,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgHierarchyResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { fields } = req.query as OrgHierarchyQuery;
+      const { fields } = req.query;
       return reply.status(200).send(await readHierarchy(fields));
     },
   );

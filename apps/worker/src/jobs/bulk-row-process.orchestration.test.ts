@@ -155,7 +155,7 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
     /** The bare upstream sentence the real writer puts on `details.signalsMessage`. */
     private readonly signalsMessage?: string,
     /** Signals' own error code and per-field map, as the real writer forwards them. */
-    private readonly upstream: { code?: string; fields?: Record<string, string> } = {},
+    private readonly upstream: { code?: string; fields?: Record<string, unknown> } = {},
   ) {
     super();
   }
@@ -314,6 +314,19 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     expect(result.category).toBe('normalisation');
     expect(result.reasons[0]).toContain('phone:');
   });
+
+  it('fails a row with no phone and no email as a validation error, without calling Signals', async () => {
+    const writer = new RecordingSignalStackWriter();
+    _setSignalStackWriter(writer);
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '', email: '' } }),
+    );
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['phone: is required']);
+    expect(result.advice?.[0]).toMatch(/^Fill in the "phone"/);
+    expect(writer.inputs).toHaveLength(0);
+  });
 });
 
 describe('processBulkRow — signalstack push outcomes', () => {
@@ -441,6 +454,45 @@ describe('processBulkRow — signalstack push outcomes', () => {
       'mobile_number: Enter a 10-digit mobile number',
       'gender: must be one of: Male, Female',
     ]);
+    expect(result.advice?.[0]).toMatch(
+      /^Check the format of the phone number in the "mobile_number" column/,
+    );
+    expect(result.advice?.[1]).toBe(
+      'Check the value in the "gender" column against the downloadable template.',
+    );
+  });
+
+  it("falls back to Signals' sentence when the per-field map holds non-string messages", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state: gender: must be one of: Male, Female',
+        { code: 'INVALID_ITEM_STATE', fields: { gender: { enum: ['Male', 'Female'] } } },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['Invalid item_state: gender: must be one of: Male, Female']);
+  });
+
+  it('keeps the string messages from a per-field map that also holds non-string values', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state',
+        {
+          code: 'INVALID_ITEM_STATE',
+          fields: {
+            mobile_number: 'Enter a 10-digit mobile number',
+            gender: { enum: ['Male', 'Female'] },
+          },
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.reasons).toEqual(['mobile_number: Enter a 10-digit mobile number']);
   });
 
   it("uses Signals' sentence for a duplicate, not the transport prefix", async () => {
@@ -455,6 +507,7 @@ describe('processBulkRow — signalstack push outcomes', () => {
     const result = await processBulkRow(makeJob());
     expect(result.category).toBe('duplicate');
     expect(result.reasons).toEqual(['This participant is already registered as a provider.']);
+    expect(result.advice?.[0]).toMatch(/already has an account of another type/);
   });
 
   it('categorises an owned-elsewhere push rejection distinctly', async () => {

@@ -5,34 +5,47 @@
  * only on this abstract class.
  */
 
-import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { z } from 'zod';
+import { MeResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 /**
  * The signed-in actor (`GET /v1/user/read/me`), cached briefly in the session.
  *
  * The database stays the authority; the cache saves one call per page.
  */
-export interface CachedActor {
-  me: MeResponse;
+export const CachedActorSchema = z.object({
+  me: MeResponseSchema,
   /** Epoch ms when it was read. */
-  at: number;
-}
+  at: z.number(),
+});
+export type CachedActor = z.infer<typeof CachedActorSchema>;
 
-export interface SessionData {
-  sub: string;
-  email?: string;
-  phone?: string;
-  name?: string;
-  accessToken: string;
-  refreshToken: string;
-  idToken: string;
-  accessTokenExp: number;
-  refreshTokenExp: number;
-  createdAt: number;
-  lastSeenAt: number;
+/**
+ * A stored session. An unreadable `consoleActor` cache is dropped, because the
+ * console reads the actor again when the cache is absent.
+ */
+export const SessionDataSchema = z.object({
+  sub: z.string(),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+  name: z.string().optional(),
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  idToken: z.string(),
+  accessTokenExp: z.number(),
+  refreshTokenExp: z.number(),
+  createdAt: z.number(),
+  lastSeenAt: z.number(),
   /** Console actor cache; absent until the console reads it. */
-  consoleActor?: CachedActor;
-}
+  consoleActor: CachedActorSchema.optional().catch(undefined),
+  /**
+   * Keycloak's session id (`sid` in the ID token). Keycloak's back-channel
+   * logout names this session. Optional: sessions created before it existed,
+   * and an ID token without `sid`, have none.
+   */
+  idpSid: z.string().optional(),
+});
+export type SessionData = z.infer<typeof SessionDataSchema>;
 
 export type SessionResult<T> = { ok: true; value: T } | { ok: false; error: SessionError };
 
@@ -50,4 +63,27 @@ export abstract class SessionStoreBase {
   abstract update(sid: string, patch: Partial<SessionData>): Promise<SessionResult<void>>;
   abstract destroy(sid: string): Promise<void>;
   abstract close(): Promise<void>;
+  /**
+   * Records a sign-in this portal started and the browser that started it, so
+   * a later request can prove the sign-in is its own.
+   *
+   * @param state - The OIDC `state` of the sign-in.
+   * @param browser - The starting browser's browser-cookie value.
+   * @param ttlSec - How long the record lasts.
+   */
+  abstract rememberSignIn(state: string, browser: string, ttlSec: number): Promise<void>;
+  /**
+   * Removes the record of a sign-in this portal started.
+   *
+   * @param state - The OIDC `state` of the sign-in.
+   * @returns The browser-cookie value it was started with, or null when there is no live record.
+   */
+  abstract takeSignIn(state: string): Promise<string | null>;
+  /**
+   * Destroys every session created under an IdP session.
+   *
+   * @param idpSid - The IdP session id, from a verified logout token.
+   * @returns How many sessions were listed for it.
+   */
+  abstract destroyByIdpSession(idpSid: string): Promise<number>;
 }

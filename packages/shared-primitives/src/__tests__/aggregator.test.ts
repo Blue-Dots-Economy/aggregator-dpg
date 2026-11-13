@@ -3,6 +3,8 @@ import {
   ConsentRecordSchema,
   RegistrationConsentSchema,
   RegistrationPayloadSchema,
+  servedDomainIds,
+  registrationDomains,
 } from '../aggregator/index.js';
 
 const validContact = {
@@ -72,5 +74,65 @@ describe('RegistrationPayloadSchema', () => {
         personas: [],
       }),
     ).toThrow();
+  });
+});
+
+describe('RegistrationPayloadSchema type', () => {
+  const base = { name: 'SkillBridge Network', contact: validContact, consent: validConsent };
+
+  it('accepts a list of domain ids', () => {
+    const parsed = RegistrationPayloadSchema.parse({ ...base, type: ['seeker', 'provider'] });
+    expect(parsed.type).toEqual(['seeker', 'provider']);
+  });
+
+  it('rejects an empty list', () => {
+    expect(() => RegistrationPayloadSchema.parse({ ...base, type: [] })).toThrow();
+  });
+
+  it('rejects a repeated id', () => {
+    expect(() =>
+      RegistrationPayloadSchema.parse({ ...base, type: ['seeker', 'seeker'] }),
+    ).toThrow();
+  });
+
+  it('rejects an empty id inside the list', () => {
+    expect(() => RegistrationPayloadSchema.parse({ ...base, type: ['seeker', ''] })).toThrow();
+  });
+});
+
+describe('registrationDomains', () => {
+  it('wraps one id in a list', () => {
+    expect(registrationDomains('seeker')).toEqual(['seeker']);
+  });
+
+  it('copies a list', () => {
+    const ids = ['seeker', 'provider'];
+    const out = registrationDomains(ids);
+    expect(out).toEqual(ids);
+    expect(out).not.toBe(ids);
+  });
+});
+
+describe('servedDomainIds', () => {
+  const NETWORK = ['seeker', 'provider'];
+
+  it('returns nothing for an empty list', () => {
+    expect(servedDomainIds([], NETWORK)).toEqual([]);
+  });
+
+  it('returns nothing when no id is in the network', () => {
+    expect(servedDomainIds(['retired'], NETWORK)).toEqual([]);
+  });
+
+  it('drops ids the network does not declare', () => {
+    expect(servedDomainIds(['retired', 'provider'], NETWORK)).toEqual(['provider']);
+  });
+
+  it('returns the ids in network order', () => {
+    expect(servedDomainIds(['provider', 'seeker'], NETWORK)).toEqual(['seeker', 'provider']);
+  });
+
+  it('does not repeat an id stored twice', () => {
+    expect(servedDomainIds(['seeker', 'seeker'], NETWORK)).toEqual(['seeker']);
   });
 });

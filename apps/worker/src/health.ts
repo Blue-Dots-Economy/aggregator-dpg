@@ -7,6 +7,7 @@
 
 import { createServer, type Server } from 'node:http';
 import type { Redis } from 'ioredis';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { logger } from './logger.js';
 
 const REDIS_PING_TIMEOUT_MS = 2000;
@@ -28,7 +29,8 @@ export function startHealthServer(port: number, redis: Redis): Server {
       res.writeHead(404).end();
       return;
     }
-    void pingRedis(redis).then((redisOk) => {
+    void (async () => {
+      const redisOk = await pingRedis(redis);
       // Liveness only: a blocked event loop fails by timing out. A down Redis
       // still returns 200, since a restart cannot fix it; it is reported in
       // the body for alerting.
@@ -38,6 +40,16 @@ export function startHealthServer(port: number, redis: Redis): Server {
           redis: redisOk ? 'ready' : 'unreachable',
         }),
       );
+    })().catch((err: unknown) => {
+      logger.error({
+        operation: 'worker.health',
+        status: 'failure',
+        error: errorMessage(err),
+        error_type: errorType(err),
+      });
+      // Answer a failure as non-200 so it never reads as healthy.
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
     });
   });
 

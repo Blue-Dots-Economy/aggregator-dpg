@@ -52,12 +52,12 @@ export interface OwnerAccessResult {
  * when an earlier one fails; failures are logged (codes only).
  *
  * @param org - The org (its `ownerKcSub` and `kcGroupId`).
- * @param log - Logger.
+ * @param log - Logger; only `warn` is used.
  * @returns Per-step results.
  */
 export async function grantOwnerAccess( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   org: Organisation,
-  log: FastifyBaseLogger,
+  log: Pick<FastifyBaseLogger, 'warn'>,
 ): Promise<OwnerAccessResult> {
   const sub = org.ownerKcSub;
   if (!sub) {

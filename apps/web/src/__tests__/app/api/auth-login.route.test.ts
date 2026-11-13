@@ -18,17 +18,32 @@ vi.mock('@/lib/oidc', () => ({
     codeChallenge: vi.fn(() => 'challenge-123'),
   },
 }));
+vi.mock('@/lib/session', () => ({
+  getSessionStore: vi.fn(),
+}));
 
 import { GET } from '@/app/api/auth/login/route';
 import { getOidcAdapter } from '@/lib/oidc';
+import { getSessionStore } from '@/lib/session';
 
 const mockGetOidcAdapter = vi.mocked(getOidcAdapter);
+const mockGetSessionStore = vi.mocked(getSessionStore);
 
 describe('GET /api/auth/login', () => {
   let originalRedirectUri: string | undefined;
   let originalSessionKey: string | undefined;
+  const store = {
+    create: vi.fn(),
+    get: vi.fn(),
+    update: vi.fn(),
+    destroy: vi.fn(async () => undefined),
+    close: vi.fn(),
+    rememberSignIn: vi.fn(async () => undefined),
+    takeSignIn: vi.fn(async (): Promise<string | null> => null),
+  };
 
   beforeEach(() => {
+    mockGetSessionStore.mockReturnValue(store as never);
     originalRedirectUri = process.env.OIDC_REDIRECT_URI;
     originalSessionKey = process.env.SESSION_KEY;
     process.env.OIDC_REDIRECT_URI = 'http://localhost:3000/api/auth/callback';
@@ -47,6 +62,7 @@ describe('GET /api/auth/login', () => {
     if (originalSessionKey === undefined) delete process.env.SESSION_KEY;
     else process.env.SESSION_KEY = originalSessionKey;
     vi.clearAllMocks();
+    store.takeSignIn.mockResolvedValue(null);
   });
 
   it('redirects to the IdP authorization URL and sets the signed flow cookie', async () => {
@@ -56,6 +72,22 @@ describe('GET /api/auth/login', () => {
     expect(res.headers.get('location')).toBe('https://kc.test/auth?client_id=x');
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('oidc_flow=');
+  });
+
+  it('records the sign-in with the browser that started it, as long as the handshake cookie lasts', async () => {
+    const res = await GET(new NextRequest('http://localhost/api/auth/login'));
+    const browser = res.cookies.get('bd_signin_browser');
+    expect(browser).toMatchObject({ httpOnly: true, sameSite: 'lax', path: '/' });
+    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', browser?.value, 300);
+  });
+
+  it('keeps the browser cookie across sign-ins in the same browser', async () => {
+    await GET(
+      new NextRequest('http://localhost/api/auth/login', {
+        headers: { cookie: 'bd_signin_browser=this-browser' },
+      }),
+    );
+    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', 'this-browser', 300);
   });
 
   it.each([
@@ -78,7 +110,6 @@ describe('GET /api/auth/login', () => {
     expect(input).toBeDefined();
     expect((input as { loginHint?: string }).loginHint).toBe(expected);
   });
-
   it('defaults returnTo to / when absent', async () => {
     const req = new NextRequest('http://localhost/api/auth/login');
     const res = await GET(req);
@@ -161,6 +192,117 @@ describe('GET /api/auth/login', () => {
       expect(setCookie).toContain('bd_logout_reason=account_switch');
       // No code is exchanged on this leg, so a flow cookie would only go stale.
       expect(setCookie).not.toContain('oidc_flow=');
+    });
+
+    it('ends a live portal session and hints Keycloak when this browser started the sign-in', async () => {
+      store.takeSignIn.mockResolvedValue('this-browser');
+      store.get.mockResolvedValue({ ok: true, value: { idToken: 'id-token-a' } });
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout?id_token_hint=a');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
+          headers: { cookie: 'sid=sess-a; bd_signin_browser=this-browser' },
+        }),
+      );
+
+      expect(store.takeSignIn).toHaveBeenCalledWith('state-b');
+      // Without this, /login would send the visitor back to the old account's
+      // dashboard after Keycloak signs out.
+      expect(store.destroy).toHaveBeenCalledWith('sess-a');
+      const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
+      expect(arg.idToken).toBe('id-token-a');
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('sid=;');
+      expect(setCookie).toContain('bd_logout_reason=account_switch');
+    });
+
+    it('falls back to client_id when the session cookie has no live session', async () => {
+      store.takeSignIn.mockResolvedValue('this-browser');
+      store.get.mockResolvedValue({ ok: false, error: new Error('not found') });
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
+          headers: { cookie: 'sid=gone; bd_signin_browser=this-browser' },
+        }),
+      );
+
+      expect(store.destroy).toHaveBeenCalledWith('gone');
+      const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
+      expect(arg.idToken).toBeUndefined();
+    });
+
+    it('leaves the portal session alone when the flow is unknown', async () => {
+      // A link from another site cannot name a live sign-in, so it must not be
+      // able to sign the user out; Keycloak's confirmation page still guards.
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=forged', {
+          headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      expect(store.get).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('sid=;');
+    });
+
+    it('leaves the portal session alone when the sign-in was started in another browser', async () => {
+      // An attacker can start their own sign-in and send its `state` in a link;
+      // the record is live, but it carries the attacker's browser value.
+      store.takeSignIn.mockResolvedValue('attacker-browser');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=attacker-state', {
+          headers: { cookie: 'sid=sess-a; bd_signin_browser=victim-browser' },
+        }),
+      );
+
+      expect(store.get).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('sid=;');
+    });
+
+    it('leaves the portal session alone when no flow is given', async () => {
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1', {
+          headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      expect(store.takeSignIn).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
     });
   });
 

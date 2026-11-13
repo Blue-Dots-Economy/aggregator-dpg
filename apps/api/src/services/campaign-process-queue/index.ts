@@ -16,6 +16,7 @@ import {
 import type { Redis } from 'ioredis';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let connection: Redis | null = null;
 let processQueue: Queue<CampaignProcessJob> | null = null;
@@ -70,7 +71,7 @@ export async function enqueueCampaignProcess(
     logger.error({
       operation: 'campaignProcessQueue.enqueue',
       status: 'failure',
-      error: (err as Error).message,
+      error: errorMessage(err),
       latency_ms: Date.now() - start,
       job_id: payload.jobId,
     });

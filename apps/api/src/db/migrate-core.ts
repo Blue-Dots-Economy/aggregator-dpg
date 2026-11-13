@@ -16,6 +16,8 @@ import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool, PoolClient } from 'pg';
+import { z } from 'zod';
+import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Anything that runs a query: a pool or one checked-out connection. */
 export type Queryable = Pick<Pool | PoolClient, 'query'>;
@@ -37,11 +39,16 @@ export interface MigrationLogger {
 }
 
 /** One journal entry (the fields the guards and the tool need). */
-export interface JournalEntry {
-  idx?: number;
-  when: number;
-  tag: string;
-}
+const JournalEntrySchema = z.object({
+  idx: z.number().int().optional(),
+  when: z.number().int(),
+  tag: z.string().min(1),
+});
+
+/** The fields of a `meta/_journal.json` entry the migrator reads. */
+export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+const JournalSchema = z.object({ entries: z.array(JournalEntrySchema) });
 
 /** One applied row of `drizzle.__drizzle_migrations`. */
 export interface AppliedMigration {
@@ -90,12 +97,19 @@ export function checkForeign(
  *
  * @param migrationsFolder - Folder holding the `.sql` files and `meta/_journal.json`.
  * @returns The journal entries, in order.
+ * @throws {Error} When the journal is not JSON or not the expected shape.
  */
 export async function readJournal(migrationsFolder: string): Promise<JournalEntry[]> {
-  const journal = JSON.parse(
+  const raw: unknown = JSON.parse(
     await readFile(path.join(migrationsFolder, 'meta/_journal.json'), 'utf8'),
-  ) as { entries: JournalEntry[] };
-  return journal.entries;
+  );
+  const journal = JournalSchema.safeParse(raw);
+  if (!journal.success) {
+    const issue = journal.error.issues[0];
+    const at = issue?.path.join('.') ?? '';
+    throw new Error(`migration journal is malformed at ${at || '(root)'}: ${issue?.message ?? ''}`);
+  }
+  return journal.data.entries;
 }
 
 /**
@@ -162,7 +176,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
     try {
       await lockClient.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK_SQL_KEY})`);
     } catch (err) {
-      broken = err as Error;
+      broken = toError(err);
       throw err;
     }
     log.info({ waitedMs: Date.now() - started }, 'migration lock acquired');
@@ -173,9 +187,9 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
         await lockClient.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_SQL_KEY})`);
       } catch (err) {
         // Discard the connection; the server drops its lock with it.
-        broken = err as Error;
+        broken = toError(err);
         log.warn(
-          { error_type: (err as Error).name },
+          { error_type: toError(err).name },
           'migration lock release failed; discarding the connection',
         );
       }

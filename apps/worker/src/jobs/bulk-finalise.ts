@@ -2,29 +2,45 @@
  * Bulk finaliser: writes the run summary for a bulk upload in the worker app.
  *
  * Steps:
- *   1. Read row errors from `bu:{id}:errors` and write errors.csv to S3
- *      (original header columns + error_category + error_reason).
+ *   1. Read row errors from `bu:{id}:errors` and write errors.csv to object storage
+ *      (original header columns + error_category + error_reason + what_to_do).
  *   2. Mark the upload completed and insert the onboarding rollup row.
  *   3. Delete the `bu:{id}:*` Redis keys after the DB writes succeed.
  *
- * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the S3 key is
+ * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the storage key is
  * fixed, and the onboarding insert is skipped if the row already exists.
  */
 
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
+import { z } from 'zod';
+import { buildKey, getObjectStorage } from '@aggregator-dpg/object-storage';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
-import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
 import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
+import {
+  FIX_ADVICE_COLUMN,
+  SURPLUS_CELLS_ADVICE,
+  adviceForRejection,
+  joinAdvice,
+} from './bulk-fix-advice.js';
 
-interface ErrorRecord {
-  row_index: number;
-  reasons: string[];
-  error_category: string;
-}
+/** One row's error entry in `bu:{id}:errors`, as written by the row processor. */
+const ErrorRecordSchema = z.object({
+  row_index: z.number(),
+  reasons: z.array(z.string()).optional(),
+  error_category: z.string().nullable().optional(),
+  /** Absent on rows committed by an older worker; then a category default is used. */
+  advice: z.array(z.string()).optional(),
+});
+
+type ErrorRecord = z.infer<typeof ErrorRecordSchema>;
+
+/** Fields per HSCAN page; a size hint to Redis that keeps each reply small. */
+const ERRORS_SCAN_PAGE_SIZE = 200;
 
 export interface FinaliseOutcome {
   status: 'completed' | 'skipped';
@@ -97,27 +113,42 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   let errorsKey: string | null = null;
   if (failed > 0) {
     const headerCols = await readHeaderCols(redis, `${ns}:meta`);
-    const csvHeader = [...headerCols, 'error_category', 'error_reason'];
+    const csvHeader = [...headerCols, 'error_category', 'error_reason', FIX_ADVICE_COLUMN];
     // Fetch stored cells for the failed rows only.
     const indices = errors.map((e) => String(e.row_index));
-    const rawRows =
-      indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
+    const rawRows: (string | null)[] =
+      indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : [];
     const csvRows: string[][] = errors.map((e, i) => {
       const { cells, surplus } = fitToHeader(readStoredRow(rawRows[i] ?? ''), headerCols.length);
       const reasons = [...(e.reasons ?? [])];
-      if (surplus > 0) reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
+      const advice = e.advice ?? adviceForRejection(e.error_category ?? '', undefined, undefined);
+      if (surplus > 0) {
+        reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
+        advice.push(SURPLUS_CELLS_ADVICE);
+      }
       return [
         ...cells.map(sanitiseCsvCell),
         sanitiseCsvCell(e.error_category ?? ''),
         sanitiseCsvCell(reasons.join('; ')),
+        sanitiseCsvCell(joinAdvice(advice)),
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-    errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
+    errorsKey = buildKey('bulk-uploads', upload.userId, job.uploadId, 'errors.csv');
     try {
-      await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
+      const put = await getObjectStorage().put({
+        ref: { area: 'bulk-uploads', key: errorsKey },
+        body: Buffer.from(csvBody, 'utf8'),
+        contentType: 'text/csv',
+      });
+      if (!put.success) throw put.error;
     } catch (err) {
-      log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
+      log.error({
+        status: 'failure',
+        sub: 'storage.put',
+        error: errorMessage(err),
+        error_type: errorType(err),
+      });
       throw err;
     }
   }
@@ -130,7 +161,7 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .update(schema.bulkUploads)
       .set({
         status: 'completed',
-        errorsCsvS3Key: errorsKey,
+        errorsCsvStorageKey: errorsKey,
         completedAt,
         lastProgressAt: completedAt,
         updatedAt: completedAt,
@@ -182,22 +213,20 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
 /**
  * Reads all error records from the errors hash, page by page.
  *
- * Malformed entries are skipped so one bad record does not block the run.
+ * Entries that are not JSON, or not an error record, are skipped so one bad
+ * entry does not block the run.
  */
 async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Promise<ErrorRecord[]> {
   const errors: ErrorRecord[] = [];
   // Recurse on the cursor until it returns to '0'.
   const scanFrom = async (cursor: string): Promise<void> => {
-    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
+    const [next, fields] = await redis.hscan(key, cursor, 'COUNT', ERRORS_SCAN_PAGE_SIZE);
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
       if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw) as ErrorRecord;
-        errors.push(parsed);
-      } catch {
-        // Skip malformed entry; the Redis counters still include it.
-      }
+      // A skipped entry is still counted by the Redis counters.
+      const parsed = ErrorRecordSchema.safeParse(parseJson(raw));
+      if (parsed.success) errors.push(parsed.data);
     }
     if (next !== '0') await scanFrom(next);
   };
@@ -249,7 +278,20 @@ function readStoredRow(stored: string): string[] {
     skipEmptyLines: 'greedy',
     delimiter: CSV_FIELD_DELIMITER,
   });
-  return (result.data[0] ?? []) as string[];
+  return result.data[0] ?? [];
+}
+
+/**
+ * Parses a JSON string without throwing.
+ *
+ * @returns The parsed value, or `undefined` when the text is not JSON.
+ */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

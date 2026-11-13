@@ -49,6 +49,7 @@ import { consoleRead } from '@/lib/console-api.server';
 import { networkDomains } from '@/lib/console-domains.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import type { OrgSearchResponse, User } from '@aggregator-dpg/shared-primitives/user-org';
+import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 const org = (over: Partial<MeOrg>): MeOrg => ({
   id: 'org-1',
@@ -197,7 +198,7 @@ describe('console coordinators page — filters', () => {
       name: /console\.org_home\.tile\.pending\.label\s*2/,
     });
     expect(pending).toHaveAttribute('href', '/console/coordinators?status=pending');
-    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
       filter: { status: 'active' },
       limit: 100,
     });
@@ -241,7 +242,7 @@ describe('console coordinators page — filters', () => {
 
   it('sends the organisation, status and domain filters to the API', async () => {
     await renderWith({ org_id: ORG_M, status: 'pending', serves: 'seeker' });
-    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
       filter: { status: 'pending', org_id: ORG_M, serves: 'seeker' },
       limit: 50,
     });
@@ -252,7 +253,10 @@ describe('console coordinators page — filters', () => {
     vi.mocked(readReachableOrgs).mockReturnValue(new Promise((r) => (release = r)));
     const pending = renderWith({});
     await vi.waitFor(() =>
-      expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', { filter: {}, limit: 50 }),
+      expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
+        filter: {},
+        limit: 50,
+      }),
     );
     release([]);
     await pending;
@@ -260,7 +264,10 @@ describe('console coordinators page — filters', () => {
 
   it('drops a domain the network does not have', async () => {
     await renderWith({ serves: 'nope' });
-    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', { filter: {}, limit: 50 });
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
+      filter: {},
+      limit: 50,
+    });
   });
 
   it('shows a chip per active filter that removes only that filter', async () => {

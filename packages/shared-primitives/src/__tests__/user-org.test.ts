@@ -134,7 +134,7 @@ describe('user-org wire schemas', () => {
 
   it('validates the metadata updates', () => {
     expect(UserMetadataUpdateRequestSchema.parse({ serves: ['agri', 'edu'] })).toBeTruthy();
-    expect(UserMetadataUpdateRequestSchema.parse({ serves: [] })).toBeTruthy();
+    expect(UserMetadataUpdateRequestSchema.safeParse({ serves: [] }).success).toBe(false);
     expect(UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success).toBe(
       false,
     );

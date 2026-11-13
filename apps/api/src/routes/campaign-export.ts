@@ -5,7 +5,7 @@
  *
  * Uses the shared submit flow in `../campaign/submit-job.ts`: creates a
  * `campaign_job` with one item per id and enqueues a `campaign-process` job.
- * The worker builds the CSV, uploads it to S3 and emails the link.
+ * The worker builds the CSV, uploads it to object storage and emails the link.
  *
  * Auth is a campaign-manager Bearer token; the aggregator must be active. The
  * recipient is the token's `email` claim, else the aggregator's contact email,
@@ -13,6 +13,7 @@
  * returns only `{ job_id }`. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
 import { campaignSubmitResponses } from '../campaign/route-schema.js';
@@ -23,7 +24,8 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignExportRoutes(app: FastifyInstance): Promise<void> {
+export async function registerCampaignExportRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/export',
     {
@@ -39,9 +41,9 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       },
     },
     async (req, reply) => {
-      await submitCampaignJob(req, reply, {
+      await submitCampaignJob(req, reply, req.body, {
         channel: 'export',
-        parseContent: (rawContent) => rawContent as Record<string, unknown>,
+        parseContent: (rawContent) => rawContent,
         // From deployment config (CAMPAIGN_EXPORT_FIELDS), not caller input.
         piiFields: () =>
           config.CAMPAIGN_EXPORT_FIELDS === 'full' ? ['full'] : ['name', 'email', 'phone'],

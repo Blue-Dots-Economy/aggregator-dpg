@@ -1,11 +1,14 @@
 /**
  * BFF proxy: confirm bulk upload completion.
  *   POST /api/bulk-uploads/:id/start → API POST /v1/bulk-uploads/:id/start
+ *
+ * An id Postgres cannot read as a UUID answers 404 without calling the API.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
-import { callApi } from '../../../../../lib/upstream-client';
-import { passthrough, proxyFailureResponse } from '../../../../../lib/bff-proxy';
+import { callApi } from '@/lib/upstream-client';
+import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
+import { invalidIdResponse, isPostgresUuid } from '@/lib/bff-input';
 
 export const runtime = 'nodejs';
 
@@ -14,10 +17,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await params;
+  if (!isPostgresUuid(id)) return invalidIdResponse();
   try {
     // The body carries the operator `attestation` flag. Pass the parsed object;
     // `callApi` stringifies it, so a string would be double-encoded.
-    const body = (await req.json().catch(() => ({}))) as unknown;
+    const body: unknown = await req.json().catch(() => ({}));
     const upstream = await callApi(`/v1/bulk-uploads/${encodeURIComponent(id)}/start`, {
       method: 'POST',
       body: body ?? {},

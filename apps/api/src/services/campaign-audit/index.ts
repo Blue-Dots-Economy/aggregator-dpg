@@ -13,6 +13,7 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { getDb } from '../../db/client.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let writer: CampaignAuditWriterBase | null = null;
 
@@ -89,7 +90,7 @@ export async function safeAudit(
     logger.error({
       ...ctx,
       status: 'failure',
-      error: cause instanceof Error ? cause.message : String(cause),
+      error: errorMessage(cause),
     });
   } finally {
     // Clear the timer so it does not keep the process alive.

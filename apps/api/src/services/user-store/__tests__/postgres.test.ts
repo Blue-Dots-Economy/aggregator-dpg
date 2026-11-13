@@ -919,6 +919,22 @@ describe('PostgresUserStore serves on write (0029)', () => {
     expect((callArgs(captured, 'values')?.[0] as { serves: string[] }).serves).toEqual(serves);
   });
 
+  it('create with a serves list stores that list', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (isAggregatorWrite(chain)) captured = chain;
+      return [makeRow({ id: 'agg-1' })];
+    });
+    _setDbClients(null, db as never);
+    await new PostgresUserStore().create(
+      makeInput({ type: 'seeker', serves: ['seeker', 'provider'] }),
+    );
+    expect((callArgs(captured, 'values')?.[0] as { serves: string[] }).serves).toEqual([
+      'seeker',
+      'provider',
+    ]);
+  });
+
   it('reads the alternate phone back into the Beckn contact, and omits a NULL one', async () => {
     _setDbClients(
       null,

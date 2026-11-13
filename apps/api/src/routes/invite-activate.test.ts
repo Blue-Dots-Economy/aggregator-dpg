@@ -126,6 +126,7 @@ describe('POST /v1/user/activate', () => {
           parentOrgId: PARENT,
           isDefaultOrg: false,
           status: 'pending',
+          serves: ['seeker'],
           contact: { name: 'Asha', email: COORD_EMAIL, phone: '+919876543210' },
         }),
       ]);
@@ -191,6 +192,18 @@ describe('POST /v1/user/activate', () => {
       ]);
       subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
       expect(errorCode(await activate('coord'))).toBe('TARGET_ORG_INACTIVE');
+    });
+
+    it('answers 409 NO_PROFILE_TYPES and stays pending when the invitee serves no profile type', async () => {
+      const seeded = await users.findById(COORD);
+      if (!seeded.ok || !seeded.value) throw new Error('seed missing');
+      users.seed([{ ...seeded.value, serves: [] }]);
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(409);
+      expect(errorCode(res)).toBe('NO_PROFILE_TYPES');
+      const row = await users.findById(COORD);
+      expect(row.ok && row.value?.status).toBe('pending');
     });
 
     it('answers 503 IDP_UNAVAILABLE when Keycloak cannot be read', async () => {

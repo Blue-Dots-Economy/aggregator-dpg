@@ -5,7 +5,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
 import { resolveSchemaRoot } from '@/lib/config-paths';
+import { parseJsonObject, readJsonSchema } from '@/lib/json-object';
+import { logger } from '@/lib/logger';
 import { loadParticipantConsent } from '@/lib/participant-consent.server';
+import { summariseIssues } from '@/lib/response-shape-error';
+import { ResolveResponseSchema } from '@/lib/registration-link';
 import { PublicRegistrationView } from './PublicRegistrationView';
 
 export const metadata: Metadata = {
@@ -14,28 +18,8 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-interface ResolveResponse {
-  slug: string;
-  // Signalstack network id (e.g. 'blue_dot'). May be absent.
-  network?: string;
-  // Domain id declared by the active network (e.g. 'seeker', 'provider').
-  domain: string;
-  context: Record<string, unknown>;
-  schema_id: string | null;
-  schema_version: string | null;
-  // JSON Schema for the link's domain, from the network config. `null` for
-  // `account_only` links, which render the identity-only form.
-  schema: RJSFSchema | null;
-  // Identity field names for the domain, used by the account-only form.
-  identity?: { name?: string; phone?: string; email?: string };
-  // Registration mode key (e.g. `voice`, `form`).
-  registration_mode?: string;
-  // Resolved form shape. Absent means `'account_and_profile'`.
-  submission_shape?: 'account_only' | 'account_and_profile';
-  // Optional i18n key for a hint rendered beneath the public form.
-  public_hint_i18n_key?: string | null;
-  expires_at: string | null;
-}
+/** The schema an `account_only` link passes to the view, which does not read it. */
+const EMPTY_SCHEMA: RJSFSchema = {};
 
 interface PageProps {
   params: Promise<{ org: string; slug: string }>;
@@ -53,7 +37,6 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
 
   // 1. Resolve link metadata via the public API.
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  let resolved: ResolveResponse;
   // Only the fetch is inside the try. `notFound()` throws, so it must be
   // called outside the try or the catch would swallow it.
   let res: Response;
@@ -79,8 +62,9 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       />
     );
   }
+  let body: unknown;
   try {
-    resolved = (await res.json()) as ResolveResponse;
+    body = await res.json();
   } catch (err) {
     return (
       <ErrorShell
@@ -89,13 +73,25 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       />
     );
   }
+  const parsedLink = ResolveResponseSchema.safeParse(body);
+  if (!parsedLink.success) {
+    logger.error({
+      operation: 'publicRegistrationPage.resolve',
+      status: 'failure',
+      error: 'unexpected response shape',
+      issues: summariseIssues(parsedLink.error.issues),
+    });
+    return <ErrorShell title="Link unavailable" message="Malformed response." />;
+  }
+  const resolved = parsedLink.data;
 
   // 2. The schema comes in the resolve response. It must be an object unless
   // the link is `account_only`, where `null` is valid.
   const submissionShape = resolved.submission_shape ?? 'account_and_profile';
   const hintKey = resolved.public_hint_i18n_key ?? null;
+  const linkSchema = readJsonSchema(resolved.schema);
   if (submissionShape !== 'account_only') {
-    if (!resolved.schema || typeof resolved.schema !== 'object') {
+    if (!linkSchema) {
       return (
         <ErrorShell
           title="Form unavailable"
@@ -108,17 +104,14 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
     notFound();
   }
   // The view ignores `schema` for account_only links.
-  const schema: RJSFSchema = resolved.schema ?? ({} as RJSFSchema);
+  const schema = linkSchema ?? EMPTY_SCHEMA;
   // Optional UI schema from config/<network>/schemas/participant/. Not read
   // for account_only links.
   let uiSchema: Record<string, unknown> = {};
   if (submissionShape !== 'account_only') {
     const uiFile = `${resolved.domain}.v1.ui.json`;
     try {
-      uiSchema = JSON.parse(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8')) as Record<
-        string,
-        unknown
-      >;
+      uiSchema = parseJsonObject(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8'));
     } catch {
       // UI schema is optional.
     }

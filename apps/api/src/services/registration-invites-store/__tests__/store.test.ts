@@ -8,7 +8,7 @@
  *
  * @module @aggregator-dpg/api
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   InMemoryRegistrationInvitesStore,
   RegistrationInvitesStoreFake,
@@ -16,6 +16,7 @@ import {
   PostgresRegistrationInvitesStore,
 } from '../index.js';
 import { _setDbClients } from '../../../db/client.js';
+import { logger } from '../../../logger.js';
 
 const ORG = '00000000-0000-0000-0000-0000000000aa';
 
@@ -217,6 +218,33 @@ describe('PostgresRegistrationInvitesStore error mapping', () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('never returns or logs the driver message, which holds query parameters', async () => {
+    const errorLog = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('value too long'), { code: '22001' });
+      throw Object.assign(
+        new Error('Failed query: insert into "registration_invites" params: asha@x.org'),
+        { cause: pgErr },
+      );
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationInvitesStore();
+    const res = await store.create({
+      parentOrgId: ORG,
+      email: 'asha@x.org',
+      expiresAt: new Date('2027-01-01'),
+      createdBy: 'owner',
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toEqual({ code: 'DB_UNAVAILABLE', message: 'database error 22001' });
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain('asha@x.org');
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'inviteStore.create', error_type: 'Error' }),
+    );
+    errorLog.mockRestore();
   });
 
   // A raw `registration_invites` row as Drizzle's inferSelect returns it.

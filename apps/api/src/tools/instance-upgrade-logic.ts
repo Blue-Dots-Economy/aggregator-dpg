@@ -6,6 +6,7 @@
  * latest shipped migration. Any other level is refused.
  */
 
+import { z } from 'zod';
 import { PRE_TRAIN_WHEN, type AppliedMigration, type JournalEntry } from '../db/migrate-core.js';
 
 /**
@@ -49,4 +50,39 @@ export function upgradeLevel(
   else if (highWater === latest) state = 'done';
   else if (appliedTag !== null && highWater > PRE_TRAIN_WHEN) state = 'partial';
   return { state, appliedTag, pending };
+}
+
+const TokenResponseSchema = z.object({ access_token: z.string() });
+
+const TokenClaimsSchema = z.object({
+  resource_access: z.object({
+    'realm-management': z.object({ roles: z.array(z.string()) }),
+  }),
+});
+
+/**
+ * Access token and `realm-management` client roles from a Keycloak token response.
+ *
+ * The claims are read without verifying the signature; the caller only checks
+ * which roles the client was given.
+ *
+ * @param body - The parsed JSON body of the token response.
+ * @returns The token (`''` when absent) and its roles (`[]` when absent or unreadable).
+ */
+export function tokenRealmRoles(body: unknown): { token: string; roles: string[] } {
+  const response = TokenResponseSchema.safeParse(body);
+  if (!response.success) return { token: '', roles: [] };
+  const token = response.data.access_token;
+  const payload = Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8');
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(payload);
+  } catch {
+    return { token, roles: [] };
+  }
+  const claims = TokenClaimsSchema.safeParse(decoded);
+  return {
+    token,
+    roles: claims.success ? claims.data.resource_access['realm-management'].roles : [],
+  };
 }

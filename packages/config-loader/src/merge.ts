@@ -12,6 +12,8 @@
  * `JSON.parse` and YAML loaders can produce `__proto__` as an own key, and
  * config is built from parsed documents.
  */
+import { isRecord } from './record.js';
+
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
@@ -32,15 +34,8 @@ export function deepMerge(
     if (FORBIDDEN_KEYS.has(key)) continue;
     const src = source[key];
     const tgt = target[key];
-    if (
-      src !== null &&
-      typeof src === 'object' &&
-      !Array.isArray(src) &&
-      tgt !== null &&
-      typeof tgt === 'object' &&
-      !Array.isArray(tgt)
-    ) {
-      deepMerge(tgt as Record<string, unknown>, src as Record<string, unknown>);
+    if (isRecord(src) && isRecord(tgt)) {
+      deepMerge(tgt, src);
     } else {
       target[key] = src;
     }

@@ -13,7 +13,10 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
+import {
+  RegistrationPayloadSchema,
+  registrationDomains,
+} from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   InviteReadQuerySchema,
   InviteReadResponseSchema,
@@ -135,6 +138,8 @@ interface CoordinatorSubmission {
   contact: BecknContact;
   phoneE164: string;
   consent: RegistrationPayload['consent'];
+  /** The domains picked, each a network domain id. */
+  domains: string[];
 }
 
 type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
@@ -152,9 +157,12 @@ async function checkCoordinatorSubmission(
   body: RegistrationPayload,
 ): Promise<CoordinatorSubmission> {
   const networkCfg = await getNetworkConfig();
-  if (!networkCfg.domainIds.includes(body.type)) {
+  // Every domain in `type` must be one of the network's domain ids.
+  const domains = registrationDomains(body.type);
+  const unknownDomains = domains.filter((d) => !networkCfg.domainIds.includes(d));
+  if (unknownDomains.length > 0) {
     throw httpError('SCHEMA_VALIDATION', {
-      detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      detail: `unknown type '${unknownDomains.join("', '")}' — valid: ${networkCfg.domainIds.join(', ')}`,
       fields: { type: 'invalid' },
     });
   }
@@ -191,7 +199,7 @@ async function checkCoordinatorSubmission(
       fields: { retry_after_seconds: rl.retryAfterSeconds },
     });
   }
-  return { contact, phoneE164, consent };
+  return { contact, phoneE164, consent, domains };
 }
 
 /**
@@ -214,7 +222,11 @@ async function acceptCoordinatorInvite(
   await authenticateCaller(req);
 
   const { invite: token, ...body } = req.body as z.infer<typeof CoordinatorInviteAcceptBodySchema>;
-  const { contact, phoneE164, consent } = await checkCoordinatorSubmission(req, reply, body);
+  const { contact, phoneE164, consent, domains } = await checkCoordinatorSubmission(
+    req,
+    reply,
+    body,
+  );
   const invite = await usableInvite(token, 'coordinator');
   if (contact.email !== invite.email) throw httpError('INVITE_EMAIL_MISMATCH');
   await assertNotOrgOwner(contact.email);
@@ -230,6 +242,7 @@ async function acceptCoordinatorInvite(
   try {
     const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
       contact,
+      domains,
       consent,
       orgId: invite.org.id,
       inviteId: invite.jti,
@@ -238,7 +251,7 @@ async function acceptCoordinatorInvite(
     });
     const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
       aggregatorId,
-      type: body.type,
+      types: domains,
       contact,
     });
     committed = true;
@@ -393,6 +406,8 @@ async function createCoordinatorRow(
   body: RegistrationPayload,
   row: {
     contact: BecknContact;
+    /** The domains served, validated and non-empty. */
+    domains: string[];
     consent: RegistrationPayload['consent'];
     orgId: string;
     inviteId: string;
@@ -403,7 +418,7 @@ async function createCoordinatorRow(
 ): Promise<{ aggregatorId: string; orgSlug: string }> {
   const recordConsent = await aggregatorConsentWriter({ consent: row.consent, log: row.log });
   const created = await createAggregatorWithSlug(userStore, body.name, {
-    type: body.type,
+    domains: row.domains,
     contact: row.contact,
     consent: row.consent,
     recordConsent,
@@ -437,7 +452,8 @@ async function createCoordinatorLogin(
   idp: ReturnType<typeof getIdpAdmin>,
   user: {
     aggregatorId: string;
-    type: RegistrationPayload['type'];
+    /** Every profile type served (multivalued claim). */
+    types: string[];
     contact: BecknContact;
   },
 ): Promise<string> {
@@ -452,7 +468,7 @@ async function createCoordinatorLogin(
     lastName,
     attributes: {
       [KC_ATTR.AGGREGATOR_ID]: user.aggregatorId,
-      [KC_ATTR.AGGREGATOR_TYPE]: user.type,
+      [KC_ATTR.AGGREGATOR_TYPE]: user.types,
       [KC_ATTR.PHONE_NUMBER]: user.contact.phone,
       [KC_ATTR.DECISION_MADE]: 'invited',
     },
@@ -557,7 +573,8 @@ async function createAggregatorWithSlug(
   store: ReturnType<typeof getUserStore>,
   name: string,
   extras: {
-    type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
+    /** The domains served, validated and non-empty. */
+    domains: string[];
     contact: BecknContact;
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
     /** Writes the consent ledger row inside the create transaction. */
@@ -581,7 +598,8 @@ async function createAggregatorWithSlug(
     last = await store.create({
       orgSlug,
       name,
-      type: extras.type,
+      type: extras.domains[0] ?? null,
+      serves: extras.domains,
       contact: extras.contact,
       consent: extras.consent,
       recordConsent: extras.recordConsent,

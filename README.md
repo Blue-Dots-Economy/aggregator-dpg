@@ -61,11 +61,11 @@ This document translates the Aggregator Product Note (Draft 2) into an engineeri
 
 ### 2.2 External systems
 
-| System                      | Role                                                                                    | API reference                                        |
-| --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution       | https://ubi-backend.onest.dhiway.net/api/reference/  |
-| Jobs Stack                  | Source of truth for job postings and applications (provider-side + seeker applications) | https://jobs-demo.onest.dhiway.net/api/v1/reference/ |
-| Ecosystem Manager platform  | Future consumer of the Signal Processing Service                                        | —                                                    |
+| System                      | Role                                                                                    | API reference                                                                                         |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution       | [Signals-DPG `openapi.json`](https://github.com/Blue-Dots-Economy/signals-dpg/blob/main/openapi.json) |
+| Jobs Stack                  | Source of truth for job postings and applications (provider-side + seeker applications) | —                                                                                                     |
+| Ecosystem Manager platform  | Future consumer of the Signal Processing Service                                        | —                                                                                                     |
 
 Per the PRD: **the Aggregator platform has no write access to the Signals Stack in MVP.** All transactional writes (registrations, applications) originate upstream. The Aggregator app is a read-and-display surface plus outbound orchestration (generating onboarding links, running bulk uploads that hit upstream APIs, exporting reports).
 
@@ -389,8 +389,6 @@ Engineering controls required regardless of how these resolve:
 **Runtime language switcher:** controlled by the `ENABLED_LANGUAGES` env var (comma-separated, ordered locale codes, e.g. `en,kn,hi`). Only codes listed here appear in the UI switcher; `en` is always included as the fallback. If the var is unset all supported locales are shown. Setting it to a single code (`ENABLED_LANGUAGES=en`) hides the switcher entirely.
 
 It is a **true runtime** setting: the root layout is a server component, so it reads the value per request and publishes it to client components via `EnabledLocalesProvider`. Changing the language set is an env edit plus a container restart — **no image rebuild**. The same value also gates the server side, so a stale `NEXT_LOCALE` cookie or an `Accept-Language` header naming a disabled language falls back to `en` rather than pinning the UI to it.
-
-`NEXT_PUBLIC_ENABLED_LANGUAGES` is still read as a fallback so deployments can migrate without a flag day; prefer the unprefixed name, and note the prefixed one is build-time only (see the note below).
 
 **Adding a new language:**
 

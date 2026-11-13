@@ -6,7 +6,8 @@
  * can register again. Called by a scheduler with a service-account token.
  */
 
-import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -134,7 +135,8 @@ const CleanupResponseSchema = z
  *
  * @param app - Fastify instance to attach the route to.
  */
-export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorMaintenanceRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/admin/v1/aggregator-registrations/cleanup-stale',
     {
@@ -145,7 +147,7 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         response: { 200: CleanupResponseSchema, ...errorResponses(401, 500, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const log = req.log.child({ operation: 'aggregator-registration.cleanup-stale' });
       const auth = await authenticateAny(req);
       if (!auth.ok) {

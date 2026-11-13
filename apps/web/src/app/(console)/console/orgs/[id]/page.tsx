@@ -14,10 +14,6 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Building2, CalendarDays, Clock, Layers, Network, Users } from 'lucide-react';
-import type {
-  OrgHierarchyResponse,
-  OrgReadResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { isUuid } from '@/lib/console-proxy';
@@ -34,6 +30,11 @@ import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
+import {
+  OrgHierarchyResponseSchema,
+  OrgReadResponseSchema,
+  type OrgReadResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 type Translate = Awaited<ReturnType<typeof getTranslations<'console'>>>;
 type Format = Awaited<ReturnType<typeof getFormatter>>;
@@ -80,15 +81,16 @@ export default async function ConsoleOrgPage({
   const { id } = await params;
   // Ids are UUIDs; anything else cannot exist, so it is a missing page, not an error.
   if (!isUuid(id)) notFound();
-  const data = await consoleRead<OrgReadResponse>(
+  const data = await consoleRead(
     `/v1/org/read/${encodeURIComponent(id)}?fields=parent.known_as_values`,
+    OrgReadResponseSchema,
   );
   const { org } = data;
   const access = orgPageAccess(actor.me, data);
   const orgSchema = await loadOrgSchema();
   // Tree limits; only the network admin can read them.
   const hierarchy = access.canRename
-    ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy')
+    ? await consoleRead('/v1/org/hierarchy', OrgHierarchyResponseSchema)
     : null;
   const canMove = hierarchy !== null && access.movable;
   return (

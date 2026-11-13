@@ -30,6 +30,8 @@ import {
   loadEmailMessageOverrides,
   assertMessagesComplete,
 } from './services/email-templates/messages.js';
+import { initObjectStorage } from '@aggregator-dpg/object-storage';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 async function main(): Promise<void> {
   if (config.RUN_MIGRATIONS_ON_BOOT) {
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
     }
   }
 
+  initObjectStorage(config);
   const app = await buildApp();
 
   // Load the RBAC role snapshot once. No-op with RBAC_MODE=off; otherwise an
@@ -92,8 +95,8 @@ async function main(): Promise<void> {
     logger.error({
       operation: 'orgTree.bootCheck',
       status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
-      error_type: err instanceof Error ? err.name : typeof err,
+      error: errorMessage(err),
+      error_type: errorType(err),
     });
   }
 

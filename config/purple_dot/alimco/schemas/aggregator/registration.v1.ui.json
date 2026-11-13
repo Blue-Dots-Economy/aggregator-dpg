@@ -46,9 +46,10 @@
     "ui:autofocus": true
   },
   "type": {
-    "ui:widget": "select",
-    "ui:placeholder": "Select aggregator type",
-    "ui:enumNames": ["Seeker", "Service Provider"]
+    "ui:widget": "checkboxes",
+    "items": {
+      "ui:enumNames": ["Seeker", "Service Provider"]
+    }
   },
   "url": {
     "ui:placeholder": "https://abclimited.org",

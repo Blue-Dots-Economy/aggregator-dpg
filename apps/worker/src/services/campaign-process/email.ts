@@ -31,7 +31,8 @@ import {
 import { emailContentSchema, type EmailContent } from '@aggregator-dpg/campaign-template/content';
 import { renderEmail } from '@aggregator-dpg/campaign-template/render';
 import { TERMINAL_ITEM_STATUSES, type ProcessingJob } from '../campaign-job-client.js';
-import { chunkArray, type CampaignJobDeps } from './index.js';
+import type { CampaignJobDeps } from './index.js';
+import { chunkArray } from './util.js';
 
 /** Email-channel collaborators (decrypt + mailer). */
 export interface EmailCollaborators {

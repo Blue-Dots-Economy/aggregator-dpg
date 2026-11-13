@@ -13,16 +13,18 @@
 import { useState, type ReactNode } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Clock, Download, Lock, Shield, type LucideIcon } from 'lucide-react';
-import type {
-  Role,
-  RoleAssignment,
-  RevokeRoleResponse,
-  UserRolesResponse,
+import {
+  RevokeRoleResponseSchema,
+  RoleAssignmentSchema,
+  type Role,
+  type RoleAssignment,
+  type UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { cn } from '../../lib/cn';
 import { errorKey, sendConsole } from '../../lib/console-client';
+import { SelectField } from '@/components/ui/SelectField';
 
 /** Durations offered for a time-limited role, in days, up to the role's limit. */
 const DURATIONS = [30, 60, 90];
@@ -105,11 +107,16 @@ export function RolesPanel({
 
   async function assign(key: string, forDays: number | null) {
     setBusy(true);
-    const r = await sendConsole<RoleAssignment>(`/api/console/user/role/assign/${userId}`, 'POST', {
-      role_key: key,
-      org_id: orgId,
-      ...(forDays ? { days: forDays } : {}),
-    });
+    const r = await sendConsole(
+      `/api/console/user/role/assign/${userId}`,
+      'POST',
+      RoleAssignmentSchema,
+      {
+        role_key: key,
+        org_id: orgId,
+        ...(forDays ? { days: forDays } : {}),
+      },
+    );
     setBusy(false);
     setPending(null);
     if (r.ok) {
@@ -125,9 +132,10 @@ export function RolesPanel({
 
   async function revoke(key: string) {
     setBusy(true);
-    const r = await sendConsole<RevokeRoleResponse>(
+    const r = await sendConsole(
       `/api/console/user/role/revoke/${userId}`,
       'POST',
+      RevokeRoleResponseSchema,
       { role_key: key, org_id: orgId },
     );
     setBusy(false);
@@ -248,18 +256,16 @@ export function RolesPanel({
                 {live ? null : (
                   <>
                     {max ? (
-                      <select
+                      <SelectField
                         aria-label={t('roles.duration', { role: nameOf(key) })}
-                        value={daysFor(key) ?? max}
-                        onChange={(e) => setDays((d) => ({ ...d, [key]: Number(e.target.value) }))}
-                        className="h-9 rounded-[10px] border border-(--bd-border) bg-(--bd-card) px-2 text-[13px] text-ink-900"
-                      >
-                        {durationsFor(max).map((n) => (
-                          <option key={n} value={n}>
-                            {t('roles.days', { days: n })}
-                          </option>
-                        ))}
-                      </select>
+                        value={String(daysFor(key) ?? max)}
+                        onChange={(v) => setDays((d) => ({ ...d, [key]: Number(v) }))}
+                        className="h-9 w-auto px-2.5 py-0 text-[13px]"
+                        options={durationsFor(max).map((n) => ({
+                          value: String(n),
+                          label: t('roles.days', { days: n }),
+                        }))}
+                      />
                     ) : null}
                     <Button disabled={busy} onClick={() => startAssign(key)}>
                       {t('roles.assign')}

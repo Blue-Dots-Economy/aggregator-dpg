@@ -515,17 +515,22 @@ button {
 }
 .bd-link-btn:hover { text-decoration: underline; }
 
-/* Error-page escape hatch. Stacks the prompt above the sign-out link so the
-   link reads as an action rather than as part of the sentence. */
-.bd-error-switch {
-  margin: 18px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--bd-ink-600, #4b5563);
+/* Error page: message, then the sign-out as the main action. */
+.bd-error .bd-alert {
+  margin-bottom: 20px;
+  font-size: 14px;
+  line-height: 1.5;
 }
-.bd-error-switch a { display: inline-block; }
+.bd-form-area .bd-error-primary {
+  display: block;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
+.bd-form-area .bd-error-primary:hover {
+  background: var(--bd-primary-600);
+  text-decoration: none;
+}
 
 .bd-terms {
   margin: 28px 0 0;

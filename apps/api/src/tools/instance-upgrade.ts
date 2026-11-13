@@ -33,8 +33,15 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import { upgradeLevel, type UpgradeLevel, type UpgradeState } from './instance-upgrade-logic.js';
 import {
+  tokenRealmRoles,
+  upgradeLevel,
+  type UpgradeLevel,
+  type UpgradeState,
+} from './instance-upgrade-logic.js';
+import { errorField } from '../db/pg-error.js';
+import {
+  applySessionSettings,
   canActAsOwner,
   isFailing,
   otherSessions,
@@ -42,7 +49,9 @@ import {
   runChecks,
   sqlStatements,
   type CheckRow,
+  type SessionClient,
 } from './instance-upgrade-db.js';
+import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = pino({ base: { service: 'train' } });
@@ -95,45 +104,37 @@ function required(name: string): string {
   return v;
 }
 
+/** Pool options whose `onConnect` sets the session up on a fresh connection. */
+export interface UpgradePoolConfig extends pg.PoolConfig {
+  // pg-pool awaits the returned promise; @types/pg types the return as void.
+  onConnect: (client: SessionClient) => Promise<void>; // NOSONAR typescript:S6544
+}
+
 /**
- * Creates a pool whose connections carry the backfill network and brand as
- * session settings, set on connect before any query.
+ * Builds the pool options. Every connection carries the backfill network and
+ * brand as session settings, set on connect before any query.
+ *
+ * @returns The pool options.
+ * @throws {Refusal} When `DATABASE_URL` is not set.
  */
-function openPool(): pg.Pool {
+export function upgradePoolConfig(): UpgradePoolConfig {
   const network = env('AGGREGATOR_NETWORK') ?? '';
   const brand = env('AGGREGATOR_BRAND') ?? '';
-  class UpgradeClient extends pg.Client {
-    override connect(): Promise<pg.Client>;
-    override connect(callback: ((err: Error) => void) | ((err: null, c: pg.Client) => void)): void;
-    override connect(
-      callback?: ((err: Error) => void) | ((err: null, c: pg.Client) => void),
-    ): Promise<pg.Client> | void {
-      const ready = super.connect().then(async () => {
-        await this.query(
-          `SELECT set_config('aggregator_dpg.network', $1, false),
-                  set_config('aggregator_dpg.brand', $2, false),
-                  set_config('TimeZone', 'UTC', false)`,
-          [network, brand],
-        );
-        return this as pg.Client;
-      });
-      if (!callback) return ready;
-      const cb = callback as (err: Error | null, c?: pg.Client) => void;
-      ready.then(
-        (c) => cb(null, c),
-        (err: Error) => cb(err),
-      );
-    }
-  }
-  return new pg.Pool({
+  return {
     connectionString: required('DATABASE_URL'),
     max: 2,
     application_name: 'train',
     // A dropped connection must surface, not hang with the locks held.
     keepAlive: true,
     connectionTimeoutMillis: 10_000,
-    Client: UpgradeClient,
-  });
+    // pg-pool awaits this before it hands the connection out, and discards the connection when it fails.
+    onConnect: (client) => applySessionSettings(client, { network, brand }),
+  };
+}
+
+/** Creates the tool's pool from {@link upgradePoolConfig}. */
+function openPool(): pg.Pool {
+  return new pg.Pool(upgradePoolConfig());
 }
 
 /** Reads the upgrade level. Refuses when an applied migration is not shipped. */
@@ -213,7 +214,7 @@ async function keycloakCheck(): Promise<boolean> {
   try {
     return await keycloakRoles(base, realm, clientId, secret);
   } catch (err) {
-    out(`  F19 keycloak: unreachable (${(err as Error).name})`);
+    out(`  F19 keycloak: unreachable (${toError(err).name})`);
     return false;
   }
 }
@@ -246,13 +247,7 @@ async function keycloakRoles(
     out(`  F19 keycloak: token request failed (${tokenRes.status})`);
     return false;
   }
-  const token = ((await tokenRes.json()) as { access_token?: string }).access_token ?? '';
-  const claims = JSON.parse(
-    Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'),
-  ) as {
-    resource_access?: Record<string, { roles?: string[] }>;
-  };
-  const roles = claims.resource_access?.['realm-management']?.roles ?? [];
+  const { token, roles } = tokenRealmRoles(await tokenRes.json());
   const role = await call(`${base}/admin/realms/${realm}/roles/org_owner`, {
     headers: { authorization: `Bearer ${token}` },
   });
@@ -325,10 +320,10 @@ async function fix(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[])
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof Refusal) throw err;
-    const e = err as { code?: string; message?: string };
+    const code = errorField(err, 'code');
     // Fixes raise their own refusals. Other errors print the code only.
     out(
-      `fix ${name}: FAILED ${e.code === 'P0001' ? (e.message ?? '') : (e.code ?? 'error')} — nothing changed`,
+      `fix ${name}: FAILED ${code === 'P0001' ? (errorField(err, 'message') ?? '') : (code ?? 'error')} — nothing changed`,
     );
     return 1;
   } finally {
@@ -536,19 +531,19 @@ async function run(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[])
   } catch (err) {
     if (!committing) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof Refusal) throw err;
-    const e = err as { code?: string; constraint?: string; table?: string; message?: string };
+    const code = errorField(err, 'code');
     log.error({
       operation: 'train.run',
       status: 'failure',
-      code: e.code,
-      constraint: e.constraint,
-      table: e.table,
+      code,
+      constraint: errorField(err, 'constraint'),
+      table: errorField(err, 'table'),
       latency_ms: Date.now() - started,
     });
     if (!committing) {
-      const detail = e.code === 'P0001' ? `: ${e.message ?? ''}` : '';
+      const detail = code === 'P0001' ? `: ${errorField(err, 'message') ?? ''}` : '';
       out(
-        `RUN FAILED (${e.code ?? 'error'}${detail}) — ` +
+        `RUN FAILED (${code ?? 'error'}${detail}) — ` +
           'rolled back: nothing was applied, the database is unchanged',
       );
       return 1;
@@ -681,8 +676,9 @@ async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<numb
           return await main([step.cmd, ...step.args]);
         } catch (err) {
           // A step that throws also stops run-all.
-          const e = err as { code?: string; name?: string };
-          out(`  ${step.cmd} failed: ${e.code ?? e.name ?? 'error'}`);
+          out(
+            `  ${step.cmd} failed: ${errorField(err, 'code') ?? errorField(err, 'name') ?? 'error'}`,
+          );
           return 1;
         }
       },
@@ -754,8 +750,12 @@ if (isEntry()) {
     if (err instanceof Refusal) {
       out(`REFUSED: ${err.message}`);
     } else {
-      const e = err as { code?: string; name?: string };
-      log.error({ operation: 'train', status: 'failure', code: e.code, error_type: e.name });
+      log.error({
+        operation: 'train',
+        status: 'failure',
+        code: errorField(err, 'code'),
+        error_type: errorField(err, 'name'),
+      });
     }
     process.exitCode = 1;
   }

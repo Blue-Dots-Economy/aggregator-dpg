@@ -32,7 +32,7 @@
   "attributes": {
     "phoneDefaultRegion": "IN",
     "userProfileEnabled": "true",
-    "kc.user.profile.config": "{\"unmanagedAttributePolicy\":\"ENABLED\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"required\":{\"roles\":[\"user\"]}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumber\",\"displayName\":\"Phone Number\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumberVerified\",\"displayName\":\"Phone Number Verified\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"aggregator_id\",\"displayName\":\"Aggregator id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"decision_made\",\"displayName\":\"Registration decision\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"aggregator_type\",\"displayName\":\"Aggregator type\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"signalstack_org_id\",\"displayName\":\"Signals organisation id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}]}"
+    "kc.user.profile.config": "{\"unmanagedAttributePolicy\":\"ENABLED\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"required\":{\"roles\":[\"user\"]}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumber\",\"displayName\":\"Phone Number\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumberVerified\",\"displayName\":\"Phone Number Verified\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"aggregator_id\",\"displayName\":\"Aggregator id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"decision_made\",\"displayName\":\"Registration decision\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"aggregator_type\",\"displayName\":\"Profile types\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":true},{\"name\":\"signalstack_org_id\",\"displayName\":\"Signals organisation id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}]}"
   },
   "smtpServer": {
     "host": "__SMTP_HOST__",
@@ -477,6 +477,8 @@
       ],
       "attributes": {
         "post.logout.redirect.uris": "http://localhost:3000/##http://localhost:3000/login##http://localhost:3100/##http://localhost:3100/login##http://localhost/##http://localhost/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/login",
+        "backchannel.logout.url": "__PORTAL_BACKCHANNEL_LOGOUT_URL__",
+        "backchannel.logout.session.required": "true",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -524,7 +526,7 @@
             "id.token.claim": "false",
             "access.token.claim": "true",
             "userinfo.token.claim": "false",
-            "multivalued": "false",
+            "multivalued": "true",
             "aggregate.attrs": "false"
           }
         },
@@ -652,7 +654,9 @@
       "webOrigins": ["http://localhost:5173", "http://localhost:2742", "__PUBLIC_BASE_URL__"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/##http://localhost:5173/auth/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/auth/login",
+        "post.logout.redirect.uris": "http://localhost:5173/##http://localhost:5173/auth/login##http://localhost:2742/##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/auth/login",
+        "backchannel.logout.url": "__SIGNALS_BACKCHANNEL_LOGOUT_URL__",
+        "backchannel.logout.session.required": "true",
         "login_theme": "signals"
       },
       "protocolMappers": [

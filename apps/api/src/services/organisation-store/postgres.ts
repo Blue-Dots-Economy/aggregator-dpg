@@ -33,7 +33,6 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { organisations, orgKnownAs, contact, userIdentities, users } from '../../db/schema.js';
-import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
   knownAsChoices,
@@ -76,6 +75,7 @@ import {
   type TreeNode,
   type TreeRefusal,
 } from './tree.js';
+import { errorType, toError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
 class ConsentHookError extends Error {
@@ -174,7 +174,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           operation: 'orgStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
-          error_type: (e.cause as Error | undefined)?.name ?? 'unknown',
+          error_type: errorType(e.cause),
           latency_ms: Date.now() - start,
         });
         return errResult('CONSENT_WRITE_FAILED', 'consent could not be recorded');
@@ -849,7 +849,7 @@ function toDomain(row: JoinedRow): Organisation {
     updatedBy: o.updatedBy,
     rejectedAt: o.rejectedAt,
     isDefault,
-    locations: (o.locations ?? []) as BecknLocation[],
+    locations: o.locations,
     legalName: o.legalName,
     knownAs: o.knownAs,
     knownAsName,
@@ -1109,11 +1109,14 @@ function classifyWriteError(
     }
   }
   // Never echo the driver message: Drizzle includes the query parameters in it.
-  return err('DB_UNAVAILABLE', code ? `database error ${code}` : (e as Error).name);
+  return err('DB_UNAVAILABLE', code ? `database error ${code}` : toError(e).name);
 }
 
-function err(code: OrgStoreError['code'], message: string): OrgStoreError {
-  return { code, message } as OrgStoreError;
+/** Error codes that carry only a message. `KNOWN_AS_UNKNOWN_KEY` also carries an `index`. */
+type PlainErrorCode = Exclude<OrgStoreError['code'], 'KNOWN_AS_UNKNOWN_KEY'>;
+
+function err(code: PlainErrorCode, message: string): OrgStoreError {
+  return { code, message };
 }
 
 /** Logs and returns a refused tree write. */
@@ -1122,6 +1125,6 @@ function refusal<T>(op: string, e: TreeRefusalError, start: number): OrgStoreRes
   return errResult(e.code, `refused: ${e.code}`);
 }
 
-function errResult<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
+function errResult<T>(code: PlainErrorCode, message: string): OrgStoreResult<T> {
   return { ok: false, error: err(code, message) };
 }

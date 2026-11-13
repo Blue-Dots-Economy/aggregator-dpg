@@ -151,7 +151,7 @@ export async function proxyServiceRequest(
 
   // Pass the upstream body through unchanged.
   if (contentType.includes('application/json')) {
-    const data = (await upstream.json()) as unknown;
+    const data: unknown = await upstream.json();
     log.info({ status: upstream.status, latency_ms }, 'upstream response forwarded');
     const res = NextResponse.json(data, { status: upstream.status });
     res.headers.set(REQUEST_ID_HEADER, reqId);

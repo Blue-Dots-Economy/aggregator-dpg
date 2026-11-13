@@ -100,7 +100,7 @@ describe('GET /api/auth/callback', () => {
           accessTokenExp: Date.now() + 60_000,
           refreshTokenExp: Date.now() + 60_000,
         },
-        claims: { sub: 'user-1', email: 'jane@x.com' },
+        claims: { sub: 'user-1', email: 'jane@x.com', sid: 'kc-session-1' },
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
@@ -109,8 +109,9 @@ describe('GET /api/auth/callback', () => {
     const res = await GET(req);
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://portal.test/dashboard');
+    // The Keycloak session id is kept so Keycloak's back-channel logout can name this session.
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ sub: 'user-1', email: 'jane@x.com' }),
+      expect.objectContaining({ sub: 'user-1', email: 'jane@x.com', idpSid: 'kc-session-1' }),
     );
     const setCookie = res.headers.getSetCookie
       ? res.headers.getSetCookie().join(' | ')

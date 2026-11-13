@@ -9,7 +9,8 @@
  * Keycloak carries five attributes:
  *
  *   - `aggregator_id`      — reverse pointer to Postgres
- *   - `aggregator_type`    — `seeker` | `provider`, drives single-type enforcement
+ *   - `aggregator_type`    — multivalued: the profile types served. Its token
+ *                            claim decides which domains a request may act on
  *   - `phoneNumber`        — read by the OTP login authenticator
  *   - `decision_made`      — gates login at the auth middleware
  *   - `signalstack_org_id` — signalstack organisation id, written after the
@@ -21,7 +22,7 @@
 export const KC_ATTR = {
   /** Postgres aggregator UUID — reverse pointer from KC to our DB. */
   AGGREGATOR_ID: 'aggregator_id',
-  /** `seeker` or `provider`. Limits an aggregator to its registered participant type. */
+  /** Multivalued: the network domain ids the coordinator serves. Absent when it serves none. */
   AGGREGATOR_TYPE: 'aggregator_type',
   /** Applicant phone in E.164. Read by the OTP login authenticator. */
   PHONE_NUMBER: 'phoneNumber',

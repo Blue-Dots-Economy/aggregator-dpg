@@ -2,6 +2,7 @@ import { getRequestConfig } from 'next-intl/server';
 import { cookies, headers } from 'next/headers';
 import { resolveLocale, LOCALE_COOKIE } from './config';
 import { applyTerms } from './terms';
+import { readJsonObject } from '../lib/json-object';
 
 /** Message catalogues with their terms filled, one per locale, built on first use. */
 const catalogues = new Map<string, Record<string, unknown>>();
@@ -15,7 +16,8 @@ const catalogues = new Map<string, Record<string, unknown>>();
 async function loadMessages(locale: string): Promise<Record<string, unknown>> {
   const cached = catalogues.get(locale);
   if (cached) return cached;
-  const raw = (await import(`./messages/${locale}.json`)).default as Record<string, unknown>;
+  const raw = readJsonObject((await import(`./messages/${locale}.json`)).default);
+  if (!raw) throw new Error(`message catalogue for ${locale} is not a JSON object`);
   const filled = applyTerms(raw, locale);
   catalogues.set(locale, filled);
   return filled;

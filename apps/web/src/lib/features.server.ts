@@ -10,6 +10,7 @@
 
 import 'server-only';
 import { cache } from 'react';
+import { z } from 'zod';
 import { logger } from './logger';
 
 /** Deploy-time capability flags surfaced by `GET /v1/aggregator-config`. */
@@ -23,6 +24,13 @@ const FETCH_TIMEOUT_MS = 5000;
 
 /** Fail-safe default when the api is unreachable or omits the field. */
 const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false, invite_role_label: null };
+
+/** The `features` block of `/v1/aggregator-config`. A missing flag is off. */
+const FeaturesConfigSchema = z.object({
+  features: z.object({ custom_roles: z.boolean().optional() }).optional(),
+  // Another shape reads as no label, so the console falls back to its own.
+  organisation: z.object({ invite_role_label: z.string().optional() }).optional().catch(undefined),
+});
 
 /**
  * Logs a warning without ever throwing.
@@ -67,14 +75,20 @@ export const getAggregatorFeatures = cache(
         });
         return DEFAULT_FEATURES;
       }
-      const cfg = (await res.json()) as {
-        features?: { custom_roles?: unknown };
-        organisation?: { invite_role_label?: unknown };
-      };
-      const label = cfg.organisation?.invite_role_label;
+      const cfg = FeaturesConfigSchema.safeParse(await res.json());
+      if (!cfg.success) {
+        warnSafe({
+          operation: 'features.getAggregatorFeatures',
+          status: 'failure',
+          error: 'unexpected response shape',
+          latency_ms: Date.now() - start,
+        });
+        return DEFAULT_FEATURES;
+      }
+      const label = cfg.data.organisation?.invite_role_label;
       return {
-        custom_roles: cfg.features?.custom_roles === true,
-        invite_role_label: typeof label === 'string' && label.length > 0 ? label : null,
+        custom_roles: cfg.data.features?.custom_roles === true,
+        invite_role_label: label ? label : null,
       };
     } catch (err) {
       warnSafe({

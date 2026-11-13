@@ -137,6 +137,18 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(mailer.outbox).toHaveLength(0);
   });
 
+  it('accepts a landline but refuses a +91 number without 10 digits', async () => {
+    const send = (phone: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/support',
+        headers: { authorization: 'Bearer good-token' },
+        payload: validBody({ phone }),
+      });
+    expect((await send('+911123456789')).statusCode).toBe(201);
+    expect((await send('+91935350600')).statusCode).toBe(400);
+  });
+
   it('accepts a submission with only a phone (no email) and adds no Reply-To', async () => {
     const body = validBody();
     delete (body as Record<string, unknown>).email;

@@ -156,6 +156,21 @@ describe('<OrgEditForm />', () => {
       expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('District');
     });
 
+    it('keeps a location row when the newer org drops the location before it', () => {
+      const second = {
+        geo: { type: 'Point' as const, coordinates: [76.6, 12.3] },
+        address: { streetAddress: '2 Lake Rd', addressLocality: 'Mysuru', addressRegion: 'KA' },
+      };
+      const first = baseOrg.locations[0]!;
+      const { rerender } = renderForm({ ...baseOrg, locations: [first, second] }, OWNER);
+      const rowBefore = screen.getByText('2 Lake Rd, Mysuru, KA').closest('li');
+      rerender(
+        form({ ...baseOrg, locations: [second], updated_at: '2026-02-01T00:00:00Z' }, OWNER),
+      );
+      expect(screen.queryByText('1 Main St, Bengaluru, KA')).toBeNull();
+      expect(screen.getByText('2 Lake Rd, Mysuru, KA').closest('li')).toBe(rowBefore);
+    });
+
     it('skips the network call and reports saved when nothing changed', async () => {
       global.fetch = respond({}, 200) as never;
       renderForm(baseOrg, OWNER);
@@ -205,9 +220,11 @@ describe('<OrgEditForm />', () => {
         fireEvent.change(screen.getByLabelText(/Website/), { target: { value } });
         save();
         expect(
-          await screen.findByText('Please enter a website starting with https://'),
+          await screen.findByText(
+            /^Invalid entry\. Please enter a website starting with https:\/\//,
+          ),
         ).toBeInTheDocument();
-        expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+        expect(screen.queryByRole('status')).toBeNull();
         expect(global.fetch).not.toHaveBeenCalled();
       },
     );
@@ -236,7 +253,7 @@ describe('<OrgEditForm />', () => {
       });
       save();
       expect(
-        await screen.findByText('Please enter a website starting with https://'),
+        await screen.findByText(/^Invalid entry\. Please enter a website starting with https:\/\//),
       ).toBeInTheDocument();
       expect(global.fetch).not.toHaveBeenCalled();
     });
@@ -295,8 +312,8 @@ describe('<OrgEditForm />', () => {
         target: { value: '27AAPFU0939F1ZV' },
       });
       save();
-      expect(await screen.findByText('Server says no.')).toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+      expect(await screen.findByText(/^Invalid entry\. Server says no\./)).toBeInTheDocument();
+      expect(screen.queryByRole('status')).toBeNull();
     });
 
     it('shows the name-taken error when the API rejects a rename', async () => {
@@ -307,6 +324,18 @@ describe('<OrgEditForm />', () => {
       });
       save();
       expect(await screen.findByText(messages.console.errors.name_taken)).toBeInTheDocument();
+    });
+
+    it('refreshes the page when the saved org cannot be read', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      global.fetch = respond({ id: baseOrg.id }, 200) as never;
+      renderForm(baseOrg, OWNER);
+      fireEvent.change(screen.getByLabelText(messages.console.org.name), {
+        target: { value: 'New Name' },
+      });
+      save();
+      expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+      expect(refresh).toHaveBeenCalled();
     });
 
     it('still renders the fixed fields when the schema cannot be loaded', () => {

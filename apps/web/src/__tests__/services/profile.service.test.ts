@@ -7,6 +7,7 @@ const apiResponse = {
   org_name: 'TRRAIN',
   actor_type: 'aggregator',
   type: null,
+  serves: [],
   url: null,
   contact: {
     name: 'Asha Rao',
@@ -152,5 +153,22 @@ describe('profileService', () => {
     const profile = await profileService.get();
     expect(profile.registered).toBe('');
     expect(profile.consent.lastReviewed).toBe('');
+  });
+
+  it('keeps every location key, because the profile form renders locations as received', async () => {
+    const location = {
+      geo: { type: 'Point', coordinates: [72.8777, 19.076], bbox: [72, 19, 73, 20] },
+      address: { addressLocality: 'Mumbai' },
+      label: 'Head office',
+    };
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ...apiResponse, locations: [location] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+    const raw = await profileService.getRaw();
+    expect(raw.locations).toEqual([location]);
   });
 });

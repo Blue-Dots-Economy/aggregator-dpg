@@ -13,10 +13,12 @@
 
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getUserStore } from '../services/user-store/index.js';
+import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -28,12 +30,12 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
-interface LinkMetrics {
+type LinkMetrics = {
   total: number;
   passed: number;
   failed: number;
   skipped: number;
-}
+};
 
 const ZERO_METRICS: LinkMetrics = { total: 0, passed: 0, failed: 0, skipped: 0 };
 
@@ -175,7 +177,8 @@ const ListLinksResponseSchema = z
   })
   .passthrough();
 
-export async function registerRegistrationLinksRoutes(app: FastifyInstance): Promise<void> {
+export async function registerRegistrationLinksRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/links/create',
     {
@@ -203,7 +206,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       const start = Date.now();
 
       // Validated by the route schema; `expires_at` is a Date or null.
-      const body = req.body as z.infer<typeof CreateLinkBodySchema>;
+      const body = req.body;
       const networkCfg = await getNetworkConfig();
       if (!networkCfg.domainIds.includes(body.domain)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -211,7 +214,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           fields: { domain: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, body.domain);
+      await requireServedDomain(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
       // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
@@ -346,7 +349,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       const start = Date.now();
 
       // Validated and defaulted by the route schema.
-      const { status, limit, offset } = req.query as z.infer<typeof ListQuerySchema>;
+      const { status, limit, offset } = req.query;
 
       const orgSlug = await resolveOrgSlug(auth.aggregatorId);
       const result = await getRegistrationLinksStore().list(auth.aggregatorId, {
@@ -407,7 +410,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       const auth = await requireAuth(req);
       // Validated by the route schemas; the `.strict()` schema rejects unknown keys
       // such as registration_mode.
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.update',
         actor: auth.userId,
@@ -415,7 +418,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      const body = req.body as z.infer<typeof UpdateLinkBodySchema>;
+      const body = req.body;
 
       const store = getRegistrationLinksStore();
       const found = await store.findById(linkId, auth.aggregatorId);
@@ -519,7 +522,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const { id: linkId } = req.params;
 
       const result = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
       if (!result.ok) {
@@ -554,7 +557,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.activate',
         actor: auth.userId,
@@ -618,7 +621,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.deactivate',
         actor: auth.userId,
@@ -688,7 +691,7 @@ async function buildResponse(
   row: RegistrationLink,
   orgSlug: string,
   overrides: ResponseOverrides = {},
-): Promise<Record<string, unknown>> {
+): Promise<z.input<typeof LinkResponseSchema>> {
   // Drafts and retired links have no public URL.
   const isPublished = row.status === 'live';
   const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
@@ -753,24 +756,4 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
-}
-
-/**
- * Rejects a link domain (seeker | provider) that does not match the
- * aggregator's registered type (`aggregator_type` claim).
- */
-function enforceAggregatorType(auth: AuthContext, domain: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== domain) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: domain,
-      },
-    });
-  }
 }

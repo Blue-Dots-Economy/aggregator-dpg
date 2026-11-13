@@ -6,6 +6,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
@@ -42,7 +43,8 @@ async function probe(fn: () => Promise<unknown>, ms = 2000): Promise<'ok' | 'err
   }
 }
 
-export async function registerHealthRoutes(app: FastifyInstance): Promise<void> {
+export async function registerHealthRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/health/live',
     {

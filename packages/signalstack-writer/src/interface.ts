@@ -162,7 +162,7 @@ export interface SignalStackUpsertAggregatorInput {
   /**
    * Signalstack domain ids this aggregator org serves (`seeker`, `provider`, …).
    * The dashboard returns `NO_DOMAINS_CONFIGURED` when this is empty. Pass
-   * every domain of the active network.
+   * the network domains the coordinator serves.
    */
   domains?: string[];
   metadata?: Record<string, unknown>;
@@ -250,9 +250,10 @@ export interface SignalStackDashboardDomainSlice {
 /**
  * Cache metadata for the rollup. `refreshed` is true when signalstack just
  * recomputed, false when it came from cache within `ttl_seconds`.
+ * `last_computed_at` is null when signalstack has not computed the rollup yet.
  */
 export interface SignalStackDashboardMetadata {
-  last_computed_at: string;
+  last_computed_at: string | null;
   ttl_seconds: number;
   refreshed: boolean;
 }
@@ -342,7 +343,8 @@ export interface SignalStackDecryptedProfileRow {
   item_domain: string;
   item_type: string;
   item_state: Record<string, unknown>;
-  contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
+  contact?:
+    Partial<Record<SignalStackContactCanonical, SignalStackContactValue | undefined>> | undefined;
   created_at: string;
   updated_at: string;
 }
@@ -396,7 +398,7 @@ export interface SignalStackProbeUserInput {
  * user both read as `owned_elsewhere`. The probe is only a UX hint; the
  * `onboard` response decides the real outcome.
  */
-export interface SignalStackProbeUserResult {
+export type SignalStackProbeUserResult = {
   user_exists: boolean;
   owned_elsewhere: boolean;
   lifecycle_summary: {
@@ -405,7 +407,7 @@ export interface SignalStackProbeUserResult {
       lifecycle_status: 'draft' | 'live' | 'paused';
     };
   } | null;
-}
+};
 
 /**
  * Provides a bearer token for Signals client-credentials auth, used instead

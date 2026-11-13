@@ -35,6 +35,8 @@ lerna-debug.log*
 
 # ── Test & coverage ───────────────────────────────────────────────────────────
 coverage/
+# Fixture folder the ESLint config tests create and remove.
+.lint-cycle-*/
 *.lcov
 .nyc_output/
 

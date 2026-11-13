@@ -97,6 +97,34 @@ describe('patchTypeFromNetwork', () => {
     expect(uiSchema.type).toEqual({ 'ui:enumNames': ['Seekers', 'Providers'] });
   });
 
+  it('patches the item choices and labels of a list field', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          domains: [
+            { id: 'seeker', label: 'Seekers' },
+            { id: 'provider', label: 'Providers' },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const schema = {
+      properties: { type: { type: 'array', items: { type: 'string', enum: ['old'] } } },
+    } as never;
+    const uiSchema: Record<string, unknown> = { type: { 'ui:widget': 'checkboxes' } };
+    await patchTypeFromNetwork(schema, uiSchema);
+
+    const props = (schema as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props.type!.items).toEqual({ type: 'string', enum: ['seeker', 'provider'] });
+    expect(props.type!.enum).toBeUndefined();
+    expect(uiSchema.type).toEqual({
+      'ui:widget': 'checkboxes',
+      items: { 'ui:enumNames': ['Seekers', 'Providers'] },
+    });
+  });
+
   it('falls back to the id when a domain has no label', async () => {
     globalThis.fetch = vi
       .fn()
@@ -152,6 +180,47 @@ describe('patchTypeFromNetwork', () => {
       ) as unknown as typeof fetch;
     const schema = { properties: {} } as never;
     await expect(patchTypeFromNetwork(schema, {})).resolves.toBeUndefined();
+  });
+  it.each([
+    ['a domain with no id', { domains: [{ label: 'Seekers' }] }],
+    ['a numeric id', { domains: [{ id: 7, label: 'Seekers' }] }],
+    ['domains as an object', { domains: { seeker: 'Seekers' } }],
+  ])('leaves the schema and UI schema untouched for %s', async (_label, body) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(body), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const schema = { properties: { type: { enum: ['seeker'] } } } as never;
+    const uiSchema: Record<string, unknown> = {};
+    await patchTypeFromNetwork(schema, uiSchema);
+    const props = (schema as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props.type!.enum).toEqual(['seeker']);
+    expect(uiSchema.type).toBeUndefined();
+  });
+
+  it('replaces a UI schema `type` entry that is not an object', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const schema = { properties: { type: {} } } as never;
+    const uiSchema: Record<string, unknown> = { type: 'select' };
+    await patchTypeFromNetwork(schema, uiSchema);
+    expect(uiSchema.type).toEqual({ 'ui:enumNames': ['Seekers'] });
+  });
+
+  it('keeps the other keys of a UI schema `type` entry', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ domains: [{ id: 'seeker', label: 'Seekers' }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    const schema = { properties: { type: {} } } as never;
+    const uiSchema: Record<string, unknown> = { type: { 'ui:widget': 'radio' } };
+    await patchTypeFromNetwork(schema, uiSchema);
+    expect(uiSchema.type).toEqual({ 'ui:widget': 'radio', 'ui:enumNames': ['Seekers'] });
   });
 });
 

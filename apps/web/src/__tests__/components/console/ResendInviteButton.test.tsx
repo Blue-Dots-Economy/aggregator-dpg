@@ -27,7 +27,11 @@ describe('ResendInviteButton', () => {
   it('re-invites a user into the org and refreshes the list', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ sent: 1 }), { status: 200 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify({ sent: 1, resent: 0, invalid: [], existing: [] }), {
+          status: 200,
+        }),
+      );
     show('user');
     fireEvent.click(screen.getByRole('button', { name: 'Resend the invite to late@x.org' }));
     await waitFor(() => expect(screen.getByText('Sent')).toBeInTheDocument());
@@ -43,7 +47,11 @@ describe('ResendInviteButton', () => {
   it('re-invites an organisation under the parent', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ sent: 1 }), { status: 200 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify({ sent: 1, resent: 0, invalid: [], existing: [] }), {
+          status: 200,
+        }),
+      );
     show('org');
     fireEvent.click(screen.getByRole('button', { name: /Resend/ }));
     await waitFor(() => expect(screen.getByText('Sent')).toBeInTheDocument());
