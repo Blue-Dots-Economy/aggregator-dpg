@@ -27,7 +27,7 @@ import {
   signalsUiUrlWarnings,
   onboardingEnabledWarnings,
 } from './config.js';
-import { loggerOptions } from './logger.js';
+import { loggableUrl, loggerOptions } from './logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAggregatorRegistrationRoutes } from './routes/aggregator-registrations.js';
 import { registerAggregatorMaintenanceRoutes } from './routes/aggregator-maintenance.js';
@@ -187,22 +187,21 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.addHook('onRequest', async (req, reply) => {
     reply.header(REQUEST_ID_HEADER, req.id);
-    req.log.info(
-      { event: 'request.start', method: req.method, url: req.url },
-      `→ ${req.method} ${req.url}`,
-    );
+    const url = loggableUrl(req.url);
+    req.log.info({ event: 'request.start', method: req.method, url }, `→ ${req.method} ${url}`);
   });
 
   app.addHook('onResponse', async (req, reply) => {
+    const url = loggableUrl(req.url);
     req.log.info(
       {
         event: 'request.end',
         method: req.method,
-        url: req.url,
+        url,
         statusCode: reply.statusCode,
         latency_ms: Math.round(reply.elapsedTime),
       },
-      `← ${req.method} ${req.url} ${reply.statusCode}`,
+      `← ${req.method} ${url} ${reply.statusCode}`,
     );
   });
 

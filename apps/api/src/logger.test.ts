@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import pino from 'pino';
 import { Writable } from 'node:stream';
-import { REDACT_PATHS, loggerOptions } from './logger.js';
+import { REDACT_PATHS, loggableUrl, loggerOptions } from './logger.js';
 
 /** Captures one log line written by a pino logger using the given redact paths. */
 function capture(paths: string[], obj: Record<string, unknown>): string {
@@ -68,5 +68,19 @@ describe('api logger redaction', () => {
     expect(out).not.toContain('req@x.io');
     expect(out).not.toContain('9998887777');
     expect(out).toContain('[REDACTED]');
+  });
+});
+
+describe('loggableUrl', () => {
+  it('masks the token query parameter wherever it sits', () => {
+    expect(loggableUrl('/v1/user/invite/read?token=eyJ.abc.def')).toBe(
+      '/v1/user/invite/read?token=[REDACTED]',
+    );
+    expect(loggableUrl('/x?a=1&token=secret&b=2')).toBe('/x?a=1&token=[REDACTED]&b=2');
+  });
+
+  it('leaves a URL without a token unchanged', () => {
+    expect(loggableUrl('/v1/org/search?tokenish=1')).toBe('/v1/org/search?tokenish=1');
+    expect(loggableUrl('/health/live')).toBe('/health/live');
   });
 });
