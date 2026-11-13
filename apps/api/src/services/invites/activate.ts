@@ -64,6 +64,16 @@ async function orgOrRoot(id: string): Promise<Organisation | null | undefined> {
   return root.value?.id === id ? root.value : null;
 }
 
+/** Logs why an activation stopped and returns that outcome. */
+function refused(
+  log: FastifyBaseLogger,
+  outcome: ActivateOutcome,
+  detail: Record<string, unknown>,
+): ActivateOutcome {
+  log.warn({ status: 'failure', outcome: outcome.kind, ...detail }, 'invite activation stopped');
+  return outcome;
+}
+
 /** Mails the inviting org's owner; a failed send is logged, not raised. */
 async function mailInviter(
   to: string,
@@ -92,7 +102,13 @@ async function activateCoordinator(
   const check = invitedAndVerified(kc);
   if (check !== 'ok') return { kind: check };
   const org = await orgOrRoot(row.parentOrgId);
-  if (org === undefined) return { kind: 'unavailable', dependency: 'db' };
+  if (org === undefined) {
+    return refused(
+      log,
+      { kind: 'unavailable', dependency: 'db' },
+      { sub_operation: 'orgStore.findById', org_id: row.parentOrgId },
+    );
+  }
   if (org === null) return { kind: 'org_inactive' };
 
   const outcome = await decideCoordinator({
@@ -141,7 +157,13 @@ async function activateOrg(
   const check = invitedAndVerified(kc);
   if (check !== 'ok') return { kind: check };
   const parent = await orgOrRoot(org.parentId);
-  if (parent === undefined) return { kind: 'unavailable', dependency: 'db' };
+  if (parent === undefined) {
+    return refused(
+      log,
+      { kind: 'unavailable', dependency: 'db' },
+      { sub_operation: 'orgStore.findById', org_id: org.parentId },
+    );
+  }
   if (parent === null) return { kind: 'org_inactive' };
 
   const outcome = await decideOrg({
@@ -189,19 +211,45 @@ export async function activateInvitedAccount(
 ): Promise<ActivateOutcome> {
   const scoped = log.child({ operation: 'invite.activate' });
   const kc = await getIdpAdmin().findById(subject);
-  if (!kc.ok) return { kind: 'unavailable', dependency: 'idp' };
-  if (!kc.value) return { kind: 'not_found' };
+  if (!kc.ok) {
+    return refused(
+      scoped,
+      { kind: 'unavailable', dependency: 'idp' },
+      { sub_operation: 'idp.findById', code: kc.error.code },
+    );
+  }
+  if (!kc.value) return refused(scoped, { kind: 'not_found' }, { reason: 'no_idp_user' });
 
   const aggregatorId = kc.value.attributes?.[KC_ATTR.AGGREGATOR_ID]?.[0];
   if (aggregatorId) {
     const row = await getUserStore().findById(aggregatorId);
-    if (!row.ok) return { kind: 'unavailable', dependency: 'db' };
-    if (!row.value) return { kind: 'not_found' };
+    if (!row.ok) {
+      return refused(
+        scoped,
+        { kind: 'unavailable', dependency: 'db' },
+        { sub_operation: 'userStore.findById', code: row.error.code },
+      );
+    }
+    if (!row.value) {
+      return refused(
+        scoped,
+        { kind: 'not_found' },
+        { reason: 'no_coordinator', aggregator_id: aggregatorId },
+      );
+    }
     return activateCoordinator(row.value, kc.value, scoped, requestId);
   }
 
   const owned = await getOrganisationStore().findByOwnerEmail(kc.value.email.toLowerCase());
-  if (!owned.ok) return { kind: 'unavailable', dependency: 'db' };
-  if (owned.value?.ownerKcSub !== subject) return { kind: 'not_found' };
+  if (!owned.ok) {
+    return refused(
+      scoped,
+      { kind: 'unavailable', dependency: 'db' },
+      { sub_operation: 'orgStore.findByOwnerEmail', code: owned.error.code },
+    );
+  }
+  if (owned.value?.ownerKcSub !== subject) {
+    return refused(scoped, { kind: 'not_found' }, { reason: 'no_owned_org' });
+  }
   return activateOrg(owned.value, kc.value, scoped);
 }
