@@ -267,7 +267,7 @@ export const UserInviteResponseSchema = z.object({
   sent: z.number().int(),
   resent: z.number().int(),
   invalid: z.array(z.object({ email: z.string(), reason: z.string() })),
-  /** Addresses already coordinators of this org (nothing mailed). */
+  /** Addresses already in this org, or owning an org directly under it (nothing mailed). */
   existing: z.array(z.object({ email: z.string(), status: z.string() })),
 });
 export type UserInviteResponse = z.infer<typeof UserInviteResponseSchema>;

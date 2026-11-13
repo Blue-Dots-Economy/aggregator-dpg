@@ -781,7 +781,6 @@ describe('PostgresOrganisationStore — tree rules', () => {
 
   it.each([
     ['create', (s: PostgresOrganisationStore) => s.create(makeInput(), rules)],
-    ['revive', (s: PostgresOrganisationStore) => s.revive('o1', 'p1', rules)],
     ['move', (s: PostgresOrganisationStore) => s.move('o1', { parentId: 'p1' }, rules)],
     ['setKnownAs', (s: PostgresOrganisationStore) => s.setKnownAs('o1', 'state', 'p1', 'u1')],
     ['setKnownAsValues', (s: PostgresOrganisationStore) => s.setKnownAsValues('o1', [], 'u1')],
@@ -848,7 +847,7 @@ describe('PostgresOrganisationStore — tree rules', () => {
   });
 });
 
-describe('PostgresOrganisationStore — move and revive statements', () => {
+describe('PostgresOrganisationStore — move statements', () => {
   const dialect = new PgDialect();
   const baseRules: TreeRules = {
     maxDepth: 5,
@@ -909,9 +908,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     list?: KnownAsValues;
     /** setKnownAs / setKnownAsValues: the target row. */
     target?: Record<string, unknown> | null;
-    /** revive: the rejected row, a child, the parent, live counts. */
-    rejected?: { status: string } | null;
-    child?: boolean;
+    /** The parent row and the live count. */
     parent?: NodeRow;
     live?: number;
     read?: Organisation;
@@ -964,16 +961,12 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       if (forArg === 'update') return [{ id: 'locked' }];
       if (forArg === 'share') return script.parent ? [script.parent] : [];
       if (!chain.some((c) => c.method === 'where')) return script.tree ?? [];
-      if (fields.length === 1 && fields[0] === 'status') {
-        return script.rejected ? [script.rejected] : [];
-      }
       if (fields.length === 1 && fields[0] === 'knownAs') {
         return [{ knownAs: script.current ?? 'aggregator' }];
       }
       if (fields.includes('slug') && !fields.includes('depth')) {
         return script.target ? [script.target] : [];
       }
-      if (fields.length === 1 && fields[0] === 'id') return script.child ? [{ id: 'kid' }] : [];
       if (fields.length === 1 && fields[0] === 'n') return [{ n: script.live ?? 0 }];
       return [];
     };
@@ -1107,32 +1100,6 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect(r.ok && r.value.movedCount).toBe(0);
     expect(s.sets).toEqual([]);
     expect(depthUpdate(s)).toBeNull();
-  });
-
-  it('revive refuses a rejected org that has a child (NOT_MOVABLE) and writes nothing', async () => {
-    const s = scripted({ rejected: { status: 'inactive' }, child: true });
-    const r = await s.store.revive('a', 'c', baseRules);
-    expect(!r.ok && r.error.code).toBe('NOT_MOVABLE');
-    expect(s.sets).toEqual([]);
-  });
-
-  it("revive places the org under the new parent, one level down, with the parent's default", async () => {
-    const s = scripted({
-      rejected: { status: 'inactive' },
-      parent: node('c', 'root', 1),
-      list: [{ key: 'ward', name: 'Ward', default: true }],
-      live: 1,
-      read: makeRow({ id: 'a', depth: 2, parentId: 'c', status: 'pending' }),
-    });
-    const r = await s.store.revive('a', 'c', baseRules);
-    expect(r.ok && r.value.parentId).toBe('c');
-    expect(s.sets[0]).toMatchObject({
-      parentId: 'c',
-      depth: 2,
-      knownAs: 'ward',
-      status: 'pending',
-      rejectedAt: null,
-    });
   });
 
   it('setKnownAs writes a key of the parent list with the writer', async () => {
@@ -1349,11 +1316,5 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       { key: 'b', name: 'B' },
       { key: 'a', name: 'A', default: true },
     ]);
-  });
-
-  it('revive answers NOT_FOUND when the org is no longer rejected', async () => {
-    const s = scripted({ rejected: null });
-    const r = await s.store.revive('a', 'c', baseRules);
-    expect(!r.ok && r.error.code).toBe('NOT_FOUND');
   });
 });

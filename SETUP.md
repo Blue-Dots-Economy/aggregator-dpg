@@ -356,7 +356,7 @@ apps/
         client.ts          pg.Pool + Drizzle singleton
         migrate.ts         Migration runner
       routes/
-        aggregator-registrations.ts   POST /v1/aggregator-registrations/create
+        aggregator-registrations.ts   POST /v1/user/invite/accept, GET /v1/user/invite/read
         aggregator-approvals.ts       Admin-side review pages + decision POST
         aggregator-profile.ts         GET/PATCH /v1/aggregators/profile/me
         health.ts

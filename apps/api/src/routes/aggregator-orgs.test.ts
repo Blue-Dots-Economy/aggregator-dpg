@@ -758,9 +758,6 @@ describe('aggregator-orgs routes', () => {
       async deleteIfPending(): Promise<OrgStoreResult<'not_pending'>> {
         return { ok: true, value: 'not_pending' };
       }
-      async revive(): Promise<OrgStoreResult<Organisation>> {
-        return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
-      }
       async move(): Promise<
         OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }>
       > {

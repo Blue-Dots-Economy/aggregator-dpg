@@ -6,8 +6,9 @@
  * de-duplicate, then mint or refresh a 14-day invite and mail it. If the
  * address already has an account:
  *
- *   - a coordinator of this org, on a coordinator invite: nothing is mailed;
- *     reported as `existing`;
+ *   - a coordinator of this org, on a coordinator invite, or the owner of an
+ *     org directly under this one, on an org invite: nothing is mailed;
+ *     reported as `existing` with its status;
  *   - any other account: a "you already have an account" mail is sent and an
  *     invite row is still kept, so the counts look the same as for a fresh
  *     address and cannot be used to probe other orgs' members.
@@ -121,7 +122,7 @@ async function resolveInviteJti(
 /** Who already holds an address, as far as inviting is concerned. */
 type AccountMatch =
   | { kind: 'none' }
-  | { kind: 'own_coordinator'; status: AggregatorStatus }
+  | { kind: 'own_member'; status: AggregatorStatus }
   | { kind: 'other_account' }
   | { kind: 'error' };
 
@@ -133,7 +134,7 @@ async function accountFor(email: string, orgId: string, role: InviteRole): Promi
   if (!coordinator.ok) return { kind: 'error' };
   if (coordinator.value) {
     return role === 'coordinator' && coordinator.value.parentOrgId === orgId
-      ? { kind: 'own_coordinator', status: coordinator.value.status }
+      ? { kind: 'own_member', status: coordinator.value.status }
       : { kind: 'other_account' };
   }
   const orgStore = getOrganisationStore();
@@ -143,6 +144,9 @@ async function accountFor(email: string, orgId: string, role: InviteRole): Promi
     orgStore.findDefault(),
   ]);
   if (!owner.ok || !root.ok || !def.ok) return { kind: 'error' };
+  if (role === 'org_owner' && owner.value?.parentId === orgId) {
+    return { kind: 'own_member', status: owner.value.status };
+  }
   if (owner.value || root.value?.ownerEmail === email || def.value?.ownerEmail === email) {
     return { kind: 'other_account' };
   }
@@ -263,7 +267,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
     const account = await accountFor(email, ctx.orgId, ctx.role); // NOSONAR typescript:S9382 — sequential by design
     if (account.kind === 'error') {
       summary.invalid.push({ email: recipient.email, reason: 'store_error' });
-    } else if (account.kind === 'own_coordinator') {
+    } else if (account.kind === 'own_member') {
       summary.existing.push({ email: recipient.email, status: account.status });
     } else if (account.kind === 'other_account') {
       tally(summary, recipient.email, await inviteExistingAccount(ctx, email)); // NOSONAR typescript:S9382 — sequential by design

@@ -1,6 +1,6 @@
 ---
 name: aggregator-e2e
-description: Use when the user wants to end-to-end test the aggregator locally — launches the stack (docker + mailpit) and exercises every flow from the UI in a real browser plus the backend API directly. Covers org + coordinator registration (flat, org-select, invite), approve/reject, OTP login, dashboard, profile, registration links + public submit, bulk CSV upload, contact support, and campaign jobs, with the key negative cases. Triggers: "test all the flows", "full e2e", "run the aggregator end to end", "test everything from the UI".
+description: Use when the user wants to end-to-end test the aggregator locally — launches the stack (docker + mailpit) and exercises every flow from the UI in a real browser plus the backend API directly. Covers invite-only onboarding (invite, register, email-code activation), OTP login, dashboard, profile, registration links + public submit, bulk CSV upload, contact support, and campaign jobs, with the key negative cases. Triggers: "test all the flows", "full e2e", "run the aggregator end to end", "test everything from the UI".
 ---
 
 # Aggregator DPG — full-stack E2E
@@ -60,10 +60,9 @@ docker-compose.dev.yml --profile storage up -d --build`. Three things that matte
   mailpit (`http://localhost:8025`) instead of trying real SMTP. Without it the
   api falls back to whatever `SMTP_HOST` is in `apps/api/.env` — commonly a real
   Gmail host, which fails auth and makes the login/approval flows untestable.
-- **Organisations are always on (migration 0028).** `/v1/orgs*` and
-  `/admin/v1/orgs*` are always registered; there is no `ORG_HIERARCHY_ENABLED`
-  any more. Every coordinator belongs to an org — the fixed **Default** org
-  (`slug = 'default'`) when it registered without one.
+- **Onboarding is by invite only.** There is no public sign-up: an owner invites
+  (`/v1/user/invite`, `/v1/org/invite`), the invitee registers from the link and
+  becomes active after signing in with the emailed code (`/v1/user/activate`).
 - **`--build` is required, not optional.** `NEXT_PUBLIC_*` is baked into the web
   image at build time.
 
@@ -81,30 +80,23 @@ ok "health/ready"           "$(code $API_URL/health/ready)" 200
 ok "aggregator-config"      "$(code $API_URL/v1/aggregator-config)" 200
 ok "support/config authed"  "$(code $API_URL/v1/support/config)" 401
 ok "dashboard needs auth"   "$(code $API_URL/v1/dashboard/items)" 401
-ok "orgs route registered"  "$(code $API_URL/v1/orgs)" 401   # 404 ⇒ flag didn't take
+ok "org routes registered"  "$(code $API_URL/v1/org/hierarchy)" 401
 ok "unknown route 404"      "$(code $API_URL/v1/nope)" 404
 ```
 
-Then the registration contract. Submit is service-authed, so drive it through
-the web BFF (`/api/aggregator/register`), which attaches the service token — that
-also covers the BFF proxy itself:
-
-```bash
-BODY_OK='{"name":"E2E '"$E2E_TAG"'","type":"seeker","contact":{"name":"E2E Person","phone":"+919800000001","email":"'"$E2E_TAG"'-a@example.org"},"consent":{"value":true,"given_at":"2026-01-01T00:00:00Z","valid_till":"2027-01-01T00:00:00Z"},"org_id":"'"$ORG_ID"'"}'
-ok "submit (org select)" "$(code -X POST -H 'content-type: application/json' -d "$BODY_OK" $BASE_URL/api/aggregator/register)" 201
-ok "duplicate email"     "$(code -X POST -H 'content-type: application/json' -d "$BODY_OK" $BASE_URL/api/aggregator/register)" 200   # reclaim: re-sends the review link
-ok "schema violation"    "$(code -X POST -H 'content-type: application/json' -d '{"name":"x"}' $BASE_URL/api/aggregator/register)" 400
-```
+Then the invite contract. Accept is service-authed, so drive it through the web
+BFF (`/api/invite/user/accept`, `/api/invite/org/accept`), which attaches the
+service token. Mint an invite as an owner first (Phase 3, flow 2) and take the
+`invite=` token from the mail in mailpit.
 
 **Negatives that have each been a real bug — keep them:**
 
-| Case                                                          | Expect                                                  | Why it matters                                                                                                                                                                                                                                               |
-| ------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Same invite, 5 **concurrent** submits, distinct emails/phones | exactly one 201, rest `409 INVITE_ALREADY_USED`         | The invite is the only volume bound on a forwarded link. A read-then-act pre-check passed all five and created five registrations (#718 review). Fire them with `&` + `wait`, not sequentially — sequential submits only prove the row is no longer pending. |
-| Duplicate **phone** on an invited submit                      | `409 PHONE_EXISTS` **and** invite back to `pending`     | H4: an ordinary user error must not burn a one-time link. Check the row, not just the status code.                                                                                                                                                           |
-| Re-register a **rejected** applicant inside the window        | `409 REGISTRATION_COOLING` + `error.fields.retry_after` | Measured from write-once `rejected_at`, never `updated_at`.                                                                                                                                                                                                  |
-| Spent invite, **different** email and phone                   | `409 INVITE_ALREADY_USED`                               | The unique constraints can't catch this — #701 leaves the invited email non-enforcing.                                                                                                                                                                       |
-| Approval token bound to org A used on org B's coordinator     | rejected                                                | Data-level invariant, enforced regardless of the feature flag.                                                                                                                                                                                               |
+| Case                                                                  | Expect                                              | Why it matters                                                                                                                                                       |
+| --------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Same invite, 5 **concurrent** accepts, invited email, distinct phones | exactly one 201, rest `409 INVITE_ALREADY_USED`     | The invite is the only volume bound on a forwarded link. Fire them with `&` + `wait`, not sequentially — sequential accepts only prove the row is no longer pending. |
+| Duplicate **phone** on an accept                                      | `409 PHONE_EXISTS` **and** invite back to `pending` | An ordinary user error must not burn a one-time link. Check the row, not just the status code.                                                                       |
+| Accept with **another** email than the invited one                    | `400 INVITE_EMAIL_MISMATCH`, invite still `pending` | The invited address is what the email code proves.                                                                                                                   |
+| Activate before verifying the email                                   | `403 EMAIL_NOT_VERIFIED`, account still `pending`   | Only the emailed code proves the address.                                                                                                                            |
 
 Verify the invite side-effects in the DB, not just the response:
 
@@ -121,8 +113,7 @@ Remaining API groups, same shape — assert status **and** the persisted effect:
   `/v1/bulk-uploads/:id/errors.csv`; `/v1/support/config` + `/v1/support`;
   `/v1/campaign/{export,voice,email}` + job poll;
   `/v1/dashboard/items` incl. `?lifecycle=` and `meta.tiles`;
-  `/admin/v1/invites` (valid grant mints; **expired** grant mints nothing and
-  re-mails a fresh grant to the DB-stored owner email only).
+  `/v1/user/invite` + `/v1/org/invite` (owner token; out-of-reach org → 404).
 
 ## Phase 3 — UI suite
 
@@ -137,21 +128,16 @@ when something fails.
 
 **Flow order matters — later flows need earlier ones:**
 
-1. **Org registration** — `/register`, organisation tab → submit → review mail in
-   mailpit → open review URL → approve → org `active`, owner enabled + `org_owner`.
-
-> **Review mail routing.** A coordinator **with a parent org** routes to that
-> org's **owner email**; only the flat flow goes to `ADMIN_EMAILS`
-> (`reviewer@bluedots.local`). Grepping mailpit for the wrong recipient looks
-> exactly like "no mail arrived" — use `mail_newest_recipient` when unsure.
-
-2. **Owner invites a coordinator** — `/register/invite` with the grant link from
-   the owner's mail → add a recipient → invite mail sent.
-3. **Coordinator registration, all three entry paths** — flat (flag off is a
-   separate run), org-selector `/register/coordinator`, and invite
-   `/register/coordinator?invite=<token>`. Assert the invite banner names the org.
-4. **Approve + reject** — approve one, reject another, then confirm the rejected
-   applicant re-registering inside the window is refused with the cooling copy.
+1. **Invite an organisation** — sign in as the network admin → Onboarded
+   Organisations → Invite organisations → invite mail in mailpit → open the
+   link in a fresh context → register → sign in with the emailed code → the org
+   is `active` and its owner lands in the console.
+2. **Invite a user** — as that owner, My Team → Invite users → mail → register
+   from the link → emailed code → the user is `active` and listed in My Team.
+3. **Waiting states** — an invite not opened yet and a registration not verified
+   yet both show as **Invited** in My Team and Onboarded Organisations.
+4. **Broken links** — an expired, a used and a tampered link each show their
+   message instead of the form; `/register` without an invite says invite only.
 5. **OTP login** — `/login`, email → Keycloak mails a 6-digit code to mailpit →
    `mail_extract_otp` → enter → lands on `/dashboard`.
 6. **Dashboard + profile** — tiles, lifecycle filters, export; `/profile` renders

@@ -137,41 +137,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return { ok: true, value: this.view(row) };
   }
 
-  revive(
-    id: string,
-    parentId: string | undefined,
-    rules: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    return this.withTreeLock(() => {
-      const org = this.byId.get(id);
-      if (org?.status !== 'inactive') return Promise.resolve(err('NOT_FOUND', id));
-      if (this.treeSnapshot().children.has(id)) {
-        return Promise.resolve(err('NOT_MOVABLE', 'a rejected org with child orgs'));
-      }
-      const parent = this.resolveParent(parentId);
-      if (parentId !== undefined && !parent) {
-        return Promise.resolve(
-          err('INVALID_PARENT', 'parent is not the root or an active organisation'),
-        );
-      }
-      const depth = (parent?.depth ?? 0) + 1;
-      const refused = this.limitRefusal(parent?.id ?? null, depth - 1, rules);
-      if (refused) return Promise.resolve(err(refused, 'organisation tree limit reached'));
-      const next: Organisation = {
-        ...org,
-        parentId: parent?.id ?? null,
-        parentName: parent?.displayName ?? null,
-        depth,
-        knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
-        status: 'pending',
-        rejectedAt: null,
-        updatedAt: new Date(),
-      };
-      this.byId.set(id, next);
-      return Promise.resolve({ ok: true, value: this.view(next) });
-    });
-  }
-
   move(
     id: string,
     change: { parentId: string },

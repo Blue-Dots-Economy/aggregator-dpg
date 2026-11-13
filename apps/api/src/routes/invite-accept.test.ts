@@ -286,6 +286,27 @@ describe('invite read and accept routes', () => {
       expect(again.statusCode).toBe(409);
     });
 
+    it('registers once when the same link is accepted several times at once', async () => {
+      const token = await inviteToken('coordinator');
+      const rs = await Promise.all(
+        [1, 2, 3, 4, 5].map((n) =>
+          accept('/v1/user/invite/accept', {
+            ...coordinatorBody,
+            contact: { ...coordinatorBody.contact, phone: `+91987654321${n}` },
+            invite: token,
+          }),
+        ),
+      );
+      expect(rs.filter((r) => r.statusCode === 201)).toHaveLength(1);
+      for (const r of rs.filter((x) => x.statusCode !== 201)) {
+        expect(r.statusCode).toBe(409);
+        expect(errorCode(r)).toBe('INVITE_ALREADY_USED');
+      }
+      const stored = await userStore.findByContactEmail(COORD_EMAIL);
+      expect(stored.ok && stored.value?.status).toBe('pending');
+      expect(await inviteStatus('inv-coordinator')).toBe('consumed');
+    });
+
     it('refuses an org owner as a coordinator with 409 OWNER_ALREADY_REGISTERED', async () => {
       orgStore.seed([
         buildOrganisation({

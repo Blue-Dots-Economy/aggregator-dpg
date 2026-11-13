@@ -183,57 +183,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     }
   }
 
-  async revive(
-    id: string,
-    parentId: string | undefined,
-    rules: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    const start = Date.now();
-    try {
-      const revived = await getDb().transaction(async (tx) => {
-        await lockTree(tx);
-        const [org] = await tx
-          .select({ status: organisations.status })
-          .from(organisations)
-          .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'inactive'))))
-          .limit(1);
-        if (!org) return null;
-        const [child] = await tx
-          .select({ id: organisations.id })
-          .from(organisations)
-          .where(eq(organisations.parentId, id))
-          .limit(1);
-        if (child) throw new TreeRefusalError('NOT_MOVABLE');
-        const parent = await resolveParent(tx, parentId);
-        const refused = newChildRefusal(
-          parent.depth,
-          await countLive(tx, parent.id),
-          await countLive(tx),
-          rules,
-        );
-        if (refused) throw new TreeRefusalError(refused);
-        const depth = parent.depth + 1;
-        await tx
-          .update(organisations)
-          .set({
-            parentId: parent.id,
-            depth,
-            knownAs: defaultKnownAsKey(await listOf(tx, parent.id)),
-            status: 'pending',
-            rejectedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(scoped(eq(organisations.id, id)));
-        return this.readIn(tx, id);
-      });
-      if (!revived) return errResult('NOT_FOUND', id);
-      return { ok: true, value: revived };
-    } catch (e) {
-      if (e instanceof TreeRefusalError) return refusal('orgStore.revive', e, start);
-      return mapDbError('orgStore.revive', e);
-    }
-  }
-
   async move(
     id: string,
     change: { parentId: string },
