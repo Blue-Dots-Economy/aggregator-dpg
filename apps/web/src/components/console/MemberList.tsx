@@ -98,7 +98,7 @@ export function MemberList({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-3 [&>*:last-child]:col-span-2 lg:[&>*:last-child]:col-span-1">
         {FILTERS.map((f) => {
           const Icon = TILE[kind][f].icon;
           return (
@@ -177,7 +177,7 @@ export function MemberList({
                       {c}
                     </th>
                   ))}
-                  <th>{t('org_home.col_action')}</th>
+                  <th className="hidden sm:table-cell">{t('org_home.col_action')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,7 +216,7 @@ export function MemberList({
                         {cell}
                       </td>
                     ))}
-                    <td className="whitespace-nowrap">
+                    <td className="hidden whitespace-nowrap sm:table-cell">
                       {r.href ? (
                         <Link
                           href={r.href}

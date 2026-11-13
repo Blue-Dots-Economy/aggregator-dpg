@@ -171,11 +171,13 @@ async function orgList(
       status: o.status,
       href: `/console/orgs/${o.id}`,
       cells: [
-        format.dateTime(new Date(o.created_at), {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
+        o.status === 'pending'
+          ? '—'
+          : format.dateTime(new Date(o.created_at), {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            }),
       ],
     }));
   const rows = [...joined, ...(await inviteRows(invites, 1))];
