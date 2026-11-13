@@ -64,6 +64,7 @@ function orgPageAccess(me: Me, data: OrgData) {
     isOwner: owner.id === me.user.id,
     // The API sends `parent` only to the parent's owner, the one who repairs access.
     canRepair: parent !== null && org.status === 'active',
+    contactShown: own || (parent !== null && org.status === 'pending'),
     // The Default org and the root never move; only pending and active orgs can.
     movable: aggregatorOrg && (org.status === 'pending' || org.status === 'active'),
   };
@@ -119,7 +120,7 @@ export default async function ConsoleOrgPage({
         />
       </div>
       <div className="flex flex-col gap-6">
-        {ownerCard(data, access.canRepair, t)}
+        {ownerCard(data, access, t)}
         {orgTiles(data, access, hierarchy?.limits.max_children ?? null, t)}
         {access.parent ? (
           <ConsoleSection title={t('org.known_as_pick_title')}>
@@ -187,7 +188,7 @@ function orgSubtitle(data: OrgData, t: Translate, format: Format) {
 }
 
 /** The owner's name and email, with access repair for the parent's owner. */
-function ownerCard(data: OrgData, canRepair: boolean, t: Translate) {
+function ownerCard(data: OrgData, access: ReturnType<typeof orgPageAccess>, t: Translate) {
   const { org, owner } = data;
   const label = owner.contact.name ?? owner.contact.email;
   return (
@@ -204,10 +205,12 @@ function ownerCard(data: OrgData, canRepair: boolean, t: Translate) {
           <div className="truncate font-bold text-ink-900">{label}</div>
           <div className="flex items-center gap-1 text-[12.5px] text-ink-500">
             <span className="truncate">{owner.contact.email}</span>
-            <CopyButton value={owner.contact.email} label={t('coordinator.copy_email')} />
+            {access.contactShown ? (
+              <CopyButton value={owner.contact.email} label={t('coordinator.copy_email')} />
+            ) : null}
           </div>
         </div>
-        {canRepair ? (
+        {access.canRepair ? (
           <div className="w-full sm:ml-auto sm:w-auto">
             <OwnerAccessRepair orgId={org.id} />
           </div>

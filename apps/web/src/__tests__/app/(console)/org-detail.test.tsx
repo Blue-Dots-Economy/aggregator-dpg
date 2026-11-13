@@ -49,7 +49,9 @@ vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
 vi.mock('@/components/console/OwnerAccessRepair', () => ({
   OwnerAccessRepair: () => <div data-testid="owner-access-repair" />,
 }));
-vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
+vi.mock('@/components/console/CopyButton', () => ({
+  CopyButton: () => <button type="button">copy-email</button>,
+}));
 vi.mock('@/components/console/KnownAsValuesEditor', () => ({
   KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
 }));
@@ -251,6 +253,30 @@ describe('console org detail — repair owner access', () => {
     mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
     await show();
     expect(screen.getByTestId('owner-access-repair')).toBeInTheDocument();
+  });
+
+  it("offers to copy the owner's email to the org's own owner", async () => {
+    mockPage(org());
+    await show();
+    expect(screen.getByRole('button', { name: 'copy-email' })).toBeInTheDocument();
+  });
+
+  it("hides the copy button from the parent's owner of an active child, whose email is masked", async () => {
+    mockPage(org({ depth: 2, status: 'active' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.queryByRole('button', { name: 'copy-email' })).toBeNull();
+  });
+
+  it("lets the parent's owner copy the email of a child still to verify, which is not masked", async () => {
+    mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.getByRole('button', { name: 'copy-email' })).toBeInTheDocument();
   });
 
   it("does not offer repair to the org's own owner", async () => {
