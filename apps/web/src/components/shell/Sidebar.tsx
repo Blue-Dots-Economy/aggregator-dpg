@@ -21,6 +21,12 @@ import {
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
 
+/** The icon of a group heading, drawn like a link's icon. */
+function SectionIcon({ name }: Readonly<{ name: IconName }>) {
+  const Ic = I[name];
+  return <Ic size={18} stroke={1.7} />;
+}
+
 /** One sidebar link. */
 export interface NavItem {
   to: string;
@@ -33,6 +39,8 @@ export interface NavItem {
   match?: string;
   /** Heading of the group the link sits in; consecutive links with the same heading share it. */
   section?: string;
+  /** Icon of the group heading, on the group's first link. */
+  sectionIcon?: IconName;
 }
 
 /** The account card at the foot of the sidebar. */
@@ -124,6 +132,8 @@ function BrandMark({
 interface SidebarPanelProps {
   brand: ReactNode;
   nav: NavItem[];
+  /** Show the "Overview" label above the links. */
+  overviewLabel: boolean;
   account: SidebarAccount;
   pathname: string | null;
   /** Rendered beside the brand, such as the drawer's close button on mobile. */
@@ -140,6 +150,7 @@ interface SidebarPanelProps {
 function SidebarPanel({
   brand,
   nav,
+  overviewLabel,
   account,
   pathname,
   headerAction,
@@ -190,9 +201,11 @@ function SidebarPanel({
       </div>
 
       <div className="px-3">
-        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
-          {t('overview')}
-        </div>
+        {overviewLabel ? (
+          <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
+            {t('overview')}
+          </div>
+        ) : null}
         <nav className="flex flex-col gap-0.5">
           {nav.map((n, i) => {
             const Ic = I[n.icon];
@@ -206,12 +219,13 @@ function SidebarPanel({
                     type="button"
                     aria-expanded={sectionOpen}
                     onClick={() => toggleSection(n.section ?? '')}
-                    className="flex w-full items-center justify-between rounded-[10px] px-3 pt-2.5 pb-1 text-left text-[12px] font-semibold text-(--bd-fg-muted) hover:text-(--bd-fg)"
+                    className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[14px] font-medium text-(--bd-fg-muted) transition-all hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
                   >
-                    {n.section}
+                    {n.sectionIcon ? <SectionIcon name={n.sectionIcon} /> : null}
+                    <span>{n.section}</span>
                     <I.chevD
-                      size={14}
-                      className={cn('transition-transform', !sectionOpen && '-rotate-90')}
+                      size={16}
+                      className={cn('ml-auto transition-transform', !sectionOpen && '-rotate-90')}
                     />
                   </button>
                 ) : null}
@@ -379,6 +393,8 @@ function SidebarPanel({
 /** What {@link AppSidebar} shows. */
 export interface AppSidebarProps {
   nav: NavItem[];
+  /** Show the "Overview" label above the links; defaults to true. */
+  overviewLabel?: boolean;
   /** Under the brand name when the brand has no logo, e.g. "Aggregator Portal". */
   portalLabel: string;
   account: SidebarAccount;
@@ -396,7 +412,7 @@ export interface AppSidebarProps {
  *
  * @param props - The links, the label under the brand and the account card.
  */
-export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
+export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: AppSidebarProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
@@ -487,6 +503,7 @@ export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
         <SidebarPanel
           brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
           nav={nav}
+          overviewLabel={overviewLabel}
           account={account}
           pathname={pathname}
           onOpenSupport={openSupport}
@@ -512,6 +529,7 @@ export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
             <SidebarPanel
               brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
               nav={nav}
+              overviewLabel={overviewLabel}
               account={account}
               pathname={pathname}
               onNavigate={closeMenu}

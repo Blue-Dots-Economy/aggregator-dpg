@@ -67,6 +67,7 @@ describe('<ConsoleSidebar />', () => {
     render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
     const group = within(aside()).getByRole('button', { name: 'nav.my_blue_dots' });
     expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(within(aside()).queryByText('overview')).toBeNull();
     fireEvent.click(group);
     expect(group).toHaveAttribute('aria-expanded', 'false');
     expect(within(aside()).queryByRole('link', { name: 'nav.my_team' })).toBeNull();
@@ -82,6 +83,7 @@ describe('<ConsoleSidebar />', () => {
     ]);
     expect(within(aside()).queryByText('nav.my_blue_dots')).toBeNull();
     expect(within(aside()).queryByText('nav.access')).toBeNull();
+    expect(within(aside()).queryByText('overview')).toBeNull();
   });
 
   it('marks My Team active only on /console itself when it is the home page', () => {
