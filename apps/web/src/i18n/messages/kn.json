@@ -1173,6 +1173,11 @@
       "empty": "Nobody is waiting on an invite.",
       "more": "Showing the newest {count}."
     },
+    "registered_orgs": {
+      "heading": "Registered, waiting to verify ({count})",
+      "status": "Waiting to verify",
+      "registered": "Registered"
+    },
     "dashboard": {
       "heading": "Dashboard",
       "subtitle": "Numbers across your network will show here.",

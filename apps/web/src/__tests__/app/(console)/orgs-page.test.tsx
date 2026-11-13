@@ -41,7 +41,16 @@ vi.mock('@/components/console/ConsoleUi', () => ({
 }));
 vi.mock('@/components/console/OrgsTable', () => ({ OrgsTable: () => null }));
 vi.mock('@/components/console/NetworkOrgsView', () => ({ NetworkOrgsView: () => null }));
-vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null }));
+vi.mock('@/components/console/ChildOrgsTree', () => ({
+  ChildOrgsTree: ({ orgs }: { orgs: Array<{ id: string }> }) => (
+    <div data-testid="tree">{orgs.map((o) => o.id).join(',')}</div>
+  ),
+}));
+vi.mock('@/components/console/RegisteredOrgs', () => ({
+  RegisteredOrgs: ({ orgs }: { orgs: Array<{ id: string }> }) => (
+    <div data-testid="registered">{orgs.map((o) => o.id).join(',')}</div>
+  ),
+}));
 vi.mock('@/components/console/HierarchySettings', () => ({
   HierarchySettings: ({ orgId, values }: { orgId: string; values: KnownAsValues }) => (
     <div data-testid="hierarchy-settings" data-org-id={orgId}>
@@ -153,6 +162,18 @@ describe('console orgs page — owner view', () => {
     mockOwner({ values: null });
     await showOwner();
     expect(screen.queryByTestId('hierarchy-settings')).toBeNull();
+  });
+
+  it('keeps a registered organisation that has not verified out of the tree and lists it apart', async () => {
+    mockOwner();
+    vi.mocked(readReachableOrgs).mockResolvedValue([
+      { id: 'a', name: 'Org A', parent_id: 'root', status: 'active', depth: 1 },
+      { id: 'b', name: 'Org B', parent_id: 'a', status: 'active', depth: 2 },
+      { id: 'c', name: 'Org C', parent_id: 'a', status: 'pending', depth: 2 },
+    ] as never);
+    await showOwner();
+    expect(screen.getByTestId('tree')).toHaveTextContent(/^b$/);
+    expect(screen.getByTestId('registered')).toHaveTextContent(/^c$/);
   });
 
   it('hides the editor from a member and on a pending organisation, without reading the values', async () => {

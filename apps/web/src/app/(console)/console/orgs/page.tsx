@@ -34,6 +34,7 @@ import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { OpenInvites } from '@/components/console/OpenInvites';
+import { RegisteredOrgs } from '@/components/console/RegisteredOrgs';
 import { readOpenInvites } from '@/lib/console-invites.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
@@ -95,9 +96,9 @@ export default async function ConsoleOrgsPage({
 }
 
 /**
- * An owner's view: the pending organisations directly under its own, then one
- * section per topmost owned organisation with the organisations directly under
- * it and the "known as" values it defines for them.
+ * An owner's view: one section per topmost owned organisation with the
+ * organisations under it, those registered and waiting to verify, its unused
+ * invites and the "known as" values it defines for them.
  *
  * @param ownedIds - The organisations the viewer belongs to.
  * @param ownerIds - Those it owns, the only ones whose values it can edit.
@@ -146,11 +147,14 @@ async function OwnerOrgs({
                 rootName={root.name}
                 rootKnownAs={root.known_as_name ?? root.known_as}
                 rootTag={t('orgs.yours')}
-                orgs={orgsBelow(root.id, orgs)}
+                orgs={orgsBelow(root.id, orgs).filter((o) => o.status !== 'pending')}
                 linkRows
                 more={false}
               />
             </ConsoleSection>
+            <RegisteredOrgs
+              orgs={orgs.filter((o) => o.status === 'pending' && o.parent_id === root.id)}
+            />
             {invitesById.get(root.id) ? <OpenInvites page={invitesById.get(root.id)!} /> : null}
             {valuesById.get(root.id) ? (
               <HierarchySettings
