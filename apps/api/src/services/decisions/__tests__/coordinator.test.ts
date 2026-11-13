@@ -80,15 +80,15 @@ describe('approveCoordinator', () => {
     expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['rejected']);
   });
 
-  it('undoes Keycloak when the approval compare-and-set fails in the database', async () => {
+  it('leaves the invitee invited and enabled when the approval compare-and-set fails in the database', async () => {
     store.approveFromPending = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'down' },
     });
     expect(await approve()).toEqual({ kind: 'unavailable', dependency: 'db' });
     const kc = await idp.findById(kcId);
-    expect(kc.ok && kc.value?.enabled).toBe(false);
-    expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['rejected']);
+    expect(kc.ok && kc.value?.enabled).toBe(true);
+    expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
   });
 
   it('answers already_decided for a row that is no longer pending', async () => {
