@@ -264,6 +264,12 @@ export const users = pgTable(
     // The coordinator's own `url` and `locations` where they differ from its
     // org's. Shown when the org's field is empty.
     legacyOrgDetails: jsonb('legacy_org_details').$type<LegacyOrgDetails>(),
+    // The coordinator's own address, entered at registration (migration 0037).
+    // Same Beckn shape as `organisations.locations`; `[]` when none was given.
+    locations: jsonb('locations')
+      .$type<BecknLocation[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
 
     // Schema-driven registration fields that have no column of their own. A
     // value never lives both here and in a typed column. New schema fields

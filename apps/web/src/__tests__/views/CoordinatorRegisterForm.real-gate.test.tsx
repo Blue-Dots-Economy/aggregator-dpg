@@ -23,6 +23,11 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+/** What the RJSF shim submits; a test may replace it. */
+const shim = vi.hoisted(() => ({
+  formData: { name: 'Enable India Coordinator' } as Record<string, unknown>,
+}));
+
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
     onSubmit,
@@ -35,7 +40,7 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
       data-testid="rjsf-shim"
       onSubmit={(ev) => {
         ev.preventDefault();
-        onSubmit({ formData: { name: 'Enable India Coordinator' } }, ev);
+        onSubmit({ formData: shim.formData }, ev);
       }}
     >
       {children}
@@ -163,6 +168,42 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
     } finally {
       globalThis.fetch = originalFetch;
       calls = [];
+    }
+  });
+
+  it("sends the coordinator's own address and drops the org's url", async () => {
+    const location = {
+      geo: { type: 'Point', coordinates: [0, 0] },
+      address: { streetAddress: 'Bengaluru, Karnataka, India' },
+    };
+    shim.formData = { name: 'x', url: 'https://org.example', locations: [location] };
+    const calls: { url: string; body: string }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      calls.push({ url: String(input), body: init?.body ?? '' });
+      return new Response(JSON.stringify({ status: 'pending', login_hint: 'asha@trrain.org' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      renderForm();
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      await screen.findByRole('dialog');
+      const checkbox = screen.getByRole('checkbox');
+      stubScrollerToMaxAndScroll();
+      await waitFor(() => expect(checkbox).toBeEnabled());
+      fireEvent.click(checkbox);
+      fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }));
+
+      await waitFor(() => expect(calls.length).toBe(1));
+      const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+      expect(body['locations']).toEqual([location]);
+      expect(body).not.toHaveProperty('url');
+    } finally {
+      globalThis.fetch = originalFetch;
+      shim.formData = { name: 'Enable India Coordinator' };
     }
   });
 });

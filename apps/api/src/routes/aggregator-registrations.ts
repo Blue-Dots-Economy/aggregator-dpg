@@ -219,6 +219,7 @@ async function acceptCoordinatorInvite(
   if (contact.email !== invite.email) throw httpError('INVITE_EMAIL_MISMATCH');
   await assertNotOrgOwner(contact.email);
   assertNoOrgDetails(body);
+  const locations = ownLocations(body);
 
   const userStore = getUserStore();
   const idp = getIdpAdmin();
@@ -232,6 +233,7 @@ async function acceptCoordinatorInvite(
       consent,
       orgId: invite.org.id,
       inviteId: invite.jti,
+      locations,
       log,
     });
     const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
@@ -275,16 +277,50 @@ async function assertNotOrgOwner(email: string): Promise<void> {
 }
 
 /**
- * Refuses `url` and `locations`, which belong to the coordinator's org.
+ * Refuses `url`, which belongs to the coordinator's org.
+ *
+ * `locations` is the coordinator's own address and is accepted; see {@link ownLocations}.
  *
  * @throws {HttpError} ORG_DETAILS_READ_ONLY.
  */
 function assertNoOrgDetails(body: RegistrationPayload): void {
-  const sent = [
-    ...(body.url?.trim() ? ['url'] : []),
-    ...((body.locations ?? []).some(hasLocationContent) ? ['locations'] : []),
-  ];
-  if (sent.length > 0) throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: sent } });
+  if (body.url?.trim()) {
+    throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: ['url'] } });
+  }
+}
+
+/**
+ * The coordinator's own address to store in `users.locations`.
+ *
+ * Empty entries (no street, no locality, `[0,0]`) are dropped. A kept entry
+ * must be a `Point` with `[longitude, latitude]` in range, as the address
+ * autocomplete sends; `[0,0]` stands for "address typed, no place picked".
+ *
+ * @param body - The validated registration body.
+ * @returns The locations to store; `[]` when none was given.
+ * @throws {HttpError} SCHEMA_VALIDATION when a kept entry is not a valid point.
+ */
+function ownLocations(body: RegistrationPayload): BecknLocation[] {
+  const kept = (body.locations ?? []).filter(hasLocationContent);
+  for (const loc of kept) {
+    const geo = loc.geo as { type?: unknown; coordinates?: unknown };
+    const c = geo.coordinates;
+    const valid =
+      geo.type === 'Point' &&
+      Array.isArray(c) &&
+      c.length === 2 &&
+      typeof c[0] === 'number' &&
+      typeof c[1] === 'number' &&
+      Math.abs(c[0]) <= 180 &&
+      Math.abs(c[1]) <= 90;
+    if (!valid) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'locations[].geo must be a Point with [longitude, latitude] in range.',
+        fields: { 'locations.geo': 'invalid' },
+      });
+    }
+  }
+  return kept;
 }
 
 /**
@@ -360,6 +396,8 @@ async function createCoordinatorRow(
     consent: RegistrationPayload['consent'];
     orgId: string;
     inviteId: string;
+    /** The coordinator's own address, from {@link ownLocations}. */
+    locations: BecknLocation[];
     log: RequestLog;
   },
 ): Promise<{ aggregatorId: string; orgSlug: string }> {
@@ -371,6 +409,7 @@ async function createCoordinatorRow(
     recordConsent,
     orgId: row.orgId,
     legacyOrgDetails: null,
+    locations: row.locations,
     inviteId: row.inviteId,
     profile: buildAggregatorProfile(body),
     profileRef: resolveProfileRef('registration.v1.json'),
@@ -527,6 +566,8 @@ async function createAggregatorWithSlug(
     orgId: string;
     /** The coordinator's own org details (Default-org registrations only). */
     legacyOrgDetails: LegacyOrgDetails | null;
+    /** The coordinator's own address (`users.locations`). */
+    locations: BecknLocation[];
     /** The consumed invite's `jti`, when registered via one. */
     inviteId: string | null;
     profile: Record<string, unknown>;
@@ -548,6 +589,7 @@ async function createAggregatorWithSlug(
       updatedBy: 'self',
       orgId: extras.orgId,
       legacyOrgDetails: extras.legacyOrgDetails,
+      locations: extras.locations,
       inviteId: extras.inviteId,
       profile: extras.profile,
       profileRef: extras.profileRef,

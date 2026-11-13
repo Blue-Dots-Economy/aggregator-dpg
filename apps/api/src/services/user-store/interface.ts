@@ -7,9 +7,10 @@
  * Name, email and phone live in the `contact` table, referenced by
  * `contactId`; `contact`, `contactPhone` and `contactEmail` are composed from it.
  *
- * `url`, `locations`, `contact.company` and `contact.gstNumber` are read from
- * the coordinator's org, falling back per field to `legacy_org_details`. This
- * store never writes them; the org's owner edits them.
+ * `url`, `contact.company` and `contact.gstNumber` are read from the
+ * coordinator's org, falling back per field to `legacy_org_details`. This
+ * store never writes them; the org's owner edits them. `locations` is the
+ * coordinator's own address (`users.locations`), written once at registration.
  *
  * Consent lives only in the `consent_record` ledger. `create` writes it through
  * `recordConsent` inside its transaction; reads take the newest registration row.
@@ -58,7 +59,10 @@ export interface Coordinator {
   contactPhone: string;
   /** The contact's email, lowercased. */
   contactEmail: string;
-  /** From the org, else the coordinator's own value. */
+  /**
+   * The coordinator's own address (`users.locations`), else the one a
+   * Default-org coordinator kept in `legacy_org_details`. Never the org's.
+   */
   locations: BecknLocation[];
   /**
    * The newest registration consent from the ledger (`given_at` = its `accepted_at`).
@@ -132,6 +136,8 @@ export interface CreateCoordinatorInput {
   orgId: string;
   /** The coordinator's own org-detail values. Set only for Default-org registrations. */
   legacyOrgDetails?: LegacyOrgDetails | null;
+  /** The coordinator's own address (`users.locations`). Defaults to `[]`. */
+  locations?: BecknLocation[];
   /** The invite consumed by this registration (`registration_invites.jti`). */
   inviteId?: string | null;
   /**

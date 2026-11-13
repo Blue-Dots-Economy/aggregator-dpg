@@ -322,7 +322,7 @@ describe('invite read and accept routes', () => {
       expect(await inviteStatus('inv-coordinator')).toBe('pending');
     });
 
-    it("refuses the org's url and locations with 409 ORG_DETAILS_READ_ONLY", async () => {
+    it("refuses the org's url with 409 ORG_DETAILS_READ_ONLY", async () => {
       const token = await inviteToken('coordinator');
       const res = await accept('/v1/user/invite/accept', {
         ...coordinatorBody,
@@ -331,6 +331,72 @@ describe('invite read and accept routes', () => {
       });
       expect(res.statusCode).toBe(409);
       expect(errorCode(res)).toBe('ORG_DETAILS_READ_ONLY');
+    });
+
+    describe("the coordinator's own address (users.locations, 0037)", () => {
+      const picked = {
+        geo: { type: 'Point', coordinates: [77.5946, 12.9716] },
+        address: { streetAddress: 'Bengaluru, Karnataka, India' },
+      };
+
+      const storedLocations = async (res: { json: () => unknown }) => {
+        const id = (res.json() as { aggregator_id: string }).aggregator_id;
+        const row = await userStore.findById(id);
+        return row.ok ? row.value?.locations : undefined;
+      };
+
+      it('stores the picked address and its [lng, lat]', async () => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [picked],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([picked]);
+      });
+
+      it('keeps a typed address with the [0,0] placeholder when no place was picked', async () => {
+        const typed = {
+          geo: { type: 'Point', coordinates: [0, 0] },
+          address: { streetAddress: 'Near the bus stand' },
+        };
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [typed],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([typed]);
+      });
+
+      it('stores nothing for an empty location', async () => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([]);
+      });
+
+      it.each([
+        ['latitude out of range', { type: 'Point', coordinates: [77.59, 91] }],
+        ['a non-point geometry', { type: 'Polygon', coordinates: [[77.59, 12.97]] }],
+        ['non-numeric coordinates', { type: 'Point', coordinates: ['77.59', '12.97'] }],
+      ])('refuses %s with 400 SCHEMA_VALIDATION and keeps the invite', async (_label, geo) => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [{ geo, address: { streetAddress: 'Bengaluru' } }],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
+        expect(await inviteStatus('inv-coordinator')).toBe('pending');
+      });
     });
 
     it.each([

@@ -41,7 +41,7 @@ export interface CoordinatorRegisterFormProps {
 }
 
 /**
- * Removes schema properties marked `"x-org-detail": true` (url, locations).
+ * Removes schema properties marked `"x-org-detail": true` (e.g. url).
  *
  * These belong to the org, so a coordinator of a real org does not see or submit them.
  *
@@ -66,8 +66,9 @@ function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
 /**
  * Renders the coordinator registration form for an invite.
  *
- * The org is fixed by the invite, so its name, url and locations are not asked
- * for, and the email is locked to the invited address. After the consent gate
+ * The org is fixed by the invite, so its name and url are not asked for, and
+ * the email is locked to the invited address. The coordinator's own address
+ * (`locations`) is asked for when the schema does not mark it `x-org-detail`. After the consent gate
  * it posts to `/api/invite/user/accept` and then goes to sign-in with the
  * invited email pre-filled.
  *
@@ -122,7 +123,6 @@ export function CoordinatorRegisterForm({
     payload['invite'] = inviteToken;
     payload['name'] = lockedOrgName;
     delete payload['url'];
-    delete payload['locations'];
     const result = await submitRegistration('/api/invite/user/accept', payload);
     if (!result.ok) {
       setState({ status: 'error', ...result.error });
