@@ -634,7 +634,7 @@
     "title": "[[Org]] console",
     "nav": {
       "home": "Home",
-      "organisations": "Onboarded [[Orgs]]",
+      "organisations": "ಸೇರಿಸಲಾದ [[Orgs]]",
       "coordinators": "[[Users]]",
       "invite": "Invite [[users]]",
       "roles": "Roles",
@@ -644,10 +644,10 @@
       "portal_label": "[[Org]] console",
       "network_admin": "Network admin",
       "org_owner": "[[Org]] owner",
-      "dashboard": "Dashboard",
-      "my_blue_dots": "My Blue Dots",
-      "my_team": "My Team",
-      "profile": "Profile"
+      "dashboard": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
+      "my_blue_dots": "ನನ್ನ Blue Dots",
+      "my_team": "ನನ್ನ ತಂಡ",
+      "profile": "ಪ್ರೊಫೈಲ್"
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -740,20 +740,20 @@
       "known_as_values_name_repeated": "Each value needs a different name."
     },
     "orgs": {
-      "heading": "Onboarded [[Orgs]]",
+      "heading": "ಸೇರಿಸಲಾದ [[Orgs]]",
       "status_filter": "Status",
       "all": "All",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
-      "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
+      "subtitle": "ನೆಟ್‌ವರ್ಕ್‌ನ ನೇರವಾಗಿ ಕೆಳಗಿರುವ [[orgs]], ಮತ್ತು ನೀವು ಆಹ್ವಾನಿಸಿದವು.",
       "col_name": "[[Org]]",
       "col_joined": "Joined",
       "col_status": "Status",
       "col_counts": "[[Users]]",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
+      "subtitle_owner": "ನಿಮ್ಮ [[org]] ನ ನೇರವಾಗಿ ಕೆಳಗಿರುವ [[orgs]], ಮತ್ತು ನೀವು ಆಹ್ವಾನಿಸಿದವು.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
       "tile": {
@@ -782,7 +782,7 @@
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
       },
       "network_note": "ನೆಟ್‌ವರ್ಕ್ · ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು",
-      "invite": "Invite [[orgs]]",
+      "invite": "[[orgs]] ಅನ್ನು ಆಹ್ವಾನಿಸಿ",
       "list_heading": "[[Orgs]]",
       "filter_label": "[[orgs]] ತೋರಿಸಿ"
     },
@@ -849,7 +849,7 @@
         "can_participants_hint": "ಯಾವಾಗಲೂ ಸೇರಿದೆ. ಇದನ್ನು ಅವರ ತಂಡದ [[user]]ರು ಮಾಡುತ್ತಾರೆ.",
         "role_label": "ಪಾತ್ರ",
         "role_hint": "ಆಹ್ವಾನಿತ [[org]]ಗಳು ಏನು ಮಾಡಬಹುದು ಎಂಬುದರಿಂದ ನಿರ್ಧಾರವಾಗುತ್ತದೆ. ಅವರ ಹೆಸರಿನ ಪಕ್ಕದಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.",
-        "role_default": "Super Admin",
+        "role_default": "ಸೂಪರ್ ಅಡ್ಮಿನ್",
         "error_limit": "ಈ [[org]] ತನ್ನ ಅಡಿಯಲ್ಲಿ ಇನ್ನಷ್ಟು [[org]]ಗಳನ್ನು ತೆಗೆದುಕೊಳ್ಳಲು ಸಾಧ್ಯವಿಲ್ಲ.",
         "breadcrumb_parent": "ಸೇರಿಸಿದ [[org]]ಗಳು",
         "help": {
@@ -1141,14 +1141,14 @@
       "more": "ಇತ್ತೀಚಿನ {count} ಆಹ್ವಾನಗಳನ್ನು ತೋರಿಸಲಾಗುತ್ತಿದೆ."
     },
     "dashboard": {
-      "heading": "Dashboard",
-      "subtitle": "Numbers across your network will show here.",
-      "tab_label": "Dashboard view",
-      "tab_aggregated": "Aggregated View",
-      "tab_participants": "Seeker & Provider View",
-      "coming_soon": "Coming soon",
-      "aggregated_body": "Your dashboard is coming soon.",
-      "participants_body": "This works only if you have onboarded seekers and providers yourself."
+      "heading": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
+      "subtitle": "ನಿಮ್ಮ ನೆಟ್‌ವರ್ಕ್‌ನ ಸಂಖ್ಯೆಗಳು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ.",
+      "tab_label": "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್ ನೋಟ",
+      "tab_aggregated": "ಒಟ್ಟು ನೋಟ",
+      "tab_participants": "ಸೀಕರ್ ಮತ್ತು ಪ್ರೊವೈಡರ್ ನೋಟ",
+      "coming_soon": "ಶೀಘ್ರದಲ್ಲೇ ಬರಲಿದೆ",
+      "aggregated_body": "ನಿಮ್ಮ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್ ಶೀಘ್ರದಲ್ಲೇ ಬರಲಿದೆ.",
+      "participants_body": "ನೀವೇ ಸೀಕರ್ ಮತ್ತು ಪ್ರೊವೈಡರ್‌ಗಳನ್ನು ಸೇರಿಸಿದ್ದರೆ ಮಾತ್ರ ಇದು ಕೆಲಸ ಮಾಡುತ್ತದೆ."
     }
   }
 }

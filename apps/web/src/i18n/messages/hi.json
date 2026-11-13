@@ -634,7 +634,7 @@
     "title": "[[Org]] console",
     "nav": {
       "home": "Home",
-      "organisations": "Onboarded [[Orgs]]",
+      "organisations": "जोड़े गए [[Orgs]]",
       "coordinators": "[[Users]]",
       "invite": "Invite [[users]]",
       "roles": "Roles",
@@ -644,10 +644,10 @@
       "portal_label": "[[Org]] console",
       "network_admin": "Network admin",
       "org_owner": "[[Org]] owner",
-      "dashboard": "Dashboard",
-      "my_blue_dots": "My Blue Dots",
-      "my_team": "My Team",
-      "profile": "Profile"
+      "dashboard": "डैशबोर्ड",
+      "my_blue_dots": "मेरे Blue Dots",
+      "my_team": "मेरी टीम",
+      "profile": "प्रोफ़ाइल"
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -740,20 +740,20 @@
       "known_as_values_name_repeated": "Each value needs a different name."
     },
     "orgs": {
-      "heading": "Onboarded [[Orgs]]",
+      "heading": "जोड़े गए [[Orgs]]",
       "status_filter": "Status",
       "all": "All",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
-      "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
+      "subtitle": "नेटवर्क के ठीक नीचे के [[orgs]], और जिन्हें आपने आमंत्रित किया है।",
       "col_name": "[[Org]]",
       "col_joined": "Joined",
       "col_status": "Status",
       "col_counts": "[[Users]]",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
+      "subtitle_owner": "आपके [[org]] के ठीक नीचे के [[orgs]], और जिन्हें आपने आमंत्रित किया है।",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
       "tile": {
@@ -782,7 +782,7 @@
         "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
       },
       "network_note": "नेटवर्क · आप नेटवर्क व्यवस्थापक हैं",
-      "invite": "Invite [[orgs]]",
+      "invite": "[[orgs]] को आमंत्रित करें",
       "list_heading": "[[Orgs]]",
       "filter_label": "[[orgs]] दिखाएँ"
     },
@@ -849,7 +849,7 @@
         "can_participants_hint": "हमेशा शामिल। यह उनकी टीम के [[user]] करते हैं।",
         "role_label": "भूमिका",
         "role_hint": "आमंत्रित [[org]] क्या कर सकते हैं, उसी से तय होती है। उनके नाम के साथ दिखाई जाती है।",
-        "role_default": "Super Admin",
+        "role_default": "सुपर एडमिन",
         "error_limit": "यह [[org]] अपने अंतर्गत और [[org]] नहीं ले सकता।",
         "breadcrumb_parent": "जोड़े गए [[org]]",
         "help": {
@@ -1141,14 +1141,14 @@
       "more": "सबसे नए {count} निमंत्रण दिखाए जा रहे हैं।"
     },
     "dashboard": {
-      "heading": "Dashboard",
-      "subtitle": "Numbers across your network will show here.",
-      "tab_label": "Dashboard view",
-      "tab_aggregated": "Aggregated View",
-      "tab_participants": "Seeker & Provider View",
-      "coming_soon": "Coming soon",
-      "aggregated_body": "Your dashboard is coming soon.",
-      "participants_body": "This works only if you have onboarded seekers and providers yourself."
+      "heading": "डैशबोर्ड",
+      "subtitle": "आपके नेटवर्क के आंकड़े यहाँ दिखेंगे।",
+      "tab_label": "डैशबोर्ड दृश्य",
+      "tab_aggregated": "समग्र दृश्य",
+      "tab_participants": "सीकर और प्रोवाइडर दृश्य",
+      "coming_soon": "जल्द आ रहा है",
+      "aggregated_body": "आपका डैशबोर्ड जल्द आ रहा है।",
+      "participants_body": "यह तभी काम करता है जब आपने खुद सीकर और प्रोवाइडर जोड़े हों।"
     }
   }
 }
