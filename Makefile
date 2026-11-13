@@ -64,12 +64,12 @@ rebuild-web: ## Rebuild the web image and restart only the web container.
 	pnpm stack:rebuild-web
 
 KC_PLUGIN_REPO ?= ../keycloak-otp-authenticator
-KC_PLUGIN_JAR  := keycloak-otp-1.3.0-SNAPSHOT.jar
 
-kc-plugin: ## Build the Keycloak OTP plugin JAR and copy into infra/keycloak/providers.
+kc-plugin: ## Build the Keycloak OTP plugin JAR and replace the one in infra/keycloak/providers.
 	cd $(KC_PLUGIN_REPO) && ./mvnw -q clean package -DskipTests
-	cp $(KC_PLUGIN_REPO)/dist/target/$(KC_PLUGIN_JAR) infra/keycloak/providers/
-	@echo "Copied $(KC_PLUGIN_JAR) → infra/keycloak/providers/"
+	rm -f infra/keycloak/providers/keycloak-otp-*.jar
+	cp $(KC_PLUGIN_REPO)/dist/target/keycloak-otp-*.jar infra/keycloak/providers/
+	@ls infra/keycloak/providers/keycloak-otp-*.jar
 
 rebuild-keycloak: kc-plugin ## Rebuild the OTP plugin and restart Keycloak (re-imports realm on first boot only).
 	docker compose restart keycloak
