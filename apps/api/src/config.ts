@@ -181,10 +181,10 @@ const ConfigSchema = z.object({
   /** BullMQ attempts for an email job. Retries never re-send an item already marked `sent`. */
   CAMPAIGN_EMAIL_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
-  // ─── Approval links ───────────────────────────────────────────────────────
+  // ─── Stale registrations ──────────────────────────────────────────────────
   /**
-   * Lifetime in seconds of emailed approval links. Sets both the token expiry
-   * and the "expires in" text. Default 7 days.
+   * How long, in seconds, a registration may stay pending before the stale-registration
+   * prune removes it, with `REGISTRATION_PENDING_GRACE_MS` added. Default 7 days.
    */
   APPROVAL_TOKEN_TTL_SECONDS: z.coerce
     .number()
