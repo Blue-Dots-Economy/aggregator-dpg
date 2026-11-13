@@ -580,6 +580,14 @@ body {
   border-color: var(--bd-primary);
   box-shadow: 0 0 0 4px var(--bd-primary-50);
 }
+/* Plain CSS outranks Tailwind's layered utilities, so the invalid border lives here. */
+.bd-input[aria-invalid='true'],
+.bd-input[aria-invalid='true']:focus {
+  border-color: var(--color-rose-400, #fb7185);
+}
+.bd-input[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 4px var(--color-rose-100, #ffe4e6);
+}
 
 /* A native <select> honours almost none of .bd-input: the UA draws its own
    compact control, so the field renders visibly shorter than the <input>s
@@ -664,6 +672,9 @@ select.bd-input:focus {
 .dropzone:hover {
   border-color: var(--bd-primary);
   background: var(--bd-tint-primary);
+}
+[aria-invalid='true'] > .dropzone {
+  border-color: var(--color-rose-400, #fb7185);
 }
 
 @keyframes pulseDot {

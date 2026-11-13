@@ -24,6 +24,7 @@ import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { withStableKeys } from '@/lib/list-keys';
 import { useReferenceDataset } from '@/hooks/useReferenceDataset';
+import { errorAria } from '../error-aria';
 
 interface ReferenceOption {
   name: string;
@@ -148,8 +149,10 @@ export function ReferenceAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   placeholder,
   options,
+  rawErrors,
 }: Readonly<WidgetProps>) {
   const opts = options as { source?: string; subtitleFields?: string[] } | undefined;
   const source = opts?.source;
@@ -237,11 +240,13 @@ export function ReferenceAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...errorAria(id, rawErrors)}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
           blurRef.current = window.setTimeout(() => setOpen(false), BLUR_CLOSE_MS);
+          onBlur?.(id, text);
         }}
       />
       {open && suggestions.length > 0 && (

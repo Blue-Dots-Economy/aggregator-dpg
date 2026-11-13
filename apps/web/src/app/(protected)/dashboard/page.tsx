@@ -16,6 +16,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
+import { useRequestErrorMessage } from '@/components/forms/useRequestErrorMessage';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -1430,6 +1431,7 @@ interface DomainTabProps {
 function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const requestErrorText = useRequestErrorText();
+  const requestMessage = useRequestErrorMessage();
   const locale = useLocale();
   // `/aggregator/dashboard` scopes results to the caller's org and returns
   // each domain under `by_domain[<id>]`. An `undefined` domain id skips the
@@ -1549,7 +1551,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
         failureText(
           err,
           t('state.refreshUnreadable'),
-          requestErrorText(err, t('state.refreshFailed')),
+          requestErrorText(err, requestMessage(err, t('state.refreshFailed'))),
         ),
       );
     } finally {
@@ -1786,6 +1788,7 @@ function formatRelative(iso: string): string {
 function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const requestErrorText = useRequestErrorText();
+  const requestMessage = useRequestErrorMessage();
   const locale = useLocale();
   // Same rollup shape and fetch as SeekersTab; only the labels differ.
   const providerDomainId = domainId;
@@ -1900,7 +1903,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
         failureText(
           err,
           t('state.refreshUnreadable'),
-          requestErrorText(err, t('state.refreshFailed')),
+          requestErrorText(err, requestMessage(err, t('state.refreshFailed'))),
         ),
       );
     } finally {

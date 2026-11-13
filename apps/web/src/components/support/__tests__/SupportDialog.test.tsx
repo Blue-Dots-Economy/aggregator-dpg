@@ -83,7 +83,8 @@ describe('SupportDialog', () => {
     renderDialog();
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Asha K');
     expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('asha@example.com');
-    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('+919000000000');
+    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9000000000');
+    expect(screen.getByLabelText('Country code').textContent).toContain('+91');
   });
 
   it('starts from the session user again each time it reopens', async () => {
@@ -124,17 +125,38 @@ describe('SupportDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('does not submit until details + a contact + consent are provided', async () => {
+  it('keeps Send enabled and shows each missing field under it, sending nothing', async () => {
     const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
-    // Contact is prefilled, but details + consent are missing → send blocked.
-    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
     const send = screen.getByRole('button', { name: /send/i });
-    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(send);
+    expect(screen.queryByText('Details is required.')).not.toBeNull();
+    expect(screen.queryByText('Consent is required.')).not.toBeNull();
+    expect(screen.getByLabelText('Details').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Details').getAttribute('aria-describedby')).toBe(
+      'support-details__error',
+    );
+    // The message goes away as soon as the field is filled.
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    expect(screen.queryByText('Details is required.')).toBeNull();
     await userEvent.click(send);
     // The dialog does fetch its attachment config on open, so assert on the
     // absence of a submit rather than the absence of any request.
     expect(submitCalls(fetchSpy)).toHaveLength(0);
+  });
+
+  it('keeps what was typed when sending fails', async () => {
+    mockFetch(
+      new Response(JSON.stringify({ error: { code: 'SUPPORT_SEND_FAILED' } }), { status: 502 }),
+    );
+    renderDialog();
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText(/could not|couldn|went wrong|try again/i)).toBeTruthy();
+    expect((screen.getByLabelText('Details') as HTMLTextAreaElement).value).toBe('It broke');
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Asha K');
   });
 
   it('POSTs the full body to /api/support and shows success', async () => {

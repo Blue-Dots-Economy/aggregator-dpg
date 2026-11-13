@@ -34,6 +34,10 @@ export interface SelectFieldProps {
   disabled?: boolean;
   'aria-label'?: string;
   'aria-required'?: boolean;
+  /** Marks the field as wrong: red border, announced by screen readers. */
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
+  onBlur?: () => void;
   /** Shown before the selected value, as the language switcher shows its icon. */
   icon?: ReactNode;
   /** Extra classes for the trigger, such as a compact size. */
@@ -62,6 +66,7 @@ export function SelectField({
   icon,
   className,
   align = 'start',
+  onBlur,
   ...aria
 }: Readonly<SelectFieldProps>): JSX.Element {
   const hasEmptyOption = options.some((o) => o.value === '');
@@ -75,7 +80,12 @@ export function SelectField({
       {...(required === undefined ? {} : { required })}
       {...(disabled === undefined ? {} : { disabled })}
     >
-      <SelectTrigger id={id} className={cn(icon ? 'gap-1.5' : '', className)} {...aria}>
+      <SelectTrigger
+        id={id}
+        className={cn(icon ? 'gap-1.5' : '', aria['aria-invalid'] && 'border-rose-400', className)}
+        onBlur={onBlur}
+        {...aria}
+      >
         {icon}
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>

@@ -1,17 +1,25 @@
 /**
  * Unit tests for PhoneWidget and withPhoneWidget.
  *
- * Covers: the fixed +91 prefix, digits only and at most 10, the stored
+ * Covers: the fixed +91 code, digits only and at most 10, the stored
  * `+91…` value, reading back a stored value, an empty field clearing the
  * value, and the widget applied to nested `phone` fields only.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { WidgetProps } from '@rjsf/utils';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '@/i18n/messages/en.json';
 import { PhoneWidget, localDigits } from '@/components/forms/custom-widgets/PhoneWidget';
 import { withPhoneWidget } from '@/lib/phone-ui-schema';
+import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
 
-function renderIt(value?: string) {
+function renderIt(
+  value?: string,
+  phoneCountries?: string,
+  placeholder = '+91 98765 43210',
+  extra: Partial<WidgetProps> = {},
+) {
   const onChange = vi.fn();
   const props = {
     id: 'root_owner_phone',
@@ -19,17 +27,58 @@ function renderIt(value?: string) {
     onChange,
     onBlur: vi.fn(),
     onFocus: vi.fn(),
-    placeholder: '+91 98765 43210',
+    placeholder,
     rawErrors: [],
+    ...extra,
   } as unknown as WidgetProps;
-  render(<PhoneWidget {...props} />);
-  return { onChange, input: screen.getByRole('textbox') as HTMLInputElement };
+  render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <FormRuntimeConfigProvider
+        value={{ collegeDataset: 'ka', ...(phoneCountries ? { phoneCountries } : {}) }}
+      >
+        <PhoneWidget {...props} />
+      </FormRuntimeConfigProvider>
+    </NextIntlClientProvider>,
+  );
+  // The number box; the country code box beside it is labelled separately.
+  const input = document.getElementById('root_owner_phone');
+  if (!(input instanceof HTMLInputElement)) throw new Error('number box not rendered');
+  return { onChange, input };
 }
 
 describe('<PhoneWidget />', () => {
+  it('stores a value saved in another layout as +91 and 10 digits', () => {
+    const { onChange } = renderIt('+91 98765 43210');
+    expect(onChange).toHaveBeenCalledWith('+919876543210');
+  });
+
+  it('does not rewrite a stored value when the field is read-only or disabled', () => {
+    expect(
+      renderIt('+91 98765 43210', undefined, '', { readonly: true }).onChange,
+    ).not.toHaveBeenCalled();
+    expect(
+      renderIt('+91 98765 43210', undefined, '', { disabled: true }).onChange,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('leaves free text that is not a phone layout untouched', () => {
+    const { onChange } = renderIt('call 98765 43210 after 6');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('tidies a number written with dots and brackets', () => {
+    const { onChange } = renderIt('(+91) 98765.43210');
+    expect(onChange).toHaveBeenCalledWith('+919876543210');
+  });
+
+  it('leaves a value already in its own layout alone', () => {
+    const { onChange } = renderIt('+919876543210');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('shows +91 in front and the placeholder without it', () => {
     const { input } = renderIt();
-    expect(screen.getByText('+91')).toBeInTheDocument();
+    expect(screen.getByLabelText('Country code')).toHaveTextContent('+91');
     expect(input).toHaveAttribute('placeholder', '98765 43210');
     expect(input).toHaveAttribute('maxLength', '10');
     expect(input).toHaveAttribute('inputMode', 'numeric');
@@ -46,6 +95,22 @@ describe('<PhoneWidget />', () => {
     expect(input).toHaveValue('9876543210');
     fireEvent.change(input, { target: { value: '' } });
     expect(onChange).toHaveBeenLastCalledWith(undefined);
+  });
+});
+
+describe('<PhoneWidget /> with configured countries', () => {
+  it('starts at the first configured country and drops its code from the placeholder', () => {
+    const { input, onChange } = renderIt(undefined, 'GB:+44,IN:+91', '+44 7911 123456');
+    expect(screen.getByLabelText('Country code')).toHaveValue('+44');
+    expect(input).toHaveAttribute('placeholder', '7911 123456');
+    fireEvent.change(input, { target: { value: '7911123456' } });
+    expect(onChange).toHaveBeenLastCalledWith('+447911123456');
+  });
+
+  it('reads a stored number of a configured country back into its own code', () => {
+    const { input, onChange } = renderIt('+44 7911 123456', 'IN:+91,GB:+44');
+    expect(onChange).toHaveBeenCalledWith('+447911123456');
+    expect(input).toHaveValue('7911123456');
   });
 });
 

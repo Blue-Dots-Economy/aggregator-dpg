@@ -191,9 +191,16 @@ describe('<PublicRegistrationView /> account-only birth year', () => {
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane Doe' } });
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
 
-    expect(screen.getByRole('button', { name: /submit/i })).toBeDisabled();
+    const submit = screen.getByRole('button', { name: /submit/i });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
     expect(
-      screen.getByText(messages.profile.public_reg.account_only.blockers.year_of_birth),
+      screen.getByText(
+        `${messages.profile.public_reg.account_only.year_of_birth_label} is required.`,
+      ),
     ).toBeInTheDocument();
+    expect(
+      vi.mocked(globalThis.fetch).mock.calls.filter(([u]) => String(u).includes('/submit')),
+    ).toHaveLength(0);
   });
 });

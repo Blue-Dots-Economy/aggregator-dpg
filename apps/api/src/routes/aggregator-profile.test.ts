@@ -223,12 +223,32 @@ describe('aggregator profile routes', () => {
   // PATCH aggregator.contact branch
   // ---------------------------------------------------------------------------
 
-  // Note: PATCH's own INVALID_PHONE branch (normalisePhone failing) is not
-  // reachable via a real HTTP request — `BecknContactSchema`'s phone regex
-  // (`^(\+?\d{10,15}|\d{10})$`) already enforces the same 10-15-digit window
-  // that `normalisePhone` checks, at the Fastify schema-validation layer, so
-  // any input that would fail `normalisePhone` is already rejected as 400
-  // SCHEMA_VALIDATION before the handler body runs. Left uncovered.
+  it('PATCH 400 INVALID_PHONE for a new +91 number that is not a mobile', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: { contact: { name: 'Asha', phone: '+912234567890', email: 'asha@trrain.org' } },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INVALID_PHONE');
+  });
+
+  it('PATCH keeps a stored phone saved before the mobile rule when it is sent back unchanged', async () => {
+    const legacy = { name: 'Asha', phone: '+912234567890', email: 'asha@trrain.org' };
+    userStore.seed([
+      buildCoordinator({ id: aggregatorId, orgSlug: 'trrain-zzzz', contact: legacy }),
+    ]);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: { aggregator: { name: 'Asha Renamed', contact: legacy } },
+    });
+    expect(res.statusCode).toBe(200);
+  });
 
   it('PATCH aborts with IDP_UNAVAILABLE (no DB write) when mirroring the phone to Keycloak fails', async () => {
     idp.setAttributes = async () => ({

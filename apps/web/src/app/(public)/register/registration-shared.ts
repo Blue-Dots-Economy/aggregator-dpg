@@ -141,7 +141,7 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
  * @param body - Parsed response body (may not be an envelope).
  * @param fallbackStatus - HTTP status, used to synthesise a detail line.
  * @param fallbackReqId - Request id to attribute when the body omits one.
- * @returns Normalised `{ title, detail, code, requestId }`, plus `fields` when the body has them.
+ * @returns Normalised `{ title, detail, code, requestId, status }`, plus `fields` when the body has them.
  */
 export function parseError(
   body: unknown,
@@ -154,6 +154,7 @@ export function parseError(
     detail: error.detail ?? `The server returned HTTP ${fallbackStatus}.`,
     code: error.code ?? 'UNKNOWN',
     requestId: error.requestId ?? fallbackReqId,
+    status: fallbackStatus,
     ...(error.fields ? { fields: error.fields } : {}),
   };
 }
@@ -179,6 +180,8 @@ export interface SubmitError {
   detail: string;
   code: string;
   requestId: string;
+  /** HTTP status; 0 when the request never reached the server. */
+  status?: number;
   fields?: Record<string, unknown>;
 }
 
@@ -228,14 +231,15 @@ export async function submitRegistration(
       return { ok: false, error: parseError(body, res.status, reqId) };
     }
     return { ok: true, body: await readSuccessBody(res, endpoint) };
-  } catch (err) {
+  } catch {
     return {
       ok: false,
       error: {
         title: 'Network error',
-        detail: err instanceof Error ? err.message : 'Could not reach the server.',
+        detail: 'Could not reach the server.',
         code: 'NETWORK_ERROR',
         requestId: '',
+        status: 0,
       },
     };
   }

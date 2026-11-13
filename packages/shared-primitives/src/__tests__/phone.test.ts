@@ -7,7 +7,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalisePhone, normaliseEmail, isEmailAddress } from '../phone/index.js';
+import {
+  normalisePhone,
+  normaliseContactPhone,
+  normaliseEmail,
+  isEmailAddress,
+} from '../phone/index.js';
 
 describe('normalisePhone', () => {
   it('keeps already-canonical E.164', () => {
@@ -52,6 +57,38 @@ describe('normalisePhone', () => {
     if (!r.ok) expect(r.error.message).toMatch(/10-15 digits after country code/);
   });
 
+  it('needs a 10-digit mobile starting 6-9 after +91', () => {
+    for (const raw of [
+      '+91935350600',
+      '+9193535060012',
+      '91935350600',
+      '+911234567890',
+      '+912234567890',
+    ]) {
+      const r = normalisePhone(raw);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toMatch(/10-digit mobile number starting 6-9/);
+    }
+    expect(normalisePhone('+447911123456')).toEqual({ ok: true, value: '+447911123456' });
+  });
+
+  it('drops a trunk 0 and reads 91 and 10 digits as +91', () => {
+    expect(normalisePhone('09876543210')).toEqual({ ok: true, value: '+919876543210' });
+    expect(normalisePhone('919876543210')).toEqual({ ok: true, value: '+919876543210' });
+    expect(normalisePhone('+09876543210').ok).toBe(false);
+  });
+
+  it('says a number cannot start with 0 after the +', () => {
+    expect(normalisePhone('+09876543210')).toEqual({
+      ok: false,
+      error: { message: 'phone cannot start with 0 after the +' },
+    });
+    expect(normalisePhone('012345678')).toEqual({
+      ok: false,
+      error: { message: 'phone has 9 digits; expected 10-15' },
+    });
+  });
+
   it('rejects a too-short number that carries a country-code prefix', () => {
     const r = normalisePhone('+12345');
     expect(r.ok).toBe(false);
@@ -66,6 +103,40 @@ describe('normalisePhone', () => {
     const r = normalisePhone('---');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.message).toMatch(/phone has 0 digits/);
+  });
+});
+
+describe('normaliseContactPhone', () => {
+  it('accepts an Indian landline and a mobile, each with 10 digits after +91', () => {
+    expect(normaliseContactPhone('+918023456789')).toEqual({ ok: true, value: '+918023456789' });
+    expect(normaliseContactPhone('011 2345 6789')).toEqual({ ok: true, value: '+911123456789' });
+    expect(normaliseContactPhone('09876543210')).toEqual({ ok: true, value: '+919876543210' });
+  });
+
+  it('rejects a +91 number that is not 10 digits', () => {
+    const r = normaliseContactPhone('+91935350600');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.message).toMatch(/10 digits after the country code/);
+  });
+
+  it('refuses a +91 number whose first digit is 0', () => {
+    for (const raw of ['+910000000000', '0123456789', '+910123456789']) {
+      const r = normaliseContactPhone(raw);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toMatch(/not starting with 0/);
+    }
+    // A leading 00 is the international prefix, so this reads as `+00000000`.
+    expect(normaliseContactPhone('0000000000')).toEqual({
+      ok: false,
+      error: { message: 'phone cannot start with 0 after the 00' },
+    });
+  });
+
+  it('reads a leading 00 as + for a contact number', () => {
+    expect(normaliseContactPhone('00 44 7911 123456')).toEqual({
+      ok: true,
+      value: '+447911123456',
+    });
   });
 });
 

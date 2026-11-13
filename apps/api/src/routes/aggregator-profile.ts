@@ -247,7 +247,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
-        const phoneR = normalisePhone(raw.phone);
+        const phoneR = await checkedPhone(userStore, auth.aggregatorId, raw.phone);
         if (!phoneR.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneR.error.message,
@@ -412,6 +412,33 @@ function mapAggregatorUpdateError(
     default:
       return 'DB_UNAVAILABLE';
   }
+}
+
+/**
+ * The phone to save: a value equal to the stored one is kept as it is, so a
+ * number saved before the current rule never blocks an unrelated edit; a new
+ * value must pass {@link normalisePhone}.
+ *
+ * @param store - The user store.
+ * @param selfId - The caller's coordinator id.
+ * @param sent - The phone in the request.
+ * @throws {HttpError} DB_UNAVAILABLE when the stored record cannot be read.
+ */
+async function checkedPhone(
+  store: ReturnType<typeof getUserStore>,
+  selfId: string,
+  sent: string,
+): Promise<ReturnType<typeof normalisePhone>> {
+  const current = await store.findById(selfId);
+  if (!current.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(current.error.message),
+      fields: { sub_operation: 'userStore.findById' },
+    });
+  }
+  const stored = current.value?.contactPhone;
+  if (stored && sent.replace(/[^\d+]/g, '') === stored) return { ok: true, value: stored };
+  return normalisePhone(sent);
 }
 
 /**

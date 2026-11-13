@@ -489,11 +489,15 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
         throw httpError('SCHEMA_VALIDATION', {
           detail: 'CSV upload not found in object storage. Complete the upload and retry.',
+          fields: { reason: 'upload_missing' },
         });
       }
       if (head.size === 0) {
         await deleteRejectedUpload(uploadRef, log);
-        throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'Uploaded CSV is empty.',
+          fields: { reason: 'empty' },
+        });
       }
       if (head.size > config.BULK_UPLOAD_MAX_BYTES) {
         await deleteRejectedUpload(uploadRef, log);
@@ -506,6 +510,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
         throw httpError('SCHEMA_VALIDATION', {
           detail: `Uploaded CSV is too large (${head.size} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
+          fields: { reason: 'too_large', max_bytes: config.BULK_UPLOAD_MAX_BYTES },
         });
       }
 

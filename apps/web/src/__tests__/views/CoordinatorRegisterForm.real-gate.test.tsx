@@ -126,7 +126,7 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
     let calls: { url: string; body: string }[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
-      // The org selector's list (always on since 0028) is not a registration.
+      // Only the Default org is listed, so the form preselects it.
       if (String(input).includes('/api/orgs')) {
         return new Response(
           JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
@@ -151,6 +151,7 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
       // The only org (Default) is preselected once the list loads.
       await screen.findByText('Default');
 
+      await screen.findByText('Default');
       // Submitting opens it: false -> true, in the DOM for the first time.
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await screen.findByRole('dialog');

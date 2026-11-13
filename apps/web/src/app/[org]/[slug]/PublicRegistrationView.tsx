@@ -2,12 +2,20 @@
 
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
+import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { z } from 'zod';
+import { fieldLabel } from '@aggregator-dpg/network-config/field-errors';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import { readableFormErrors } from '../../../lib/readable-form-errors';
+import {
+  useFieldErrors,
+  useFieldErrorCopy,
+  withExtraMessages,
+} from '@/components/forms/useFieldErrors';
+import { FieldMessage, useHandFieldErrors } from '@/components/forms/useHandFieldErrors';
+import { readableFormErrors, serverFieldErrors } from '@/lib/readable-form-errors';
+import { requestErrorKind } from '@/lib/request-errors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
@@ -20,7 +28,7 @@ import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
 import type { LinkIdentity } from '@/lib/registration-link';
-import { readErrorEnvelope } from '@/lib/api-error';
+import { readErrorEnvelope, type ErrorEnvelope } from '@/lib/api-error';
 import { summariseIssues } from '@/lib/response-shape-error';
 import { SelectField } from '@/components/ui/SelectField';
 
@@ -68,7 +76,7 @@ type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'done'; submissionId: string; outcome: 'passed' | 'skipped' }
-  | { status: 'error'; title: string; detail: string; code: string };
+  | { status: 'error'; title: string; detail: string };
 
 /**
  * Seconds before the post-submit hand-off to Signals.
@@ -157,36 +165,6 @@ interface ItemLocation {
 export { readableFormErrors };
 
 /**
- * Turns the API's `fields.field_errors` (`{ "address.city": "message" }`) into
- * an RJSF error schema, so each rejected field is marked inline.
- *
- * @param fieldErrors - The `field_errors` map from an error response, if any.
- * @returns The error schema, or `undefined` when there is nothing to mark.
- */
-export function toErrorSchema(fieldErrors: unknown): ErrorSchema | undefined {
-  if (!fieldErrors || typeof fieldErrors !== 'object' || Array.isArray(fieldErrors)) {
-    return undefined;
-  }
-  const root: Record<string, unknown> = {};
-  let marked = false;
-  for (const [path, message] of Object.entries(fieldErrors as Record<string, unknown>)) {
-    if (typeof message !== 'string' || !path) continue;
-    const segments = path.split('.');
-    // Keys come from the server (and, through it, from Signals): a `__proto__`
-    // segment would write onto Object.prototype, so such a path is skipped.
-    if (segments.includes('__proto__')) continue;
-    let node = root;
-    for (const seg of segments) {
-      if (!Object.hasOwn(node, seg)) node[seg] = {};
-      node = node[seg] as Record<string, unknown>;
-    }
-    node['__errors'] = [...((node['__errors'] as string[] | undefined) ?? []), message];
-    marked = true;
-  }
-  return marked ? (root as ErrorSchema) : undefined;
-}
-
-/**
  * Maps a schema property's custom markers to a uiSchema entry for a custom widget.
  *
  * Uses the same markers as the Signals profile form:
@@ -246,6 +224,15 @@ export function resolveMarkerUiSchema(
  *
  * Submit POSTs to the BFF, which proxies to `/public/v1/registrations/create/:slug`.
  */
+/** The identity phone field's `pattern`, so the phone box stores what the schema accepts. */
+function identityPhonePattern(schema: unknown, key: string | undefined): string | undefined {
+  if (!key || !schema || typeof schema !== 'object') return undefined;
+  const props = (schema as { properties?: Record<string, unknown> }).properties;
+  const field = props && Object.hasOwn(props, key) ? props[key] : undefined;
+  const pattern = (field as { pattern?: unknown } | undefined)?.pattern;
+  return typeof pattern === 'string' ? pattern : undefined;
+}
+
 export function PublicRegistrationView({
   org,
   slug,
@@ -261,6 +248,8 @@ export function PublicRegistrationView({
   consentContent = null,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
+  const tRequest = useTranslations('form.request_error');
+  const copy = useFieldErrorCopy();
   // Reuses the register forms' "consent unavailable" copy.
   const tRegister = useTranslations('register');
   const [formData, setFormData] = useState<Record<string, unknown>>({});
@@ -278,11 +267,11 @@ export function PublicRegistrationView({
    * `owned_elsewhere` stops the submit and shows its banner.
    */
   const [lookup, setLookup] = useState<LookupOutcome | null>(null);
-  // Show required-field errors only after the user types or tries to submit.
-  const [showValidation, setShowValidation] = useState(false);
-  // Field errors the server returned for the last submit, shown inline;
-  // cleared as soon as the participant edits the form.
-  const [serverFieldErrors, setServerFieldErrors] = useState<ErrorSchema | undefined>(undefined);
+  // Server messages for the account-only form, keyed by payload key.
+  const [accountOnlyServerErrors, setAccountOnlyServerErrors] = useState<Record<
+    string,
+    string
+  > | null>(null);
   // Coordinates the registrant picked from the address autocomplete, sent as
   // `item_locations` so Signals stores that point. Empty when nothing was
   // picked; Signals then geocodes the address text.
@@ -309,6 +298,11 @@ export function PublicRegistrationView({
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
   const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
   const isMinor = yobValid && derivedAge <= 18;
+  const yobFe = useHandFieldErrors<'year_of_birth'>('public-reg', {
+    year_of_birth: yobValid
+      ? null
+      : { kind: 'required', message: copy.required(t('year_of_birth_label')) },
+  });
   const { data: cfgData, isError: cfgFailed } = useAggregatorConfig();
   const cfg = cfgData ?? DEFAULT_AGGREGATOR_CONFIG;
   /**
@@ -451,6 +445,7 @@ export function PublicRegistrationView({
     }
     return clone;
   }, [schema, identity]);
+  const fieldErrors = useFieldErrors(formSchema);
 
   // Default uiSchema: array fields use checkboxes or a comma-separated input,
   // array and boolean fields span full width, and required fields come first.
@@ -664,16 +659,14 @@ export function PublicRegistrationView({
       }
       if (!res.ok) {
         const error = readErrorEnvelope(body);
-        const inline = toErrorSchema(error.fields?.['field_errors']);
-        if (inline) {
-          setServerFieldErrors(inline);
-          setShowValidation(true);
+        if (showFieldErrors(error)) {
+          setState({ status: 'idle' });
+          return;
         }
         setState({
           status: 'error',
-          title: error.title ?? t('error_submission_title'),
-          detail: error.detail ?? t('error_server_detail', { status: res.status }),
-          code: error.code ?? 'UNKNOWN',
+          title: t('error_submission_title'),
+          detail: submitErrorText(res.status, error),
         });
         return;
       }
@@ -688,17 +681,90 @@ export function PublicRegistrationView({
         outcome: accepted.success && accepted.data.outcome === 'skipped' ? 'skipped' : 'passed',
       });
     } catch (err) {
+      // `fetch` rejects with a TypeError when the request never reached the server.
+      const network = err instanceof TypeError;
+      if (!network) {
+        console.error('[public-registration] submit handling failed', {
+          error_type: err instanceof Error ? err.name : typeof err,
+        });
+      }
       setState({
         status: 'error',
-        title: t('error_network_title'),
-        detail: err instanceof Error ? err.message : t('error_network_detail'),
-        code: 'NETWORK_ERROR',
+        title: t('error_submission_title'),
+        detail: tRequest(network ? 'network' : 'generic'),
       });
     }
   };
 
+  /**
+   * Puts a rejected submit's field errors on their fields.
+   *
+   * @param error - The API's error envelope.
+   * @returns True when at least one message landed on a field.
+   */
+  const showFieldErrors = (error: ErrorEnvelope): boolean => {
+    const phoneKey = identity?.phone;
+    const fields: Record<string, unknown> =
+      withExtraMessages(
+        { ...error?.fields },
+        error?.code === 'INVALID_PHONE' && phoneKey ? { [phoneKey]: t('error_phone_invalid') } : {},
+      ) ?? {};
+    if (!isAccountOnly) return fieldErrors.setServerErrors(fields).complete;
+
+    const flat: Record<string, string> = serverFieldErrorsFlat(fields);
+    const missing: unknown[] = Array.isArray(fields['missing']) ? fields['missing'] : [];
+    for (const key of missing) {
+      if (key === 'phone_or_email') {
+        const target = identity?.phone ?? identity?.email;
+        if (target) flat[target] = t('account_only.errors.contact_required');
+      } else if (typeof key === 'string') {
+        flat[key] = copy.required(fieldLabel(schema, key));
+      }
+    }
+    // Only the fields MinimalIdentityForm shows can carry a message; any other
+    // key (e.g. consent) needs the banner.
+    const shown = new Set(
+      [identity?.name, identity?.phone, identity?.email, 'year_of_birth'].filter(Boolean),
+    );
+    const keys = Object.keys(flat);
+    const onForm = Object.fromEntries(Object.entries(flat).filter(([key]) => shown.has(key)));
+    if (Object.keys(onForm).length > 0) setAccountOnlyServerErrors(onForm);
+    return keys.length > 0 && keys.every((key) => shown.has(key));
+  };
+
+  /** Top-level field messages from the API's field errors, keyed by field. */
+  const serverFieldErrorsFlat = (fields: Record<string, unknown>): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const mapped = serverFieldErrors(fields, formSchema, copy);
+    for (const [key, node] of Object.entries(mapped?.errorSchema ?? {})) {
+      const first = node?.__errors?.[0];
+      if (first) out[key] = first;
+    }
+    return out;
+  };
+
+  /**
+   * One readable sentence for a rejected submit that names no field.
+   *
+   * @param status - HTTP status.
+   * @param error - The API's error envelope.
+   * @returns The message for the banner.
+   */
+  const submitErrorText = (status: number, error: ErrorEnvelope): string => {
+    const code = error?.code;
+    if (code === 'LINK_NOT_LIVE') return t('error_link_not_live');
+    if (code === 'U18_REGISTRATION_REDIRECT') return t('error_u18');
+    if (code === 'CONSENT_REQUIRED') return t('error_consent_required');
+    if (error?.fields?.['code'] === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') {
+      return t('error_profile_limit');
+    }
+    return tRequest(requestErrorKind(status));
+  };
+
   const handleSubmit = async (e: IChangeEvent<Record<string, unknown>>): Promise<void> => {
     const values = (e.formData ?? {}) as Record<string, unknown>;
+    if (!isAccountOnly && showBirthYear && !yobFe.validate()) return;
+    setAccountOnlyServerErrors(null);
     // Birth year for this submit: from the payload (account-only form) or
     // from this component's state (full-profile form).
     const yobRaw = values['year_of_birth'];
@@ -729,7 +795,6 @@ export function PublicRegistrationView({
           status: 'error',
           title: tRegister('consent.load_failed_title'),
           detail: tRegister('consent.load_failed_detail'),
-          code: 'CONSENT_UNAVAILABLE',
         });
         return;
       }
@@ -881,8 +946,8 @@ export function PublicRegistrationView({
           type="button"
           onClick={() => {
             setFormData({});
-            setShowValidation(false);
             setState({ status: 'idle' });
+            yobFe.reset();
             // Reset consent and birth year for the next person, so they see
             // the consent gate and do not inherit the previous person's age.
             setConsentAccepted(false);
@@ -909,10 +974,22 @@ export function PublicRegistrationView({
     activeView = 'form';
   }
 
-  // Render the account-only form while `idle` or `submitting`, so it stays
-  // mounted and keeps its local field state during submit. `done` and
-  // `error` fall through to the shared views below.
-  if (isAccountOnly && (state.status === 'idle' || state.status === 'submitting') && !lookup) {
+  // The account-only form stays mounted until `done`, so a failed submit
+  // keeps what the participant typed.
+  const errorBanner =
+    state.status === 'error' ? (
+      <div
+        ref={errorRef}
+        role="alert"
+        tabIndex={-1}
+        className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-hidden"
+      >
+        <div className="font-semibold">{state.title}</div>
+        <div className="mt-1 text-rose-600">{state.detail}</div>
+      </div>
+    ) : null;
+
+  if (isAccountOnly && state.status !== 'done') {
     return (
       <div
         className="bd-public-light min-h-screen w-full"
@@ -931,9 +1008,22 @@ export function PublicRegistrationView({
           ) : (
             <>
               {backToChooser}
+              {errorBanner}
+              {lookup?.kind === 'owned_elsewhere' ? (
+                <div
+                  role="alert"
+                  data-testid="lookup-owned-elsewhere"
+                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+                >
+                  <div className="font-semibold">{t('lookup.owned_elsewhere_title')}</div>
+                  <div className="mt-1 text-amber-700">{t('lookup.owned_elsewhere_body')}</div>
+                </div>
+              ) : null}
               {/* `busy` is the form's only in-flight flag. */}
               <MinimalIdentityForm
+                serverErrors={accountOnlyServerErrors}
                 identity={identity ?? {}}
+                phonePattern={identityPhonePattern(schema, identity?.phone)}
                 onSubmit={handleMinimalSubmit}
                 brandColor={heroGradient}
                 hintI18nKey={publicHintI18nKey}
@@ -1008,22 +1098,7 @@ export function PublicRegistrationView({
             {activeView === 'form' && (
               <>
                 {backToChooser}
-                {state.status === 'error' ? (
-                  <div
-                    ref={errorRef}
-                    role="alert"
-                    tabIndex={-1}
-                    className="mb-5 rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 scroll-mt-6 outline-hidden"
-                  >
-                    <div className="font-semibold">{state.title}</div>
-                    <div className="mt-1 text-rose-600">{state.detail}</div>
-                    {state.code !== 'UNKNOWN' && (
-                      <div className="mt-2 text-[11px] text-rose-500/80 font-mono">
-                        Code: {state.code}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                {errorBanner}
 
                 {lookup?.kind === 'owned_elsewhere' ? (
                   <div
@@ -1061,7 +1136,6 @@ export function PublicRegistrationView({
                   </div>
                 ) : null}
 
-                {/* Account-only links show only the banner here, never the RJSF form. */}
                 {!isAccountOnly && (
                   <RjsfThemedForm
                     schema={formSchema}
@@ -1076,48 +1150,41 @@ export function PublicRegistrationView({
                       // The multi-value widget already emits this shape.
                       onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
                     }}
-                    onChange={(e) => {
+                    onChange={(e, id) => {
                       setFormData(e.formData as Record<string, unknown>);
-                      if (serverFieldErrors) setServerFieldErrors(undefined);
+                      fieldErrors.onFormChange(id, { before: formData, after: e.formData });
                     }}
                     onSubmit={handleSubmit}
-                    // Submit is never disabled by an invalid field: the click
-                    // validates, reveals errors and lands in `onError`. Live
-                    // validation starts only then.
-                    liveValidate={showValidation}
-                    showErrorList={showValidation ? 'top' : false}
+                    {...fieldErrors.formProps}
+                    showErrorList={false}
                     focusOnFirstError
                     noHtml5Validate
-                    transformErrors={(errors) => readableFormErrors(errors, formSchema)}
-                    {...(serverFieldErrors ? { extraErrors: serverFieldErrors } : {})}
-                    onError={(errors) => {
-                      setShowValidation(true);
-                      setState({
-                        status: 'error',
-                        title: t('validation_error_title'),
-                        detail: errors.map((e) => e.stack).join(' ') || t('validation_required'),
-                        code: 'VALIDATION',
-                      });
-                    }}
                   >
                     <div className="mt-4 flex flex-col gap-3">
                       {showBirthYear && (
-                        <label className="block">
-                          <span className="text-[14px] font-medium text-(--bd-fg)">
-                            {t('year_of_birth_label')}
-                            <span className="text-rose-500 ml-0.5">*</span>
-                          </span>
-                          <SelectField
-                            value={yearOfBirth}
-                            onChange={setYearOfBirth}
-                            className="mt-1"
-                            required
-                            placeholder={t('year_of_birth_placeholder')}
-                            options={Array.from({ length: 101 }, (_, i) => currentYear - i).map(
-                              (y) => ({ value: String(y), label: y }),
-                            )}
+                        <div>
+                          <label className="block">
+                            <span className="text-[14px] font-medium text-(--bd-fg)">
+                              {t('year_of_birth_label')}
+                              <span className="text-rose-500 ml-0.5">*</span>
+                            </span>
+                            <SelectField
+                              {...yobFe.controlProps('year_of_birth')}
+                              value={yearOfBirth}
+                              onChange={setYearOfBirth}
+                              className="mt-1"
+                              required
+                              placeholder={t('year_of_birth_placeholder')}
+                              options={Array.from({ length: 101 }, (_, i) => currentYear - i).map(
+                                (y) => ({ value: String(y), label: y }),
+                              )}
+                            />
+                          </label>
+                          <FieldMessage
+                            id={yobFe.errorId('year_of_birth')}
+                            message={yobFe.message('year_of_birth')}
                           />
-                        </label>
+                        </div>
                       )}
                       {showConsent && isMinor && (
                         // Minor: no consent here; they accept terms in the
@@ -1127,15 +1194,16 @@ export function PublicRegistrationView({
                         </div>
                       )}
                       {(() => {
-                        // Require a valid birth year only when the domain collects
-                        // it. Consent does not disable the button; submit opens
-                        // the consent gate when needed.
-                        const blocked =
-                          state.status === 'submitting' || (showBirthYear && !yobValid);
+                        // Disabled only in flight; the click shows every field's error.
+                        const blocked = state.status === 'submitting';
                         return (
                           <button
                             type="submit"
                             disabled={blocked}
+                            onClick={() => {
+                              fieldErrors.markAttempted();
+                              yobFe.markAttempted();
+                            }}
                             // Same background and text colour in both states;
                             // disabled only lowers opacity.
                             style={{ backgroundColor: cfg.brand.primary_color }}

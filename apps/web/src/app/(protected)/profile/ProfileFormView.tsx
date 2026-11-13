@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../components/shell/Topbar';
 import { Button } from '../../../components/ui/Button';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { FieldMessage, useHandFieldErrors } from '@/components/forms/useHandFieldErrors';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { I } from '../../../icons';
 import type { ProfileApiResponse } from '../../../services/profile.service';
@@ -121,6 +122,9 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
   const updatableFields = useMemo(() => collectUpdatableFields(schema), [schema]);
   const hasChanges = updatableFields.some((f) => (newValues[f.key] ?? '').trim() !== '');
+  const requestFe = useHandFieldErrors<'values'>('update-request', {
+    values: hasChanges ? null : { kind: 'required', message: t('update_request_none') },
+  });
 
   const closeRequest = (): void => {
     setRequesting(false);
@@ -189,7 +193,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                     <span>{t('col_current')}</span>
                     <span>{t('col_requested')}</span>
                   </div>
-                  {updatableFields.map((f) => (
+                  {updatableFields.map((f, i) => (
                     <div
                       key={f.key}
                       className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr_1.3fr] gap-1.5 md:gap-3 md:items-center"
@@ -200,6 +204,8 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                       </div>
                       <input
                         className="bd-input"
+                        {...(i === 0 ? requestFe.controlProps('values') : {})}
+                        aria-label={f.label}
                         value={newValues[f.key] ?? ''}
                         placeholder={t('new_value_placeholder')}
                         onChange={(e) => {
@@ -210,9 +216,12 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                       />
                     </div>
                   ))}
+                  <FieldMessage
+                    id={requestFe.errorId('values')}
+                    message={requestFe.message('values')}
+                  />
                 </div>
               )}
-
               {requestSent && (
                 <div className="mt-3 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 flex items-start gap-2">
                   <I.alert size={14} className="mt-0.5 shrink-0" />
@@ -225,8 +234,10 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
                 </Button>
                 <Button
                   icon={<I.check size={14} />}
-                  disabled={!hasChanges || requestSent}
-                  onClick={() => setRequestSent(true)}
+                  disabled={requestSent}
+                  onClick={() => {
+                    if (requestFe.validate()) setRequestSent(true);
+                  }}
                 >
                   {t('btn_submit_request')}
                 </Button>

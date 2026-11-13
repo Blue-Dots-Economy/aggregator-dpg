@@ -12,8 +12,9 @@
  * @module apps/web/lib/FormRuntimeConfigProvider
  */
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { DEFAULT_COLLEGE_DATASET, type FormRuntimeConfig } from './form-runtime-config';
+import { parsePhoneCountries, type PhoneCountries } from './phone';
 
 const FormRuntimeConfigContext = createContext<FormRuntimeConfig | null>(null);
 
@@ -42,4 +43,14 @@ export function FormRuntimeConfigProvider({
  */
 export function useFormRuntimeConfig(): FormRuntimeConfig {
   return useContext(FormRuntimeConfigContext) ?? FALLBACK_CONFIG;
+}
+
+/**
+ * The countries a phone field offers, from the deployment's `PHONE_COUNTRIES`.
+ *
+ * @returns The parsed list (India only when unset); the first is the default.
+ */
+export function usePhoneCountries(): PhoneCountries {
+  const raw = useFormRuntimeConfig().phoneCountries;
+  return useMemo(() => parsePhoneCountries(raw), [raw]);
 }

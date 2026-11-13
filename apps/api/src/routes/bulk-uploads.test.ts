@@ -890,6 +890,9 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('not found');
+      expect((res.json() as { error: { fields: { reason: string } } }).error.fields.reason).toBe(
+        'upload_missing',
+      );
     });
 
     it('400 SCHEMA_VALIDATION when the stored key is still the pending placeholder', async () => {
@@ -931,6 +934,9 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('empty');
       expect(storage.read(UPLOAD_REF)).toBeUndefined();
+      expect((res.json() as { error: { fields: { reason: string } } }).error.fields.reason).toBe(
+        'empty',
+      );
     });
 
     it('400 SCHEMA_VALIDATION when the uploaded CSV exceeds the max size', async () => {
@@ -944,6 +950,9 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('too large');
+      expect((res.json() as { error: { fields: { reason: string } } }).error.fields.reason).toBe(
+        'too_large',
+      );
       expect(storage.read(UPLOAD_REF)).toBeUndefined();
     });
 

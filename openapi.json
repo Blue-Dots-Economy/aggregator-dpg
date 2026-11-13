@@ -21443,7 +21443,6 @@
                   },
                   "phone": {
                     "type": "string",
-                    "minLength": 3,
                     "maxLength": 20
                   },
                   "type": {

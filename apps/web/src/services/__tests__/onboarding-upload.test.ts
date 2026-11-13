@@ -1,3 +1,4 @@
+import { HttpError } from '@/services/http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BulkUploadEmptyError,
@@ -112,9 +113,10 @@ describe('bulk upload follows the upload instructions', () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(created())
       .mockResolvedValueOnce(new Response('secret body', { status: 403 }));
-    await expect(onboardingService.uploadCsv(file, 'seeker', true)).rejects.toThrow(
-      /^File upload failed \(403\)$/,
-    );
+    const err = await onboardingService.uploadCsv(file, 'seeker', true).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).toMatchObject({ status: 403, code: 'STORAGE_UPLOAD_LINK_EXPIRED' });
+    expect(String((err as Error).message)).not.toContain('secret body');
   });
 
   it('rejects a file over max_bytes before any upload request', async () => {

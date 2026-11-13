@@ -29,6 +29,7 @@ import { useState, type ReactNode } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import messages from '@/i18n/messages/en.json';
 import { RjsfThemedForm, type RjsfThemedFormProps } from '@/components/forms/RjsfThemed';
+import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -773,5 +774,44 @@ describe('<RjsfThemedForm /> wrapper behaviour', () => {
     expect(onSubmit).toHaveBeenCalled();
     const arg = onSubmit.mock.calls[0]![0];
     expect(arg.formData).toEqual({ name: 'Asha' });
+  });
+});
+
+describe('<RjsfThemedForm /> phone fields', () => {
+  const schemaWith = (pattern?: string): RJSFSchema => ({
+    type: 'object',
+    properties: { phone: { type: 'string', title: 'Phone', ...(pattern ? { pattern } : {}) } },
+  });
+  const hasPhoneBox = () => screen.queryByLabelText('Country code') !== null;
+
+  it('gives the phone box to a field whose pattern takes an Indian number', () => {
+    renderThemed({
+      schema: schemaWith('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9})$'),
+      formData: {},
+      onChange: () => {},
+    });
+    expect(hasPhoneBox()).toBe(true);
+  });
+
+  it('keeps a plain text box when the field has no pattern', () => {
+    renderThemed({ schema: schemaWith(), formData: {}, onChange: () => {} });
+    expect(hasPhoneBox()).toBe(false);
+  });
+
+  it('gives the phone box to a +44 pattern only when GB is configured', () => {
+    const schema = schemaWith('^\\+44[0-9]{10}$');
+    const { unmount } = renderThemed({ schema, formData: {}, onChange: () => {} });
+    expect(hasPhoneBox()).toBe(false);
+    unmount();
+    render(
+      <Wrapper>
+        <FormRuntimeConfigProvider
+          value={{ collegeDataset: 'ka', phoneCountries: 'IN:+91,GB:+44' }}
+        >
+          <RjsfThemedForm schema={schema} formData={{}} onChange={() => {}} />
+        </FormRuntimeConfigProvider>
+      </Wrapper>,
+    );
+    expect(hasPhoneBox()).toBe(true);
   });
 });
