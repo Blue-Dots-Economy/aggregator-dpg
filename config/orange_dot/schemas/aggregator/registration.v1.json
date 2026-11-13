@@ -81,8 +81,7 @@
             }
           }
         }
-      },
-      "x-org-detail": true
+      }
     },
     "contact": {
       "type": "object",
