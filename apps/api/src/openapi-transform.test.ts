@@ -10,7 +10,8 @@ import { openApiTransform } from './openapi-transform.js';
 
 function run(schema: unknown): Record<string, unknown> {
   generated.schema = schema;
-  return openApiTransform({ schema: {}, url: '/x' }).schema as Record<string, unknown>;
+  const input = { schema: {}, url: '/x' } as Parameters<typeof openApiTransform>[0];
+  return openApiTransform(input).schema as Record<string, unknown>;
 }
 
 describe('openApiTransform', () => {

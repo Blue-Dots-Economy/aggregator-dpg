@@ -6,7 +6,7 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import { z } from 'zod';
 
-const JsonObjectSchema = z.record(z.unknown());
+const JsonObjectSchema = z.record(z.string(), z.unknown());
 
 /**
  * Parses JSON text that holds an object.
@@ -39,7 +39,7 @@ export function readJsonObject(value: unknown): Record<string, unknown> | null {
  */
 const JsonSchemaKeywordsSchema = z.object({
   type: z.union([z.string(), z.array(z.string())]).optional(),
-  properties: z.record(z.unknown()).optional(),
+  properties: z.record(z.string(), z.unknown()).optional(),
 });
 
 /** Narrows a JSON object to a JSON Schema once its `type` and `properties` have the right form. */

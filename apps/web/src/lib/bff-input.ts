@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 /** 32 hex digits with an optional hyphen after any group of four. */
 const POSTGRES_UUID_BODY_RE = /^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/i;
@@ -52,8 +52,8 @@ export function invalidQueryResponse(): NextResponse {
   );
 }
 
-/** A query schema: an object, optionally wrapped in a refinement. */
-export type QuerySchema = z.AnyZodObject | z.ZodEffects<z.AnyZodObject>;
+/** A query schema: an object, optionally refined. */
+export type QuerySchema = z.ZodObject;
 
 /** Outcome of {@link parseQuery}: the rebuilt search string, or a ready 400. */
 export type QueryResult = { ok: true; search: string } | { ok: false; response: NextResponse };
@@ -70,7 +70,7 @@ export type QueryResult = { ok: true; search: string } | { ok: false; response: 
  * @returns `{ ok: true, search }` (`''` or `?k=v…`), or `{ ok: false, response }`.
  */
 export function parseQuery(params: URLSearchParams, schema: QuerySchema): QueryResult {
-  const shape = schema instanceof z.ZodEffects ? schema.innerType().shape : schema.shape;
+  const shape = schema.shape;
   const raw = new URLSearchParams();
   for (const key of Object.keys(shape)) {
     const value = params.get(key);

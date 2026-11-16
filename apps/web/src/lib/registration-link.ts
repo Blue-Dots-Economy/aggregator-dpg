@@ -21,9 +21,9 @@ export const ResolveResponseSchema = z.object({
   network: z.string().optional(),
   /** Domain id declared by the active network, for example `seeker`. */
   domain: z.string(),
-  context: z.record(z.unknown()),
+  context: z.record(z.string(), z.unknown()),
   /** JSON Schema for the link's domain. `null` for `account_only` links. */
-  schema: z.unknown(),
+  schema: z.unknown().optional(),
   /** Identity field names for the domain, used by the account-only form. */
   identity: LinkIdentitySchema.optional(),
   /** Registration mode key, for example `voice` or `form`. */

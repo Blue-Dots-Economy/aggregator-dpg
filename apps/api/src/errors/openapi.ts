@@ -18,7 +18,7 @@ export const ErrorEnvelopeSchema = z
         title: z.string(),
         detail: z.string(),
         docs: z.string().optional(),
-        fields: z.record(z.unknown()).optional(),
+        fields: z.record(z.string(), z.unknown()).optional(),
         requestId: z.string(),
         timestamp: z.string(),
       })

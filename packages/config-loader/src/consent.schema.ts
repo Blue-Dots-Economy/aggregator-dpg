@@ -50,7 +50,7 @@ export const DocSchema = z
 
     if (!nums.includes(doc.current_version)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message: `current_version ${doc.current_version} is not present in versions [${nums.join(', ')}]`,
         path: ['current_version'],
       });
@@ -60,7 +60,7 @@ export const DocSchema = z
     for (const num of nums) {
       if (seen.has(num)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `Duplicate version number ${num} in versions array`,
           path: ['versions'],
         });

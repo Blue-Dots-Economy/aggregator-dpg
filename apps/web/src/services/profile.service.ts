@@ -30,7 +30,7 @@ const BecknContactSchema = z.object({
 const BecknLocationSchema = z
   .object({
     geo: z.object({ type: z.string(), coordinates: z.unknown().optional() }).passthrough(),
-    address: z.record(z.string().optional()).optional(),
+    address: z.record(z.string(), z.string().optional()).optional(),
   })
   .passthrough();
 

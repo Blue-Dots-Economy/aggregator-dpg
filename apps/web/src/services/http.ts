@@ -23,7 +23,7 @@ const ErrorEnvelopeSchema = z.object({
   detail: optionalText,
   message: optionalText,
   requestId: optionalText,
-  fields: z.record(z.unknown()).optional().catch(undefined),
+  fields: z.record(z.string(), z.unknown()).optional().catch(undefined),
 });
 
 /** API errors nest the envelope under `error`; some bodies are flat. */

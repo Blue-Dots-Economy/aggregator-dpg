@@ -19,7 +19,7 @@ export const voiceContentSchema = z
     batch_name: z.string().min(1).max(200).optional(),
     variables: z.array(z.string().min(1)).optional(),
     // Raya start passthrough — forwarded verbatim, never defaulted:
-    schedule: z.record(z.unknown()).optional(),
+    schedule: z.record(z.string(), z.unknown()).optional(),
     max_retries: z.number().int().nonnegative().optional(),
     retry_after_hrs: z.number().nonnegative().optional(),
     max_concurrent_calls: z.number().int().positive().optional(),

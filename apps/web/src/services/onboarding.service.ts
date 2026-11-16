@@ -26,7 +26,7 @@ export const ApiRegistrationLinkSchema = z.object({
    * immutable. The network config maps modes to form shapes.
    */
   registration_mode: z.string().optional(),
-  context: z.record(z.unknown()),
+  context: z.record(z.string(), z.unknown()),
   expires_at: z.string().nullable(),
   /** Set only while the link is live; `null` for drafts and retired links. */
   public_url: z.string().nullable(),
