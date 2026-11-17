@@ -5,13 +5,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _setRbacRuntime } from '../runtime.js';
 import {
-  ensureDefaultRolesForAll,
   reconcileTokenRoles,
   startTokenRolesRepair,
   stopTokenRolesRepair,
   sweepTokenRoles,
-  type ActiveCoordinatorRow,
-  type DefaultRolesDeps,
   type SweepDeps,
 } from '../token-roles-sweep.js';
 import type { TokenRolesOutcome } from '../token-roles.js';
@@ -43,7 +40,6 @@ function fakeDeps(over: Partial<SweepDeps> = {}, outcome: TokenRolesOutcome = 's
       return outcome;
     },
     now: () => NOW,
-    ensureDefaultRoles: async () => ({ checked: 0, granted: 0, failed: 0 }),
     ...over,
   };
   return { deps, synced, windows };
@@ -99,23 +95,6 @@ describe('reconcileTokenRoles', () => {
     ]);
   });
 
-  it('fills in missing default roles before it syncs the claims', async () => {
-    const order: string[] = [];
-    const { deps } = fakeDeps({
-      ensureDefaultRoles: async () => {
-        order.push('defaults');
-        return { checked: 2, granted: 1, failed: 0 };
-      },
-      sync: async (id) => {
-        order.push(`sync:${id}`);
-        return 'synced';
-      },
-    });
-    expect(await reconcileTokenRoles(deps)).toBe('ran');
-    expect(order[0]).toBe('defaults');
-    expect(order).toHaveLength(4);
-  });
-
   it('syncs a few at a time and covers every user', async () => {
     const ids = Array.from({ length: 12 }, (_, i) => `u${i}`);
     let inFlight = 0;
@@ -156,98 +135,5 @@ describe('startTokenRolesRepair', () => {
     const spy = vi.spyOn(globalThis, 'setInterval');
     startTokenRolesRepair();
     expect(spy).not.toHaveBeenCalled();
-  });
-});
-
-describe('ensureDefaultRolesForAll', () => {
-  const row = (id: string, orgId: string | null = `org-${id}`): ActiveCoordinatorRow => ({
-    id,
-    orgId,
-    orgType: 'aggregator',
-    owner: `owner-${id}`,
-  });
-
-  /** Fake dependencies recording each grant call; `outcome` decides what each grant reports. */
-  function deps(
-    rows: ActiveCoordinatorRow[],
-    outcome: (id: string) => { granted: string[]; present: string[]; skipped: string[] } = () => ({
-      granted: ['data_export', 'pii_access'],
-      present: [],
-      skipped: [],
-    }),
-  ) {
-    const calls: unknown[][] = [];
-    const d: DefaultRolesDeps = {
-      listActiveCoordinators: async () => rows,
-      grant: async (...args) => {
-        calls.push(args);
-        return outcome(args[0]);
-      },
-    };
-    return { d, calls };
-  }
-
-  it('grants the missing roles to every active coordinator as a backfill, without a token sync', async () => {
-    const { d, calls } = deps([row('a'), row('b')]);
-
-    expect(await ensureDefaultRolesForAll(d)).toEqual({ checked: 2, granted: 4, failed: 0 });
-    expect(calls).toEqual([
-      [
-        'a',
-        { id: 'org-a', orgType: 'aggregator' },
-        'owner-a',
-        { reason: 'default_backfill', syncToken: false },
-      ],
-      [
-        'b',
-        { id: 'org-b', orgType: 'aggregator' },
-        'owner-b',
-        { reason: 'default_backfill', syncToken: false },
-      ],
-    ]);
-  });
-
-  it('counts roles that could not be granted, and roles already held as nothing to do', async () => {
-    const { d } = deps([row('a'), row('b')], (id) =>
-      id === 'a'
-        ? { granted: [], present: ['data_export', 'pii_access'], skipped: [] }
-        : { granted: ['data_export'], present: [], skipped: ['pii_access'] },
-    );
-
-    expect(await ensureDefaultRolesForAll(d)).toEqual({ checked: 2, granted: 1, failed: 1 });
-  });
-
-  it('skips a row with no organisation', async () => {
-    const { d, calls } = deps([row('a', null), row('b')]);
-
-    expect(await ensureDefaultRolesForAll(d)).toEqual({ checked: 1, granted: 2, failed: 0 });
-    expect(calls.map((c) => c[0])).toEqual(['b']);
-  });
-
-  it('covers every coordinator when there are more than one batch', async () => {
-    const rows = Array.from({ length: 12 }, (_, i) => row(`u${i}`));
-    const { d, calls } = deps(rows);
-
-    expect((await ensureDefaultRolesForAll(d)).checked).toBe(12);
-    expect(calls).toHaveLength(12);
-  });
-
-  it('never throws when the coordinators cannot be read', async () => {
-    const d: DefaultRolesDeps = {
-      listActiveCoordinators: async () => {
-        throw new Error('db down');
-      },
-      grant: vi.fn(),
-    };
-
-    expect(await ensureDefaultRolesForAll(d)).toEqual({ checked: 0, granted: 0, failed: -1 });
-    expect(d.grant).not.toHaveBeenCalled();
-  });
-
-  it('does nothing when there are no active coordinators', async () => {
-    const { d, calls } = deps([]);
-
-    expect(await ensureDefaultRolesForAll(d)).toEqual({ checked: 0, granted: 0, failed: 0 });
-    expect(calls).toEqual([]);
   });
 });

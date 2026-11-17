@@ -272,14 +272,7 @@
       "idx": 38,
       "version": "7",
       "when": 1792300000000,
-      "tag": "0038_pii_access_no_expiry",
-      "breakpoints": true
-    },
-    {
-      "idx": 39,
-      "version": "7",
-      "when": 1792400000000,
-      "tag": "0039_coordinator_role_name",
+      "tag": "0038_coordinator_base_permissions",
       "breakpoints": true
     }
   ]

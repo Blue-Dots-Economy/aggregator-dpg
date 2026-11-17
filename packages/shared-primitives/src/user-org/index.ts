@@ -24,14 +24,6 @@ export type UserOrgStatus = z.infer<typeof UserOrgStatusSchema>;
 export const OrgTypeSchema = z.enum(['network_facilitator', 'aggregator']);
 export type OrgType = z.infer<typeof OrgTypeSchema>;
 
-/**
- * The additional roles a coordinator gets when it joins from an invite. With
- * the base Coordinator role they make the capabilities the invite screen
- * lists. The API grants them on activation and the console offers no way to
- * remove them.
- */
-export const INVITE_DEFAULT_ROLE_KEYS: readonly string[] = ['data_export', 'pii_access'];
-
 /** Key of an org's "known as" value. Membership in the parent's list is checked by the API. */
 export const KnownAsKeySchema = z
   .string()

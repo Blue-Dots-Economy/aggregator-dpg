@@ -20,7 +20,7 @@ import type { RoleDefinition } from './interface.js';
 export const BUILTIN_ROLES: readonly RoleDefinition[] = [
   {
     key: 'coordinator',
-    name: 'Onboard Seekers & Providers',
+    name: 'Coordinator',
     description: 'An approved coordinator of an aggregator organisation.',
     isBuiltin: true,
     accountType: 'coordinator',
@@ -28,7 +28,15 @@ export const BUILTIN_ROLES: readonly RoleDefinition[] = [
     assignableOrgTypes: ['aggregator'],
     assignedBy: null,
     maxDays: null,
-    permissions: ['profiles.view', 'profiles.onboard', 'campaigns.run'],
+    // Every team member exports profile lists and sees personal details, so these
+    // come with membership rather than per-person grants.
+    permissions: [
+      'profiles.view',
+      'profiles.onboard',
+      'campaigns.run',
+      'profiles.export',
+      'profiles.view_pii',
+    ],
   },
   {
     key: 'data_export',
@@ -109,7 +117,7 @@ export const BUILTIN_ROLES: readonly RoleDefinition[] = [
     baseFor: null,
     assignableOrgTypes: ['aggregator'],
     assignedBy: 'org.manage',
-    maxDays: null,
+    maxDays: 90,
     permissions: ['profiles.view_pii'],
   },
 ];

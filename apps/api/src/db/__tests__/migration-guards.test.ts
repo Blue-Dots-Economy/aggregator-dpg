@@ -32,10 +32,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0036_invite_role',
   // Adds `users.locations` (default `[]`); idempotent.
   '0037_user_locations',
-  // Removes the day limit from the built-in PII Access role; idempotent.
-  '0038_pii_access_no_expiry',
-  // Renames the built-in Coordinator role's display name; idempotent.
-  '0039_coordinator_role_name',
+  // Adds profiles.export and profiles.view_pii to the built-in Coordinator role; idempotent.
+  '0038_coordinator_base_permissions',
 ];
 
 const journal: JournalEntry[] = [

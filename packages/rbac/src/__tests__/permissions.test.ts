@@ -19,6 +19,13 @@ const index = indexRoles([
     assignedBy: 'network.administer',
     permissions: ['profiles.act_on_behalf'],
   }),
+  // A coordinator role that adds a permission the base role does not have.
+  buildRole({
+    key: 'verifier',
+    accountType: 'coordinator',
+    assignedBy: 'org.manage',
+    permissions: ['profiles.verify'],
+  }),
 ]);
 
 const NOW = 1_800_000_000_000;
@@ -35,7 +42,13 @@ const coordinator = (held: HeldRole[] = []): PermissionSubject => ({
   memberships: [A],
   held,
 });
-const COORD = ['campaigns.run', 'profiles.onboard', 'profiles.view'];
+const COORD = [
+  'campaigns.run',
+  'profiles.export',
+  'profiles.onboard',
+  'profiles.view',
+  'profiles.view_pii',
+];
 
 describe('baseRoleOf', () => {
   it('maps member, aggregator owner and root owner', () => {
@@ -51,21 +64,21 @@ describe('effectivePermissions', () => {
   });
 
   it('adds a live additional role held in the organisation', () => {
-    const held = [{ roleKey: 'data_export', orgId: 'A', expiresAt: null }];
+    const held = [{ roleKey: 'verifier', orgId: 'A', expiresAt: null }];
     expect(effectivePermissions(index, coordinator(held), new Set(['A']), NOW)).toEqual(
-      [...COORD, 'profiles.export'].sort(),
+      [...COORD, 'profiles.verify'].sort(),
     );
   });
 
   it('ignores an expired additional role', () => {
-    const held = [{ roleKey: 'pii_access', orgId: 'A', expiresAt: NOW }];
+    const held = [{ roleKey: 'verifier', orgId: 'A', expiresAt: NOW }];
     expect(effectivePermissions(index, coordinator(held), new Set(['A']), NOW)).toEqual(COORD);
   });
 
   it('counts a role with an expiry still in the future', () => {
-    const held = [{ roleKey: 'pii_access', orgId: 'A', expiresAt: NOW + 1 }];
+    const held = [{ roleKey: 'verifier', orgId: 'A', expiresAt: NOW + 1 }];
     expect(effectivePermissions(index, coordinator(held), new Set(['A']), NOW)).toContain(
-      'profiles.view_pii',
+      'profiles.verify',
     );
   });
 
@@ -74,7 +87,7 @@ describe('effectivePermissions', () => {
   });
 
   it('ignores a held role in an organisation the user is not part of', () => {
-    const held = [{ roleKey: 'data_export', orgId: 'B', expiresAt: null }];
+    const held = [{ roleKey: 'verifier', orgId: 'B', expiresAt: null }];
     expect(effectivePermissions(index, coordinator(held), null, NOW)).toEqual(COORD);
   });
 

@@ -36,7 +36,13 @@ const MATRIX: Record<string, string[]> = {
     'profiles.view',
   ],
   org_onboarder: ['orgs.onboard', 'profiles.move', 'profiles.verify'],
-  coordinator: ['campaigns.run', 'profiles.onboard', 'profiles.view'],
+  coordinator: [
+    'campaigns.run',
+    'profiles.export',
+    'profiles.onboard',
+    'profiles.view',
+    'profiles.view_pii',
+  ],
   pii_access: ['profiles.view_pii'],
   data_export: ['profiles.export'],
 };
@@ -64,7 +70,7 @@ describe('BUILTIN_ROLES', () => {
     });
     expect(role('pii_access')).toMatchObject({
       assignedBy: 'org.manage',
-      maxDays: null,
+      maxDays: 90,
       accountType: 'coordinator',
     });
     expect(role('data_export')).toMatchObject({ assignedBy: 'org.manage', maxDays: null });

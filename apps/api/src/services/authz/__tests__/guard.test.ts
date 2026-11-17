@@ -11,6 +11,7 @@ import {
   listCapabilitiesForTargets,
   permissionsByOrg,
 } from '../guard.js';
+import { buildRole } from '@aggregator-dpg/rbac/testing';
 import { _setRbacRuntime } from '../runtime.js';
 import { shippedRoleIndex } from '../testing.js';
 import {
@@ -20,8 +21,21 @@ import {
   type Actor,
 } from '../../auth/actor/index.js';
 
-const roles = await shippedRoleIndex();
-const COORDINATOR = ['campaigns.run', 'profiles.onboard', 'profiles.view'];
+// A coordinator role that adds a permission the base role does not have.
+const VERIFIER = buildRole({
+  key: 'verifier',
+  accountType: 'coordinator',
+  assignedBy: 'org.manage',
+  permissions: ['profiles.verify'],
+});
+const roles = await shippedRoleIndex([VERIFIER]);
+const COORDINATOR = [
+  'campaigns.run',
+  'profiles.export',
+  'profiles.onboard',
+  'profiles.view',
+  'profiles.view_pii',
+];
 
 function req() {
   const log = { debug: vi.fn(), warn: vi.fn() };
@@ -59,12 +73,12 @@ describe('decisionInput', () => {
   it('adds a live additional role in the target organisation', () => {
     const actor: Actor = {
       ...coordinator,
-      roles: [{ roleKey: 'data_export', orgId: 'org-a', expiresAt: null }],
+      roles: [{ roleKey: 'verifier', orgId: 'org-a', expiresAt: null }],
     };
     const target = { id: 'org-a', orgType: 'aggregator' as const, ancestorIds: [] };
-    const input = decisionInput(roles, actor, 'profiles.export', target, 0);
+    const input = decisionInput(roles, actor, 'profiles.verify', target, 0);
     expect(input.org).toEqual({ id: 'org-a', orgType: 'aggregator' });
-    expect(input.actor.permissions).toEqual([...COORDINATOR, 'profiles.export'].sort());
+    expect(input.actor.permissions).toEqual([...COORDINATOR, 'profiles.verify'].sort());
   });
 
   it('gives nothing in an organisation the actor is not part of', () => {
@@ -95,16 +109,23 @@ describe('checkCapability modes', () => {
     });
   });
 
+  it('allows a plain team member to export and see personal details through the base role', async () => {
+    setup('enforce');
+    for (const capability of ['profiles.export', 'profiles.view_pii'] as const) {
+      expect((await checkCapability(req(), coordinator, capability)).allowed).toBe(true);
+    }
+  });
+
   it('denies in enforce mode and logs a failure', async () => {
     setup('enforce');
     const r = req();
-    const out = await checkCapability(r, coordinator, 'profiles.view_pii');
+    const out = await checkCapability(r, coordinator, 'profiles.verify');
     expect(out).toMatchObject({ allowed: false, decision: { reasons: ['not_held'] } });
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'rbac.decide',
         status: 'failure',
-        capability: 'profiles.view_pii',
+        capability: 'profiles.verify',
       }),
     );
   });
@@ -112,10 +133,10 @@ describe('checkCapability modes', () => {
   it('only logs a deny in log mode, unless strict', async () => {
     setup('log');
     const r = req();
-    const out = await checkCapability(r, coordinator, 'profiles.view_pii');
+    const out = await checkCapability(r, coordinator, 'profiles.verify');
     expect(out).toMatchObject({ allowed: true, decision: { allow: false } });
     expect(r.spy.warn).toHaveBeenCalledWith(expect.objectContaining({ status: 'skipped' }));
-    const strict = await checkCapability(req(), coordinator, 'profiles.view_pii', { strict: true });
+    const strict = await checkCapability(req(), coordinator, 'profiles.verify', { strict: true });
     expect(strict).toMatchObject({ allowed: false });
   });
 
@@ -131,12 +152,12 @@ describe('checkCapability', () => {
     setup('enforce');
     const actor: Actor = {
       ...coordinator,
-      roles: [{ roleKey: 'pii_access', orgId: 'org-a', expiresAt: 100 }],
+      roles: [{ roleKey: 'verifier', orgId: 'org-a', expiresAt: 100 }],
     };
-    expect((await checkCapability(req(), actor, 'profiles.view_pii', { now: 99 })).allowed).toBe(
+    expect((await checkCapability(req(), actor, 'profiles.verify', { now: 99 })).allowed).toBe(
       true,
     );
-    expect((await checkCapability(req(), actor, 'profiles.view_pii', { now: 100 })).allowed).toBe(
+    expect((await checkCapability(req(), actor, 'profiles.verify', { now: 100 })).allowed).toBe(
       false,
     );
   });

@@ -18,9 +18,7 @@
 
 import { config } from '../../config.js';
 import { getDb } from '../../db/client.js';
-import { and, eq } from 'drizzle-orm';
-import { organisations, users } from '../../db/schema.js';
-import { grantInviteDefaultRoles } from './roles.js';
+import { users } from '../../db/schema.js';
 import { logger } from '../../logger.js';
 import { getRedis } from '../redis/index.js';
 import { getRoleStore } from '../role-store/index.js';
@@ -40,11 +38,6 @@ export interface SweepDeps {
   once(name: string, ttlMs: number, fn: () => Promise<void>): Promise<boolean>;
   /** Syncs one user. */
   sync(userId: string, reason: string): Promise<TokenRolesOutcome>;
-  /**
-   * Gives every active coordinator the default roles it is missing, before
-   * the claims are synced. Never throws.
-   */
-  ensureDefaultRoles(): Promise<DefaultRolesSummary>;
   /** Epoch milliseconds. */
   now(): number;
 }
@@ -77,7 +70,6 @@ export function defaultSweepDeps(): SweepDeps {
       return true;
     },
     sync: (userId, reason) => syncTokenRoles(userId, reason),
-    ensureDefaultRoles: () => ensureDefaultRolesForAll(),
     now: () => Date.now(),
   };
 }
@@ -174,99 +166,10 @@ export async function reconcileTokenRoles(
   deps: SweepDeps = defaultSweepDeps(),
 ): Promise<'ran' | 'skipped' | 'failed'> {
   return runJob('reconcile', 10 * 60_000, deps, async () => {
-    const defaults = await deps.ensureDefaultRoles();
     const ids = await deps.listUserIds();
     const outcomes = await syncAll(ids, 'reconcile', deps);
-    return { users: ids.length, ...outcomes, default_roles: defaults };
+    return { users: ids.length, ...outcomes };
   });
-}
-
-/** What {@link ensureDefaultRolesForAll} did, as counts. */
-export interface DefaultRolesSummary {
-  /** Active coordinators checked. */
-  checked: number;
-  /** Role assignments written. */
-  granted: number;
-  /** Roles that could not be granted, or `-1` when the coordinators could not be read. */
-  failed: number;
-}
-
-/** An active coordinator and its organisation, as the default-role check reads them. */
-export interface ActiveCoordinatorRow {
-  id: string;
-  orgId: string | null;
-  orgType: 'network_facilitator' | 'aggregator';
-  /** The organisation's owner, recorded as the grantor. */
-  owner: string;
-}
-
-/** What {@link ensureDefaultRolesForAll} needs; injectable for tests. */
-export interface DefaultRolesDeps {
-  /** Every active coordinator with its organisation. May throw on a database error. */
-  listActiveCoordinators(): Promise<ActiveCoordinatorRow[]>;
-  /** Grants the missing default roles to one coordinator. */
-  grant: typeof grantInviteDefaultRoles;
-}
-
-/** Reads every active coordinator with its organisation's type and owner. */
-async function listActiveCoordinators(): Promise<ActiveCoordinatorRow[]> {
-  return getDb()
-    .select({
-      id: users.id,
-      orgId: users.orgId,
-      orgType: organisations.orgType,
-      owner: organisations.orgOwner,
-    })
-    .from(users)
-    .innerJoin(organisations, eq(organisations.id, users.orgId))
-    .where(and(eq(users.userType, 'coordinator'), eq(users.status, 'active')));
-}
-
-/**
- * Gives every active coordinator the invite default roles it does not hold,
- * audited as granted by its organisation's owner. Backfills coordinators who
- * joined before the defaults existed, and repairs a grant that failed at
- * activation. Never throws; the reconcile that calls it syncs the claims.
- *
- * @param deps - Dependencies; the app's own by default.
- * @returns Counts of what was checked, granted and failed.
- */
-export async function ensureDefaultRolesForAll(
-  deps: DefaultRolesDeps = { listActiveCoordinators, grant: grantInviteDefaultRoles },
-): Promise<DefaultRolesSummary> {
-  const summary: DefaultRolesSummary = { checked: 0, granted: 0, failed: 0 };
-  let rows: ActiveCoordinatorRow[];
-  try {
-    rows = await deps.listActiveCoordinators();
-  } catch (e) {
-    logger.warn({
-      operation: 'rbac.roles.ensureDefaults',
-      status: 'failure',
-      error: errorMessage(e),
-      error_type: errorType(e),
-    });
-    return { ...summary, failed: -1 };
-  }
-  for (let i = 0; i < rows.length; i += CONCURRENCY) {
-    const batch = rows.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map((r) =>
-        r.orgId
-          ? deps.grant(r.id, { id: r.orgId, orgType: r.orgType }, r.owner, {
-              reason: 'default_backfill',
-              syncToken: false,
-            })
-          : null,
-      ),
-    );
-    for (const res of results) {
-      if (!res) continue;
-      summary.checked += 1;
-      summary.granted += res.granted.length;
-      summary.failed += res.skipped.length;
-    }
-  }
-  return summary;
 }
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
