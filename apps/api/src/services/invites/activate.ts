@@ -4,8 +4,9 @@
  * An invite accept leaves the coordinator or the org `pending`, with a
  * Keycloak user that is enabled, unverified and `decision_made = invited`.
  * Signing in with an email code marks the email verified, which proves the
- * invitee owns the invited address. Activation then approves the account and
- * tells the inviting org's owner that the invitee joined.
+ * invitee owns the invited address. Activation then approves the account,
+ * gives an invited coordinator the invite's default roles, and tells the
+ * inviting org's owner that the invitee joined.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -15,6 +16,7 @@ import { getUserStore, type Coordinator } from '../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { approveCoordinator } from '../decisions/coordinator.js';
 import { approveOrg, grantOwnerAccess, type OwnerAccessResult } from '../decisions/org.js';
+import { grantInviteDefaultRoles } from '../authz/roles.js';
 import { renderCoordinatorJoined, renderOrgJoined } from '../email-templates/index.js';
 import { config } from '../../config.js';
 
@@ -112,6 +114,13 @@ async function activateCoordinator(
   }
   if (org === null) return { kind: 'org_inactive' };
 
+  // Granted before approval, so the token-roles sync the approval starts
+  // already sees them. The root is the only organisation without a parent.
+  await grantInviteDefaultRoles(
+    row.id,
+    { id: org.id, orgType: org.parentId === null ? 'network_facilitator' : 'aggregator' },
+    org.ownerUserId,
+  );
   const outcome = await approveCoordinator({
     aggregatorId: row.id,
     decidedBy: `invite:${org.ownerUserId}`,

@@ -40,6 +40,7 @@ function fakeDeps(over: Partial<SweepDeps> = {}, outcome: TokenRolesOutcome = 's
       return outcome;
     },
     now: () => NOW,
+    ensureDefaultRoles: async () => ({ checked: 0, granted: 0, failed: 0 }),
     ...over,
   };
   return { deps, synced, windows };
@@ -93,6 +94,23 @@ describe('reconcileTokenRoles', () => {
       ['b', 'reconcile'],
       ['c', 'reconcile'],
     ]);
+  });
+
+  it('fills in missing default roles before it syncs the claims', async () => {
+    const order: string[] = [];
+    const { deps } = fakeDeps({
+      ensureDefaultRoles: async () => {
+        order.push('defaults');
+        return { checked: 2, granted: 1, failed: 0 };
+      },
+      sync: async (id) => {
+        order.push(`sync:${id}`);
+        return 'synced';
+      },
+    });
+    expect(await reconcileTokenRoles(deps)).toBe('ran');
+    expect(order[0]).toBe('defaults');
+    expect(order).toHaveLength(4);
   });
 
   it('syncs a few at a time and covers every user', async () => {

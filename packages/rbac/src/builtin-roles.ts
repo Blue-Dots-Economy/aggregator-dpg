@@ -20,7 +20,7 @@ import type { RoleDefinition } from './interface.js';
 export const BUILTIN_ROLES: readonly RoleDefinition[] = [
   {
     key: 'coordinator',
-    name: 'Coordinator',
+    name: 'Onboard Seekers & Providers',
     description: 'An approved coordinator of an aggregator organisation.',
     isBuiltin: true,
     accountType: 'coordinator',
@@ -109,7 +109,7 @@ export const BUILTIN_ROLES: readonly RoleDefinition[] = [
     baseFor: null,
     assignableOrgTypes: ['aggregator'],
     assignedBy: 'org.manage',
-    maxDays: 90,
+    maxDays: null,
     permissions: ['profiles.view_pii'],
   },
 ];

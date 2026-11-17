@@ -12,10 +12,11 @@
 import type { FastifyRequest } from 'fastify';
 import type { Membership, OrgType, RoleDefinition, UserType } from '@aggregator-dpg/rbac';
 import { baseRoleOf } from '@aggregator-dpg/rbac';
+import { INVITE_DEFAULT_ROLE_KEYS } from '@aggregator-dpg/shared-primitives/user-org';
 import { getUserStore } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
 import type { Actor } from '../auth/actor/index.js';
-import { getRoleStore, type UserRoleRecord } from '../role-store/index.js';
+import { getRoleStore, type RoleStoreResult, type UserRoleRecord } from '../role-store/index.js';
 import { requestTokenRolesSync } from './token-roles.js';
 import { actorPermissions, checkCapability, type TargetOrg } from './guard.js';
 import { reachesOrg } from './scope.js';
@@ -223,20 +224,131 @@ export async function assignRole(
   if (role.maxDays !== null && days !== null && days > role.maxDays) {
     return fail({ kind: 'not_allowed', reason: 'days_exceed_max' });
   }
-  const expiresAt = days === null ? null : new Date(now.getTime() + days * DAY_MS);
-  const created = await getRoleStore().assign(
-    { userId, roleKey: role.key, orgId: m.orgId, grantedBy: actor.userId, expiresAt },
-    {
-      event: 'role.assign',
-      actorUserId: actor.userId,
-      targetUserId: userId,
-      targetOrgId: m.orgId,
-      details: { role: role.key, expires_at: expiresAt ? expiresAt.toISOString() : null },
-    },
+  const created = await writeAssignment(
+    { userId, roleKey: role.key, orgId: m.orgId, grantedBy: actor.userId, days },
+    now,
   );
   if (!created.ok) return fail({ kind: 'unavailable', message: created.error.message });
   requestTokenRolesSync([userId], 'role_assigned');
   return { ok: true, value: created.value };
+}
+
+/** One assignment to write, after every rule has been applied. */
+interface AssignmentWrite {
+  userId: string;
+  roleKey: string;
+  orgId: string;
+  grantedBy: string;
+  /** Validity in days; null = no expiry. */
+  days: number | null;
+  /** Why it was made, for the audit; omitted for an admin's own assignment. */
+  reason?: string;
+}
+
+/**
+ * Writes one assignment and its audit row. Shared by every path that assigns
+ * a role, so they compute the expiry and audit the change the same way.
+ *
+ * @param w - The assignment.
+ * @param now - Clock, for the expiry.
+ * @returns The new assignment, or the store failure.
+ */
+async function writeAssignment(
+  w: AssignmentWrite,
+  now: Date,
+): Promise<RoleStoreResult<UserRoleRecord>> {
+  const expiresAt = w.days === null ? null : new Date(now.getTime() + w.days * DAY_MS);
+  return getRoleStore().assign(
+    { userId: w.userId, roleKey: w.roleKey, orgId: w.orgId, grantedBy: w.grantedBy, expiresAt },
+    {
+      event: 'role.assign',
+      actorUserId: w.grantedBy,
+      targetUserId: w.userId,
+      targetOrgId: w.orgId,
+      details: {
+        role: w.roleKey,
+        expires_at: expiresAt ? expiresAt.toISOString() : null,
+        ...(w.reason ? { reason: w.reason } : {}),
+      },
+    },
+  );
+}
+
+/** Why default roles are granted: at activation, or to fill in missing ones. */
+export type DefaultRolesReason = 'invite_default' | 'default_backfill';
+
+/** What {@link grantInviteDefaultRoles} did. */
+export interface InviteDefaultRolesOutcome {
+  granted: string[];
+  /** Already live in the organisation; nothing written. */
+  present: string[];
+  /** Not granted: unknown, not allowed for this account or organisation type, or a store failure. */
+  skipped: string[];
+}
+
+/**
+ * Gives a coordinator every {@link INVITE_DEFAULT_ROLE_KEYS} role it does not
+ * already hold live in its organisation, each for its role's longest validity
+ * (no expiry when the role has no limit), audited as granted by the
+ * organisation's owner. A role the organisation's type cannot hold is skipped,
+ * as `assignRole` would refuse it. Best effort: a failure is logged and
+ * skipped, and never fails the caller.
+ *
+ * @param userId - The coordinator.
+ * @param org - The organisation it belongs to.
+ * @param grantedBy - The organisation's owner.
+ * @param opts - `reason` for the audit (default `invite_default`); `syncToken`
+ *   false when the caller syncs the token claim itself; `now` for the expiry.
+ * @returns The roles granted, already present and skipped.
+ */
+export async function grantInviteDefaultRoles(
+  userId: string,
+  org: { id: string; orgType: OrgType },
+  grantedBy: string,
+  opts: { reason?: DefaultRolesReason; syncToken?: boolean; now?: Date } = {},
+): Promise<InviteDefaultRolesOutcome> {
+  const reason = opts.reason ?? 'invite_default';
+  const now = opts.now ?? new Date();
+  const outcome: InviteDefaultRolesOutcome = { granted: [], present: [], skipped: [] };
+  const rt = getRbacRuntime();
+  if (!rt) return outcome;
+  const live = await getRoleStore().listLive(userId, now);
+  if (!live.ok) {
+    outcome.skipped.push(...INVITE_DEFAULT_ROLE_KEYS);
+  } else {
+    const held = new Set(live.value.filter((a) => a.orgId === org.id).map((a) => a.roleKey));
+    const membership: Membership = { orgId: org.id, orgType: org.orgType, relation: 'member' };
+    const user: TargetUser = { userId, userType: 'coordinator', memberships: [membership] };
+    for (const key of INVITE_DEFAULT_ROLE_KEYS) {
+      const role = rt.roles.byKey.get(key);
+      if (held.has(key)) {
+        outcome.present.push(key);
+      } else if (!role || role.baseFor || ruleRefusal(role, user, membership) !== null) {
+        outcome.skipped.push(key);
+      } else {
+        const days = role.maxDays;
+        const created = await writeAssignment(
+          { userId, roleKey: key, orgId: org.id, grantedBy, days, reason },
+          now,
+        );
+        (created.ok ? outcome.granted : outcome.skipped).push(key);
+      }
+    }
+  }
+  if (outcome.granted.length > 0 || outcome.skipped.length > 0) {
+    logger[outcome.skipped.length > 0 ? 'warn' : 'info']({
+      operation: 'rbac.roles.grantInviteDefaults',
+      status: outcome.skipped.length > 0 ? 'failure' : 'success',
+      user_id: userId,
+      reason,
+      granted: outcome.granted,
+      skipped: outcome.skipped,
+    });
+  }
+  if (outcome.granted.length > 0 && opts.syncToken !== false) {
+    requestTokenRolesSync([userId], reason);
+  }
+  return outcome;
 }
 
 /**

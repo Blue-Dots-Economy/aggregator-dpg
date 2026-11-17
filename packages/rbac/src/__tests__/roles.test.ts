@@ -64,7 +64,7 @@ describe('BUILTIN_ROLES', () => {
     });
     expect(role('pii_access')).toMatchObject({
       assignedBy: 'org.manage',
-      maxDays: 90,
+      maxDays: null,
       accountType: 'coordinator',
     });
     expect(role('data_export')).toMatchObject({ assignedBy: 'org.manage', maxDays: null });

@@ -6,7 +6,8 @@
  *   POST /v1/support        → emails the submission and any image/video/audio
  *                             attachments to SUPPORT_EMAIL.
  *
- * Any authenticated coordinator may submit, approved or not.
+ * Any authenticated coordinator may submit, approved or not, and so may an
+ * organisation owner or the network admin signed in to the console.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -31,6 +32,7 @@ import {
   validateSupportAttachments,
 } from '../services/support-attachments.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { requireActor } from '../services/auth/actor/index.js';
 
 const SupportRequestSchema = z
   .object({
@@ -96,7 +98,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       },
     },
     async (req, reply) => {
-      await requireAuth(req);
+      await requireSupportCaller(req);
       // Served to the web form so its checks match this API's.
       const limits = supportAttachmentLimits();
       return reply.send({
@@ -130,7 +132,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireSupportCaller(req);
       const log = req.log.child({ operation: 'support.submit', actor: auth.userId });
       const start = Date.now();
 
@@ -143,7 +145,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       // phone; the coordinator may have edited the prefilled values.
       const { name, email, phone, type, details, attachments } = req.body;
 
-      // Count against the per-coordinator cap before validating the body, so
+      // Count against the per-user cap before validating the body, so
       // rejected submissions also use a slot. Runs after the 503 check. Fails open
       // on a Redis error.
       const rate = await checkSupportRate(auth.userId);
@@ -208,6 +210,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
         status: 'success',
         latency_ms: Date.now() - start,
         aggregator_id: auth.aggregatorId,
+        caller_type: auth.kind,
         reference,
         attachment_count: checked.attachments.length,
         attachment_bytes: checked.attachments.reduce((sum, a) => sum + a.bytes, 0),
@@ -217,16 +220,40 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
   );
 }
 
-/** Returns the auth context or throws the catalogue error. */
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
+/** Who sends a support request. */
+interface SupportCaller {
+  kind: 'coordinator' | 'admin';
+  /** The token's subject; keys the per-user rate limit. */
+  userId: string;
+  /** The coordinator's id; null for an organisation owner. */
+  aggregatorId: string | null;
+}
+
+/**
+ * Returns the caller: a coordinator from its token, or, for a token without an
+ * `aggregator_id`, an organisation owner resolved as the console resolves it.
+ *
+ * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
+ *   account or wrong client), `USER_NOT_PROVISIONED`, `NOT_ORG_ADMIN` (an
+ *   owner with no active organisation).
+ */
+async function requireSupportCaller(req: FastifyRequest): Promise<SupportCaller> {
   const result = await authenticate(req);
   if (result.ok) {
     await recordRouteCaller(req, callerFromAuth(result.context));
-    return result.context;
+    return coordinatorCaller(result.context);
   }
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
+  if (result.error.code === 'MISSING_AGGREGATOR_ID') {
+    const { auth } = await requireActor(req);
+    return { kind: 'admin', userId: auth.subject, aggregatorId: null };
+  }
+  throw httpError('UNAUTHORIZED', {
     detail: result.error.message,
     fields: { reason: result.error.code },
   });
+}
+
+/** A coordinator caller from its verified token. */
+function coordinatorCaller(auth: AuthContext): SupportCaller {
+  return { kind: 'coordinator', userId: auth.userId, aggregatorId: auth.aggregatorId };
 }

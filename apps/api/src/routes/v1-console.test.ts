@@ -2328,14 +2328,12 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(res.assignable.map((r) => r.role_key).sort()).toEqual(['data_export', 'pii_access']);
       });
 
-      it('assigns PII Access for 90 days, takes effect, then revokes it', async () => {
+      it('assigns PII Access with no expiry, takes effect, then revokes it', async () => {
         const res = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A });
         expect(res.statusCode).toBe(200);
-        const body = res.json() as { live: boolean; expires_at: string };
+        const body = res.json() as { live: boolean; expires_at: string | null };
         expect(body.live).toBe(true);
-        const days = (Date.parse(body.expires_at) - Date.now()) / 86_400_000;
-        expect(days).toBeGreaterThan(89.9);
-        expect(days).toBeLessThanOrEqual(90);
+        expect(body.expires_at).toBeNull();
 
         const me = (await get('/v1/user/read/me', 'coord')).json() as { capabilities: string[] };
         expect(me.capabilities).toContain('profiles.view_pii');
@@ -2360,7 +2358,24 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await assign('a', C3, { role_key: 'nope', org_id: ORG_A })).statusCode).toBe(400);
         const base = await assign('a', C3, { role_key: 'coordinator', org_id: ORG_A });
         expect([base.statusCode, reasonOf(base)]).toEqual([409, 'base_role']);
-        const long = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A, days: 91 });
+        // No built-in additional role has a day limit; a custom one exercises the rule.
+        _setRbacRuntime(
+          await testRbacRuntime('enforce', undefined, [
+            {
+              key: 'time_boxed',
+              name: 'Time Boxed',
+              description: 'A custom role with a day limit.',
+              isBuiltin: false,
+              accountType: 'coordinator',
+              baseFor: null,
+              assignableOrgTypes: ['aggregator'],
+              assignedBy: 'org.manage',
+              maxDays: 30,
+              permissions: ['profiles.view'],
+            },
+          ]),
+        );
+        const long = await assign('a', C3, { role_key: 'time_boxed', org_id: ORG_A, days: 31 });
         expect([long.statusCode, reasonOf(long)]).toEqual([409, 'days_exceed_max']);
       });
 
@@ -2563,7 +2578,7 @@ describe('console routes /v1/user, /v1/org', () => {
           held_by: 'coordinators',
           held_in: ['aggregator'],
           granted: { via: 'assignment', assigned_by: 'org.manage' },
-          max_days: 90,
+          max_days: null,
           permissions: ['profiles.view_pii'],
         });
       });
