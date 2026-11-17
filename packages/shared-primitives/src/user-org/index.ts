@@ -210,12 +210,12 @@ export const UserSearchRequestSchema = z
   .object({
     filter: z
       .object({
-        org_id: z.string().uuid().optional(),
+        org_id: z.guid().optional(),
         status: UserOrgStatusSchema.optional(),
         serves: ProfileTypeSchema.optional(),
       })
       .strict()
-      .default({}),
+      .prefault({}),
     cursor: CursorSchema.optional(),
     limit: PageLimitSchema.optional(),
   })
@@ -238,13 +238,13 @@ export const InviteRecipientsSchema = z
 
 /** `POST /v1/user/invite`: invite users into an org. */
 export const UserInviteRequestSchema = z
-  .object({ org_id: z.string().uuid(), recipients: InviteRecipientsSchema })
+  .object({ org_id: z.guid(), recipients: InviteRecipientsSchema })
   .strict();
 export type UserInviteRequest = z.infer<typeof UserInviteRequestSchema>;
 
 /** `POST /v1/org/invite`: invite organisations to register under `parent_id`. */
 export const OrgInviteRequestSchema = z
-  .object({ parent_id: z.string().uuid(), recipients: InviteRecipientsSchema })
+  .object({ parent_id: z.guid(), recipients: InviteRecipientsSchema })
   .strict();
 export type OrgInviteRequest = z.infer<typeof OrgInviteRequestSchema>;
 
@@ -273,7 +273,7 @@ export type UserInviteResponse = z.infer<typeof UserInviteResponseSchema>;
 /** `POST /v1/user/invite/search`: unused invites into an org. */
 export const UserInviteSearchRequestSchema = z
   .object({
-    org_id: z.string().uuid(),
+    org_id: z.guid(),
     cursor: CursorSchema.optional(),
     limit: PageLimitSchema.optional(),
   })
@@ -282,7 +282,7 @@ export const UserInviteSearchRequestSchema = z
 /** `POST /v1/org/invite/search`: unused invites to register under an org. */
 export const OrgInviteSearchRequestSchema = z
   .object({
-    parent_id: z.string().uuid(),
+    parent_id: z.guid(),
     cursor: CursorSchema.optional(),
     limit: PageLimitSchema.optional(),
   })
@@ -420,16 +420,16 @@ export const OrgSearchRequestSchema = z
         status: UserOrgStatusSchema.optional(),
         name_prefix: z.string().trim().min(1).max(100).optional(),
         /** Only orgs below this org; the result never goes past the caller's reach. */
-        descendants_of: z.string().uuid().optional(),
+        descendants_of: z.guid().optional(),
         /** Only the direct children of this org; the org must be within the caller's reach. */
-        parent_id: z.string().uuid().optional(),
+        parent_id: z.guid().optional(),
       })
       .strict()
       .refine((f) => f.descendants_of === undefined || f.parent_id === undefined, {
         message: 'Send descendants_of or parent_id, not both.',
         path: ['parent_id'],
       })
-      .default({}),
+      .prefault({}),
     cursor: CursorSchema.optional(),
     limit: PageLimitSchema.optional(),
   })
@@ -479,7 +479,7 @@ export type OrgMetadataUpdateRequest = z.infer<typeof OrgMetadataUpdateRequestSc
  */
 export const OrgParentUpdateRequestSchema = z
   .object({
-    parent_id: z.string().uuid(),
+    parent_id: z.guid(),
   })
   .strict();
 export type OrgParentUpdateRequest = z.infer<typeof OrgParentUpdateRequestSchema>;
@@ -663,7 +663,7 @@ export type UserRolesResponse = z.infer<typeof UserRolesResponseSchema>;
 export const AssignRoleRequestSchema = z
   .object({
     role_key: z.string().min(1),
-    org_id: z.string().uuid(),
+    org_id: z.guid(),
     days: z.number().int().positive().optional(),
   })
   .strict();
@@ -671,7 +671,7 @@ export type AssignRoleRequest = z.infer<typeof AssignRoleRequestSchema>;
 
 /** `POST /v1/user/role/revoke/:id`. */
 export const RevokeRoleRequestSchema = z
-  .object({ role_key: z.string().min(1), org_id: z.string().uuid() })
+  .object({ role_key: z.string().min(1), org_id: z.guid() })
   .strict();
 export type RevokeRoleRequest = z.infer<typeof RevokeRoleRequestSchema>;
 

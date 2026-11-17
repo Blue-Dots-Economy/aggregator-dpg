@@ -27,9 +27,9 @@ export const campaignMetadataPairSchema = z
  */
 export const campaignEnvelopeSchema = z
   .object({
-    item_ids: z.array(z.string().uuid()).min(1),
+    item_ids: z.array(z.guid()).min(1),
     metadata: z.array(campaignMetadataPairSchema).max(50).default([]),
-    content: z.record(z.unknown()).default({}),
+    content: z.record(z.string(), z.unknown()).default({}),
   })
   .strict();
 

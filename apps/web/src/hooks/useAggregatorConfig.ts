@@ -42,9 +42,9 @@ export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
  * Mirrors network-config `DashboardBuckets`.
  */
 const DashboardBucketsSchema = z.object({
-  by_status: z.record(z.string()).optional(),
-  by_initiated_action_status: z.record(z.string()).optional(),
-  by_received_action_status: z.record(z.string()).optional(),
+  by_status: z.record(z.string(), z.string()).optional(),
+  by_initiated_action_status: z.record(z.string(), z.string()).optional(),
+  by_received_action_status: z.record(z.string(), z.string()).optional(),
 });
 export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;
 
@@ -112,9 +112,9 @@ export const AggregatorConfigPayloadSchema = z.object({
   features: z.object({ custom_roles: z.boolean() }),
   dashboardBuckets: DashboardBucketsSchema.optional(),
   /** Per-link registration modes declared by the network (admin dropdown source). */
-  registration_modes: z.record(RegistrationModeConfigSchema).optional(),
+  registration_modes: z.record(z.string(), RegistrationModeConfigSchema).optional(),
   /** Per-domain Signals UI login URLs. A domain without a URL has no Signals hand-off. */
-  signals_ui_urls: z.record(z.string()).optional(),
+  signals_ui_urls: z.record(z.string(), z.string()).optional(),
   /** Largest bulk-upload CSV the api accepts, in bytes. */
   bulk_upload_max_bytes: z.number().int().positive().optional(),
 });

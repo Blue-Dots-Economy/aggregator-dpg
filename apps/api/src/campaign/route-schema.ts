@@ -17,7 +17,7 @@ import { errorResponses } from '../errors/openapi.js';
 export const campaignSubmitAcceptedSchema = z.object({
   status: z.literal('queued'),
   requested: z.number().int(),
-  job_id: z.string().uuid(),
+  job_id: z.guid(),
   message: z.string(),
 });
 

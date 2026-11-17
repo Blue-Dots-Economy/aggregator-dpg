@@ -450,7 +450,7 @@ function deriveAgeAndConsent(
  * Signals' per-field messages. Entries whose message is not a string are
  * dropped, as the writer does; an empty result is treated as absent.
  */
-const SignalsFieldsSchema = z.record(z.unknown()).transform((fields) => {
+const SignalsFieldsSchema = z.record(z.string(), z.unknown()).transform((fields) => {
   const out: Record<string, string> = {};
   for (const [field, msg] of Object.entries(fields)) {
     if (typeof msg === 'string') out[field] = msg;

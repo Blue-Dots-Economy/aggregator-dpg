@@ -308,7 +308,7 @@ export type HierarchyConfig = z.infer<typeof HierarchyConfigSchema>;
  * The schema is not strict, so unknown keys in the block are ignored.
  */
 export const OrganisationConfigSchema = z.object({
-  hierarchy: HierarchyConfigSchema.default({}),
+  hierarchy: HierarchyConfigSchema.prefault({}),
   /** Shown as the role of an invited organisation; {@link DEFAULT_INVITE_ROLE_LABEL} when unset. */
   invite_role_label: z.string().trim().min(1).max(60).optional(),
   /**
@@ -338,16 +338,16 @@ export const AggregatorYamlSchema = z.object({
     network: NetworkBindingSchema,
     brand: BrandConfigSchema,
     domain_labels: z.record(z.string(), DomainLabelsSchema).optional(),
-    onboarding: OnboardingConfigSchema.default({}),
+    onboarding: OnboardingConfigSchema.prefault({}),
     admin_emails: z.array(z.string().email()).default([]),
-    registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).default({
+    registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).prefault({
       form: {
         label_i18n_key: 'registration_mode.form.label',
         submission_shape: 'account_and_profile',
         public_hint_i18n_key: null,
       },
     }),
-    organisation: OrganisationConfigSchema.default({}),
+    organisation: OrganisationConfigSchema.prefault({}),
   }),
 });
 export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
@@ -457,8 +457,7 @@ export const NetworkDomainSchema = z
   .object(
     {
       id: z.string({
-        required_error: 'each domain must declare `id`',
-        invalid_type_error: 'each domain must declare `id`',
+        error: 'each domain must declare `id`',
       }),
       description: droppedWhenMalformed(z.string()),
       /** Dashboard tile groups. Optional, copied from `network.json`. */
@@ -484,7 +483,7 @@ export const NetworkDomainSchema = z
       ),
       item_schemas: z.record(z.string(), z.record(z.string(), z.unknown())),
     },
-    { invalid_type_error: 'each domain must declare `id`' },
+    { error: 'each domain must declare `id`' },
   )
   .passthrough();
 export type NetworkDomain = z.infer<typeof NetworkDomainSchema>;
@@ -499,19 +498,18 @@ const DomainWithNamedErrorsSchema = z
   .object(
     {
       id: z.string({
-        required_error: 'each domain must declare `id`',
-        invalid_type_error: 'each domain must declare `id`',
+        error: 'each domain must declare `id`',
       }),
-      item_schemas: z.unknown(),
+      item_schemas: z.unknown().optional(),
     },
-    { invalid_type_error: 'each domain must declare `id`' },
+    { error: 'each domain must declare `id`' },
   )
   .passthrough()
   .superRefine((domain, ctx) => {
     const itemSchemas = JsonObjectSchema.safeParse(domain.item_schemas);
     if (!itemSchemas.success) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         path: ['item_schemas'],
         message: `domain ${domain.id} missing item_schemas`,
       });
@@ -520,7 +518,7 @@ const DomainWithNamedErrorsSchema = z
     for (const [itemType, schema] of Object.entries(itemSchemas.data)) {
       if (!JsonObjectSchema.safeParse(schema).success) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['item_schemas', itemType],
           message: `domain ${domain.id} item schema ${itemType} must be an object`,
         });
@@ -540,24 +538,21 @@ export const SignalstackNetworkSchema = z
     {
       id: z
         .string({
-          required_error: 'network.json missing `id`',
-          invalid_type_error: 'network.json missing `id`',
+          error: 'network.json missing `id`',
         })
         .min(1, 'network.json missing `id`'),
       display_name: droppedWhenMalformed(z.string()),
       description: droppedWhenMalformed(z.string()),
       domains: z
         .array(DomainWithNamedErrorsSchema, {
-          required_error: 'network.json must declare at least one domain',
-          invalid_type_error: 'network.json must declare at least one domain',
+          error: 'network.json must declare at least one domain',
         })
         .min(1, 'network.json must declare at least one domain'),
       /** Shared dashboard bucket labels. Optional, copied from `network.json`. */
       dashboard_buckets: droppedWhenMalformed(DashboardBucketsSchema),
     },
     {
-      required_error: 'network.json must be an object',
-      invalid_type_error: 'network.json must be an object',
+      error: 'network.json must be an object',
     },
   )
   .passthrough();

@@ -88,7 +88,7 @@ import {
   toWireOrg,
 } from './console-shared.js';
 
-const IdParamsSchema = z.object({ id: z.string().uuid() });
+const IdParamsSchema = z.object({ id: z.guid() });
 
 /** Throws `DB_UNAVAILABLE` naming the failed store call. */
 function dbDown(subOperation: string, message: string): never {

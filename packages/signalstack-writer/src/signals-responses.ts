@@ -36,7 +36,7 @@ export const OnboardResponseSchema = z.object({
 export const ItemIdentitySchema = z.object({
   item_network: z.string(),
   item_domain: z.string(),
-  item_type: z.unknown(),
+  item_type: z.unknown().optional(),
 });
 
 /** The onboard or probe item chosen for the request. Other fields are ignored. */
@@ -63,7 +63,7 @@ export const UpsertAggregatorResponseSchema = z.object({
 });
 
 /** A map of bucket name to count. Signals omits no bucket, but callers treat a missing one as 0. */
-const CountMapSchema = z.record(z.number());
+const CountMapSchema = z.record(z.string(), z.number());
 
 const DashboardRollupSchema = z
   .object({
@@ -83,7 +83,7 @@ const DashboardRollupSchema = z
 const DashboardDomainSliceSchema = z
   .object({
     rollup: DashboardRollupSchema,
-    items: z.array(z.record(z.unknown())),
+    items: z.array(z.record(z.string(), z.unknown())),
     total_matching: z.number(),
     next_cursor: z.string().nullable(),
   })
@@ -92,7 +92,7 @@ const DashboardDomainSliceSchema = z
 /** Response from `GET /api/v1/aggregator/dashboard`. */
 export const DashboardResponseSchema = z
   .object({
-    by_domain: z.record(DashboardDomainSliceSchema),
+    by_domain: z.record(z.string(), DashboardDomainSliceSchema),
     metadata: z
       .object({
         last_computed_at: z.string().nullable(),
@@ -114,7 +114,7 @@ const DecryptedProfileRowSchema = z
     item_network: z.string(),
     item_domain: z.string(),
     item_type: z.string(),
-    item_state: z.record(z.unknown()),
+    item_state: z.record(z.string(), z.unknown()),
     contact: z
       .object({
         name: ContactValueSchema.optional(),

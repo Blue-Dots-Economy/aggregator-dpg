@@ -179,7 +179,7 @@ export async function searchOpenInvites(
   let after: { createdAt: Date; jti: string } | undefined;
   if (page.cursor) {
     const c = decodeUserCursor(page.cursor);
-    if (!z.string().uuid().safeParse(c.id).success) {
+    if (!z.guid().safeParse(c.id).success) {
       throw httpError('SCHEMA_VALIDATION', {
         detail: 'cursor is invalid',
         fields: { field: 'cursor' },

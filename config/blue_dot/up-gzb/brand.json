@@ -1,9 +1,7 @@
 {
   "brand": {
     "name": "BLUE DOTS AI",
-    "wordmark": "BLUE DOTS AI",
-    "seededBy": "EkStep",
-    "strapline": "Seeded by EkStep"
+    "wordmark": "BLUE DOTS AI"
   },
   "logo": {
     "default": "/brand/up-gzb/logo.png",

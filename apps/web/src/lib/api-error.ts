@@ -22,7 +22,7 @@ const ErrorFieldsSchema = z.object({
   message: optionalText,
   requestId: optionalText,
   /** Per-field detail (e.g. a `400`'s `issues`), read by forms that map errors to fields. */
-  fields: z.record(z.unknown()).optional().catch(undefined),
+  fields: z.record(z.string(), z.unknown()).optional().catch(undefined),
 });
 
 /** The API's error envelope: the fields nested under `error`. */

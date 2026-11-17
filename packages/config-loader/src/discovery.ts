@@ -22,9 +22,9 @@ import { isRecord } from './record.js';
  * `configDefaults` holds optional baseline values merged before env overrides.
  */
 const ConfigSchemaModuleSchema = z.object({
-  configKey: z.unknown(),
-  configSchema: z.unknown(),
-  configDefaults: z.unknown(),
+  configKey: z.unknown().optional(),
+  configSchema: z.unknown().optional(),
+  configDefaults: z.unknown().optional(),
 });
 
 /** Shape every config.schema module must export. */

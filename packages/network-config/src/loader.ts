@@ -397,16 +397,16 @@ interface CheckedNetwork {
  * {@link SignalstackNetworkSchema}.
  */
 const RawOptionalBlocksSchema = z.object({
-  display_name: z.unknown(),
-  description: z.unknown(),
-  dashboard_buckets: z.unknown(),
+  display_name: z.unknown().optional(),
+  description: z.unknown().optional(),
+  dashboard_buckets: z.unknown().optional(),
   domains: z.array(
     z.object({
-      description: z.unknown(),
-      dashboard_tiles: z.unknown(),
-      status_rules: z.unknown(),
-      guardian_consent_required: z.unknown(),
-      go_live_required: z.unknown(),
+      description: z.unknown().optional(),
+      dashboard_tiles: z.unknown().optional(),
+      status_rules: z.unknown().optional(),
+      guardian_consent_required: z.unknown().optional(),
+      go_live_required: z.unknown().optional(),
     }),
   ),
 });
