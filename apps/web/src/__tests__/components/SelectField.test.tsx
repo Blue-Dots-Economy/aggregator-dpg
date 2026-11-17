@@ -68,6 +68,25 @@ describe('<SelectField />', () => {
     expect(screen.getByTestId('icon')).toBeInTheDocument();
   });
 
+  it('opens its list inside the dialog it sits in, so a modal dialog does not hide it', async () => {
+    render(
+      <dialog open>
+        <SelectField aria-label="Fruit" value="apple" onChange={vi.fn()} options={FRUIT} />
+      </dialog>,
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Fruit' }));
+    const option = await screen.findByRole('option', { name: 'Plum' });
+    expect(option.closest('dialog')).not.toBeNull();
+  });
+
+  it('opens its list at the end of the page when it is not in a dialog', async () => {
+    renderField();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Fruit' }));
+    const option = await screen.findByRole('option', { name: 'Plum' });
+    expect(option.closest('dialog')).toBeNull();
+    expect(document.body).toContainElement(option);
+  });
+
   it('submits its value under the given name', () => {
     const { container } = render(
       <form>

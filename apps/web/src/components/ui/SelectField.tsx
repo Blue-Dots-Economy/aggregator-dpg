@@ -8,7 +8,7 @@
  * dropdowns, unlike a browser-native `<select>`.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { useRef, useState, type JSX, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select';
 
@@ -72,15 +72,23 @@ export function SelectField({
   const hasEmptyOption = options.some((o) => o.value === '');
   const toItem = (v: string) => (v === '' ? EMPTY : v);
   const rootValue = value === '' && !hasEmptyOption ? '' : toItem(value);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // A modal <dialog> sits above the page and makes the rest inert, so a list
+  // rendered at document.body would be hidden behind it. Render it inside.
+  const [container, setContainer] = useState<HTMLElement | null>(null);
   return (
     <Select
       value={rootValue}
       onValueChange={(v) => onChange(v === EMPTY ? '' : v)}
+      onOpenChange={(open) => {
+        if (open) setContainer(triggerRef.current?.closest('dialog') ?? null);
+      }}
       {...(name === undefined ? {} : { name })}
       {...(required === undefined ? {} : { required })}
       {...(disabled === undefined ? {} : { disabled })}
     >
       <SelectTrigger
+        ref={triggerRef}
         id={id}
         className={cn(icon ? 'gap-1.5' : '', aria['aria-invalid'] && 'border-rose-400', className)}
         onBlur={onBlur}
@@ -89,7 +97,7 @@ export function SelectField({
         {icon}
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent align={align}>
+      <SelectContent align={align} container={container}>
         {options.map((o) => (
           <SelectItem key={o.value} value={toItem(o.value)} disabled={o.disabled}>
             {o.label}
