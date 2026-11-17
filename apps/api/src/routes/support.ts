@@ -6,14 +6,12 @@
  *   POST /v1/support        → emails the submission and any image/video/audio
  *                             attachments to SUPPORT_EMAIL.
  *
- * Any authenticated coordinator may submit, approved or not, and so may an
- * organisation owner or the network admin signed in to the console.
+ * An active coordinator, an organisation owner or the network admin may submit.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderSupportRequest,
@@ -31,8 +29,8 @@ import {
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
-import { requireActor } from '../services/auth/actor/index.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { requireActor, type ResolvedCaller } from '../services/auth/actor/index.js';
 
 const SupportRequestSchema = z
   .object({
@@ -132,8 +130,8 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
-      const auth = await requireSupportCaller(req);
-      const log = req.log.child({ operation: 'support.submit', actor: auth.userId });
+      const { actor, auth } = await requireSupportCaller(req);
+      const log = req.log.child({ operation: 'support.submit', actor: auth.subject });
       const start = Date.now();
 
       const recipient = supportEmail();
@@ -148,7 +146,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       // Count against the per-user cap before validating the body, so
       // rejected submissions also use a slot. Runs after the 503 check. Fails open
       // on a Redis error.
-      const rate = await checkSupportRate(auth.userId);
+      const rate = await checkSupportRate(auth.subject);
       if (!rate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many support submissions; please try again later.',
@@ -209,8 +207,8 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: auth.aggregatorId,
-        caller_type: auth.kind,
+        aggregator_id: auth.aggregatorId ?? null,
+        caller_type: actor.userType,
         reference,
         attachment_count: checked.attachments.length,
         attachment_bytes: checked.attachments.reduce((sum, a) => sum + a.bytes, 0),
@@ -220,40 +218,17 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
   );
 }
 
-/** Who sends a support request. */
-interface SupportCaller {
-  kind: 'coordinator' | 'admin';
-  /** The token's subject; keys the per-user rate limit. */
-  userId: string;
-  /** The coordinator's id; null for an organisation owner. */
-  aggregatorId: string | null;
-}
-
 /**
- * Returns the caller: a coordinator from its token, or, for a token without an
- * `aggregator_id`, an organisation owner resolved as the console resolves it.
+ * Returns the caller, resolved as the console resolves it: an active
+ * coordinator, an organisation owner or the network admin.
  *
  * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
- *   account or wrong client), `USER_NOT_PROVISIONED`, `NOT_ORG_ADMIN` (an
- *   owner with no active organisation).
+ *   account or wrong client), `USER_NOT_PROVISIONED`, `NOT_APPROVED` (a
+ *   coordinator not active yet), `NOT_ORG_ADMIN` (an owner with no active
+ *   organisation).
  */
-async function requireSupportCaller(req: FastifyRequest): Promise<SupportCaller> {
-  const result = await authenticate(req);
-  if (result.ok) {
-    await recordRouteCaller(req, callerFromAuth(result.context));
-    return coordinatorCaller(result.context);
-  }
-  if (result.error.code === 'MISSING_AGGREGATOR_ID') {
-    const { auth } = await requireActor(req);
-    return { kind: 'admin', userId: auth.subject, aggregatorId: null };
-  }
-  throw httpError('UNAUTHORIZED', {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
-}
-
-/** A coordinator caller from its verified token. */
-function coordinatorCaller(auth: AuthContext): SupportCaller {
-  return { kind: 'coordinator', userId: auth.userId, aggregatorId: auth.aggregatorId };
+async function requireSupportCaller(req: FastifyRequest): Promise<ResolvedCaller> {
+  const caller = await requireActor(req, { allowCoordinator: true });
+  await recordRouteCaller(req, callerFromAny(caller.auth));
+  return caller;
 }

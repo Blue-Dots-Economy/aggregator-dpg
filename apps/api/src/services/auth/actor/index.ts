@@ -16,4 +16,4 @@ export type {
 export { StoreActorResolver } from './store.js';
 export { isNetworkAdmin, ownedOrgIds } from './facts.js';
 export { requireActor, type ResolvedCaller } from './require.js';
-export { ActorResolverFake, buildAdminActor } from './testing.js';
+export { ActorResolverFake, buildAdminActor, buildCoordinatorActor } from './testing.js';

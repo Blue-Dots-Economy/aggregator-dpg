@@ -18,6 +18,7 @@ import { _setSupportRateChecker } from '../services/support-rate.js';
 import {
   ActorResolverFake,
   buildAdminActor,
+  buildCoordinatorActor,
   _setActorResolver,
 } from '../services/auth/actor/index.js';
 
@@ -56,6 +57,9 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       if (token === 'owner-token') {
         return { sub: 'owner-sub', email: 'owner@org.com', preferred_username: 'owner@org.com' };
       }
+      if (token === 'pending-token') {
+        return { sub: 'p1', aggregator_id: 'agg-pending', email: 'p@org.com' };
+      }
       if (token === 'stranger-token') {
         return { sub: 'stranger-sub', email: 'x@org.com', preferred_username: 'x@org.com' };
       }
@@ -73,6 +77,8 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
 
     const resolver = new ActorResolverFake();
     resolver.seed('owner-sub', buildAdminActor());
+    resolver.seed('agg-9', buildCoordinatorActor());
+    resolver.seed('agg-pending', buildCoordinatorActor({ active: false }));
     _setActorResolver(resolver);
 
     app = await buildApp();
@@ -104,6 +110,18 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(res.statusCode).toBe(201);
     expect(mailer.outbox).toHaveLength(1);
     expect(mailer.outbox[0]!.replyTo).toBe('owner@org.com');
+  });
+
+  it('refuses a coordinator who has not activated yet', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer pending-token' },
+      payload: validBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: { code: 'NOT_APPROVED' } });
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('refuses a token with no aggregator_id that belongs to no account', async () => {
