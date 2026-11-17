@@ -364,8 +364,13 @@ function OrgDetailsReadOnly({
   const t = useTranslations('console');
   const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
   const ui = view?.uiSchema ?? {};
+  /** A field's schema title, or its name when the schema gives no text title. */
+  const labelOf = (field: string) => {
+    const title = props[field]?.['title'];
+    return typeof title === 'string' ? title : field;
+  };
   const schemaItems = fields.map((field) => ({
-    label: String(props[field]?.['title'] ?? field),
+    label: labelOf(field),
     value:
       orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
       '—',
