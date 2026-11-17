@@ -162,12 +162,20 @@ A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_RE
 ## Campaign PII audit log (#617)
 
 `campaign_pii_audit` is **append-only** and records every campaign action that
-**releases data** — export, voice and email. Status/list GETs are deliberately
-NOT audited: the rule is data release, not API traffic, and clients poll every
-5-10s.
+**releases data** — export, voice, email, and the non-PII dump. Status/list GETs
+are deliberately NOT audited: the rule is data release, not API traffic, and
+clients poll every 5-10s.
 
 - A campaign writes **two** rows sharing `correlation_id = campaign_job.id`:
   `requested` from the API, `completed` from the worker on terminal status.
+  A dump writes **one**. That row's `actor_signalstack_org_id` (`actor_org_id`
+  before 0029) is never set at all —
+  `DumpAuditInput` (`packages/campaign-audit/src/interface.ts`) has no such
+  field, and `PostgresCampaignAuditWriter.recordDumpAccess` (`postgres.ts`)
+  omits the key from the insert rather than passing an explicit `null` — the
+  column stores NULL as a result. That NULL is meaningful: it marks a
+  whole-network, un-org-scoped access, and must never be backfilled with a
+  guessed org.
 - `event` is the phase, `outcome` is the result. `outcome` is NULL on
   `requested` rows.
 - `piiFields` (on the `requested` row) carries **field NAMES and counts
@@ -223,10 +231,13 @@ limit)` once the count cap is reached — three distinct markers, never
     that never released one).
 - **`error_code` is dual-purpose — not a stable enumeration.** Depending on
   which code path wrote the row it holds either a genuine error code (the
-  watchdog's `stalled`, below) or a raw exception class name
-  (`err.constructor.name`, `campaign-process/index.ts`'s worker-completion
-  write) — usually the literal string `Error`, since most thrown errors in
-  this codebase are plain `Error`s rather than a named subclass. Query this
+  dump route's `503 DUMP_NOT_CONFIGURED`, or the watchdog's `stalled` below)
+  or a raw exception class name (`err.constructor.name`,
+  `campaign-process/index.ts`'s worker-completion write) — usually the
+  literal string `Error`, since most thrown errors in this codebase are
+  plain `Error`s rather than a named subclass. Renaming the column (e.g. to
+  `error_class`) was considered and rejected: dump rows carry a real error
+  code, so that name would be wrong for every one of those. Query this
   column expecting free text, not a fixed set of values.
 - **The stalled-job watchdog also writes a `completed` row** (#617
   follow-up): `jobs/cron-watchdog.ts`'s stall sweep force-fails a
@@ -253,12 +264,11 @@ WHERE a.id IS NULL;
 ```
 
 The mirror check (every `completed` has a `requested`) must exclude
-`channel = 'dump'` if querying `campaign_pii_audit` directly: that channel's
-rows predate its removal and never had a `requested` row.
+`channel = 'dump'`, which legitimately has no `requested` row.
 
 The reverse gap — a job that reached a terminal status but never got its
 `completed` row — is exactly the anomaly the watchdog fix above closes;
-`campaign_job` never had `channel = 'dump'` rows, so no exclusion is needed
+`campaign_job` never has `channel = 'dump'` rows, so no exclusion is needed
 here:
 
 ```sql
