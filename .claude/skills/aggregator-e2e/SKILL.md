@@ -111,7 +111,7 @@ Remaining API groups, same shape — assert status **and** the persisted effect:
 - `/public/v1/aggregators/:orgSlug/registrations/:slug` (public submit);
   `/v1/bulk-uploads` (presign) → `/start` → poll `/v1/bulk-uploads/:id` →
   `/v1/bulk-uploads/:id/errors.csv`; `/v1/support/config` + `/v1/support`;
-  `/v1/campaign/{export,voice,email}` + job poll;
+  `/v1/campaign/{export,voice,email}` + job poll + `/v1/campaign/dump`;
   `/v1/dashboard/items` incl. `?lifecycle=` and `meta.tiles`;
   `/v1/user/invite` + `/v1/org/invite` (owner token; out-of-reach org → 404).
 

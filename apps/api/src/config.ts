@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { storageConfigFields } from '@aggregator-dpg/object-storage/config';
+import { dumpFilesSchema } from './services/object-storage/dump-keys.js';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
@@ -156,6 +157,14 @@ const ConfigSchema = z.object({
   CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  /** Key prefix of the non-PII dump in `S3_BUCKET`. */
+  CAMPAIGN_DUMP_PREFIX: z.string().default(''),
+  /** Signals instance whose dump this deployment serves; unset returns 503. */
+  CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
+  /** Lifetime of the pre-signed dump URLs. */
+  CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  /** Dump files to serve, comma-separated. */
+  CAMPAIGN_DUMP_FILES: dumpFilesSchema,
   // ─── Campaign email channel ─────────────────────────────────────────────
   /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
   CAMPAIGN_EMAIL_MAX_ITEMS: z.coerce.number().int().positive().default(200),
@@ -321,6 +330,27 @@ export function campaignManagerAllowedAzp(): string[] {
     .filter((s) => s.length > 0);
   // Never return an empty list: `[]` turns the azp check off.
   return parsed.length > 0 ? parsed : ['campaign-manager'];
+}
+
+/**
+ * Keycloak `preferred_username` of the campaign manager's system token: required on the
+ * dump route, refused on the org-scoped campaign routes.
+ *
+ * @returns The expected username; the default when the env var is unset or blank.
+ */
+export function campaignDumpServiceAccount(): string {
+  // An empty value would match a token with no username, so fall back to the default.
+  return process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT?.trim() || 'service-account-campaign-manager';
+}
+
+/**
+ * The Signals instance whose dump this deployment serves.
+ *
+ * @returns The instance id, or `undefined` when unset or blank (the route then returns 503).
+ */
+export function campaignDumpInstanceId(): string | undefined {
+  const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
+  return raw && raw.length > 0 ? raw : undefined;
 }
 
 /**

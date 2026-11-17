@@ -333,7 +333,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
  *
  * @param req - The Fastify request.
  * @param opts.allowedAzp - `azp` allow-list that replaces `KEYCLOAK_ALLOWED_AZP`
- *   for this call.
+ *   for this call. Used by the campaign dump route.
  * @returns `ok: true` with the {@link AnyAuthContext}; otherwise `ok: false`
  *   with `MISSING_TOKEN`, `INVALID_TOKEN`, or `AZP_NOT_ALLOWED`.
  */
