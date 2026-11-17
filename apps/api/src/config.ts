@@ -333,7 +333,8 @@ export function campaignManagerAllowedAzp(): string[] {
 }
 
 /**
- * Keycloak `preferred_username` of the campaign manager's system token on the dump route.
+ * Keycloak `preferred_username` of the campaign manager's system token: required on the
+ * dump route, refused on the org-scoped campaign routes.
  *
  * @returns The expected username; the default when the env var is unset or blank.
  */

@@ -24,13 +24,21 @@ import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
  *
  * @param req - The inbound request carrying the Bearer token.
  * @returns The verified {@link AuthContext}.
- * @throws `UNAUTHORIZED`/`FORBIDDEN` when auth fails.
+ * @throws `UNAUTHORIZED`/`FORBIDDEN` when auth fails; `FORBIDDEN` for the campaign-manager system token.
  */
 export async function requireCampaignAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (!result.ok) {
     const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
     throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
+  }
+  // The system token shares this client's `azp`. Reject it even if it was
+  // given an `aggregator_id` by mistake, so it can never reach org-scoped PII.
+  if (result.context.preferredUsername === campaignDumpServiceAccount()) {
+    throw httpError('FORBIDDEN', {
+      detail: 'the campaign-manager system token cannot access org-scoped campaign routes',
+      fields: { reason: 'SYSTEM_TOKEN_NOT_PERMITTED' },
+    });
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;

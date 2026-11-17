@@ -193,5 +193,16 @@ describe('campaign auth', () => {
         fields: { reason: 'MISSING_AGGREGATOR_ID' },
       });
     });
+
+    it('rejects the system token with 403 (no aggregator_id)', async () => {
+      await expect(requireCampaignAuth(req('system'))).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('rejects a system token given an org id by mistake with 403 SYSTEM_TOKEN_NOT_PERMITTED', async () => {
+      await expect(requireCampaignAuth(req('misprovisioned'))).rejects.toMatchObject({
+        status: 403,
+        fields: { reason: 'SYSTEM_TOKEN_NOT_PERMITTED' },
+      });
+    });
   });
 });
