@@ -753,10 +753,17 @@ function Capabilities({
         ))}
       </fieldset>
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="invite-role" className="text-[14px] font-bold text-ink-900">
+        <span id="invite-role-label" className="text-[14px] font-bold text-ink-900">
           {t('invite.org.role_label')}
-        </label>
-        <input id="invite-role" className="bd-input sm:max-w-xs" value={roleLabel} readOnly />
+        </span>
+        {/* Fixed by the capabilities above, so plain text, not an input that looks editable. */}
+        <p
+          id="invite-role"
+          aria-labelledby="invite-role-label"
+          className="rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2.5 text-[14px] text-(--bd-fg) sm:max-w-xs"
+        >
+          {roleLabel}
+        </p>
         <span className="text-[12.5px] text-ink-500">{t(`${ns}.role_hint`)}</span>
       </div>
     </div>

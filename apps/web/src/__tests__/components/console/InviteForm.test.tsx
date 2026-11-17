@@ -87,8 +87,9 @@ describe('<InviteForm />', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(3);
     expect(screen.getByText(`Role: ${copy.role_default}`)).toBeInTheDocument();
     const role = screen.getByLabelText(messages.console.invite.org.role_label);
-    expect(role).toHaveValue(copy.role_default);
-    expect(role).toHaveAttribute('readonly');
+    expect(role).toHaveTextContent(copy.role_default);
+    // Plain text, so it cannot be focused or typed into.
+    expect(role.tagName).toBe('P');
   });
 
   it('shows a select defaulting to the first organisation when there are several', async () => {
@@ -496,7 +497,7 @@ describe('<InviteForm target org />', () => {
       expect(box).toBeChecked();
       expect(box).toBeDisabled();
     }
-    expect(screen.getByLabelText('Role')).toHaveValue('Lead Partner');
+    expect(screen.getByLabelText('Role')).toHaveTextContent('Lead Partner');
     expect(screen.getByText('Role: Lead Partner')).toBeInTheDocument();
     expect(screen.getByText(`Onboard ${term('Orgs')}`)).toBeInTheDocument();
   });
