@@ -31,7 +31,7 @@ export const BecknContactSchema = z
   .object({
     name: z.string().min(1).max(200),
     phone: z.string().regex(PHONE_REGEX, 'phone must be 10-15 digits (E.164-ish)'),
-    email: z.string().email().max(320).toLowerCase(),
+    email: z.email().max(320).toLowerCase(),
     alternatePhone: z.string().regex(PHONE_REGEX).optional(),
     company: z.string().max(200).optional(),
     gstNumber: z.string().max(32).optional(),
