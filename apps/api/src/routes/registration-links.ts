@@ -90,7 +90,7 @@ const CreateLinkBodySchema = z.object({
     .min(3)
     .max(60)
     .optional(),
-  context: z.record(z.unknown()).default({}),
+  context: z.record(z.string(), z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   /**
    * Registration mode key (e.g. `voice`, `form`), checked against the network
@@ -119,7 +119,7 @@ const UpdateLinkBodySchema = z
       .min(3)
       .max(60)
       .optional(),
-    context: z.record(z.unknown()).optional(),
+    context: z.record(z.string(), z.unknown()).optional(),
     expires_at: z
       .string()
       .datetime({ offset: true })
@@ -149,7 +149,7 @@ const LinkResponseSchema = z
     domain: z.string(),
     status: z.string(),
     registration_mode: z.string(),
-    context: z.record(z.unknown()),
+    context: z.record(z.string(), z.unknown()),
     expires_at: z.string().nullable(),
     public_url: z.string().nullable(),
     qr_url: z.string().nullable(),

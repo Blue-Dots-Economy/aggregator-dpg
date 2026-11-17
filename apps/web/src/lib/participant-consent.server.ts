@@ -61,7 +61,7 @@ const ParticipantConsentFileSchema = z.object({
 type ParticipantConsentFile = z.infer<typeof ParticipantConsentFileSchema>;
 
 /** The body of `GET /v1/participant-consent`. */
-const ParticipantConsentResponseSchema = z.object({ participant_consent: z.unknown() });
+const ParticipantConsentResponseSchema = z.object({ participant_consent: z.unknown().optional() });
 
 /**
  * Reads a participant consent document, logging the field paths of a wrong shape.

@@ -49,14 +49,14 @@
     "drizzle-orm": "^0.45.4",
     "exceljs": "^4.4.0",
     "fastify": "^5.12.7",
-    "fastify-type-provider-zod": "^4.0.2",
+    "fastify-type-provider-zod": "^7.0.0",
     "ioredis": "^6.0.0",
     "jose": "^6.2.12",
     "nodemailer": "^10.1.4",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "pino-pretty": "^13.2.0",
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",

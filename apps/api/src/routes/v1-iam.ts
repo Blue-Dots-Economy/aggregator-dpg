@@ -58,7 +58,7 @@ import {
 } from '../services/authz/custom-roles.js';
 import { guardWriteRate } from './console-shared.js';
 
-const IdParamsSchema = z.object({ id: z.string().uuid() });
+const IdParamsSchema = z.object({ id: z.guid() });
 const KeyParamsSchema = z.object({ key: z.string().min(1).max(40) });
 
 /** Throws the HTTP error for a failed custom-role change. */

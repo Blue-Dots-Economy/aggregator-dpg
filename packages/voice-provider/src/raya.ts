@@ -46,10 +46,10 @@ import {
  * PII and is never persisted.
  */
 const RayaRowErrorSchema = z.object({
-  row: z.unknown(),
-  field: z.unknown(),
-  value: z.unknown(),
-  message: z.unknown(),
+  row: z.unknown().optional(),
+  field: z.unknown().optional(),
+  value: z.unknown().optional(),
+  message: z.unknown().optional(),
 });
 
 /**
@@ -58,38 +58,38 @@ const RayaRowErrorSchema = z.object({
  * as empty. `data[]` contains PII and is never persisted.
  */
 const RayaCreateBatchResponseSchema = z.object({
-  status: z.unknown(),
-  message: z.unknown(),
-  batchId: z.unknown(),
-  totalRows: z.unknown(),
-  validRows: z.unknown(),
-  invalidRows: z.unknown(),
-  contactsInserted: z.unknown(),
+  status: z.unknown().optional(),
+  message: z.unknown().optional(),
+  batchId: z.unknown().optional(),
+  totalRows: z.unknown().optional(),
+  validRows: z.unknown().optional(),
+  invalidRows: z.unknown().optional(),
+  contactsInserted: z.unknown().optional(),
   errors: z.array(z.unknown()).catch([]),
-  data: z.unknown(),
+  data: z.unknown().optional(),
 });
 type RayaCreateBatchResponse = z.infer<typeof RayaCreateBatchResponseSchema>;
 
 /** Raya's `POST /batch/{id}/start` response (only the fields this adapter reads). */
 const RayaStartBatchResponseSchema = z.object({
-  id: z.unknown(),
-  status: z.unknown(),
-  total_contacts: z.unknown(),
-  completed_contacts: z.unknown(),
-  unanswered_contacts: z.unknown(),
-  schedule: z.unknown(),
-  max_retries: z.unknown(),
-  concurrency: z.unknown(),
-  retry_after_hrs: z.unknown(),
+  id: z.unknown().optional(),
+  status: z.unknown().optional(),
+  total_contacts: z.unknown().optional(),
+  completed_contacts: z.unknown().optional(),
+  unanswered_contacts: z.unknown().optional(),
+  schedule: z.unknown().optional(),
+  max_retries: z.unknown().optional(),
+  concurrency: z.unknown().optional(),
+  retry_after_hrs: z.unknown().optional(),
 });
 type RayaStartBatchResponse = z.infer<typeof RayaStartBatchResponseSchema>;
 
 /** One entry of `batches[]` in Raya's `GET /batch` response. */
 const RayaBatchSummarySchema = z.object({
-  id: z.unknown(),
-  name: z.unknown(),
-  agent_id: z.unknown(),
-  total_contacts: z.unknown(),
+  id: z.unknown().optional(),
+  name: z.unknown().optional(),
+  agent_id: z.unknown().optional(),
+  total_contacts: z.unknown().optional(),
 });
 
 /**
@@ -105,7 +105,7 @@ const RayaListBatchesResponseSchema = z.object({
 const RayaErrorBodySchema = z.object({ message: z.string().min(1) });
 
 /** The `retry_after` field of a Raya `429` body, in seconds. */
-const RayaRateLimitBodySchema = z.object({ retry_after: z.unknown() });
+const RayaRateLimitBodySchema = z.object({ retry_after: z.unknown().optional() });
 
 /**
  * Whitelist of `POST /batch` response fields safe to persist. Excludes
@@ -428,7 +428,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    * @returns ok(parsed body) on 2xx; err(BaseError) otherwise.
    */
   private async request<T>(
-    schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+    schema: z.ZodType<T, unknown>,
     method: string,
     path: string,
     body: unknown,
@@ -520,7 +520,7 @@ type ResponseOutcome<T> =
 async function classifyResponse<T>(
   res: Response,
   path: string,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  schema: z.ZodType<T, unknown>,
 ): Promise<ResponseOutcome<T>> {
   if (res.ok) {
     let body: unknown;

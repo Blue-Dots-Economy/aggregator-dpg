@@ -43,7 +43,7 @@ const itemStatusSchema = z.enum([
 const metadataSchema = z.array(z.object({ key: z.string(), value: z.string() }));
 
 const jobSummarySchema = z.object({
-  job_id: z.string().uuid(),
+  job_id: z.guid(),
   channel: channelSchema,
   status: jobStatusSchema,
   counts: countsSchema,
@@ -75,12 +75,12 @@ export async function registerCampaignJobRoutes(
         summary: `Get one ${channel} job's status and per-item outcomes`,
         description: `Returns the job status (derived from item counts) and each item id with its status, provider ref and skip/error reason. Scoped to this org and to the ${channel} channel — a job belonging to another org or channel returns 403.`,
         security: [{ bearerAuth: [] }],
-        params: z.object({ job_id: z.string().uuid() }),
+        params: z.object({ job_id: z.guid() }),
         response: {
           200: jobSummarySchema.extend({
             metadata: metadataSchema,
             // Provider response, already reduced to PII-safe fields by the writer.
-            provider_response: z.unknown().nullable(),
+            provider_response: z.unknown().nullish(),
             items: z.array(
               z.object({
                 item_id: z.string(),

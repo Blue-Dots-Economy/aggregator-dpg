@@ -121,19 +121,6 @@ updates:
       # epic/keycloak-iam branch may rewrite this adapter anyway.
       - dependency-name: "openid-client"
         update-types: ["version-update:semver-major"]
-      # fastify-type-provider-zod v7 requires zod v4 — it imports `safeEncode` from
-      # `zod/v4/core`, which does not exist under zod 3, so apps/api fails at module
-      # load and every API test dies (#714). zod's own major is held WITH it, and
-      # must be: `zod` is declared in nine manifests here, and letting one of them
-      # move alone would put two incompatible copies of zod in the tree — v3 and v4
-      # schema objects are not interchangeable across a package boundary, and that
-      # surfaces as a runtime type error rather than a build failure (the same
-      # duplicate-copy trap as the ioredis/bullmq typing in #585). Both move
-      # together in #725.
-      - dependency-name: "fastify-type-provider-zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
       # ioredis v6 CANNOT land while the pnpm-workspace.yaml override pins
       # `ioredis: ^5.11.1`, which is why #744 is lockfile-only and would be
       # reverted by the next install. That override is not incidental: bullmq

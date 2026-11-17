@@ -709,7 +709,7 @@ const KcUserSchema = z.object({
   emailVerified: z.boolean().nullish(),
   firstName: z.string().nullish(),
   lastName: z.string().nullish(),
-  attributes: z.record(z.array(z.string())).nullish(),
+  attributes: z.record(z.string(), z.array(z.string())).nullish(),
 });
 type KcUserPayload = z.infer<typeof KcUserSchema>;
 
@@ -723,7 +723,7 @@ const KcRoleNameSchema = z.object({ name: z.string() });
 const KcGroupSchema = z.object({
   id: z.string(),
   name: z.string(),
-  attributes: z.record(z.array(z.string())).optional().catch({}),
+  attributes: z.record(z.string(), z.array(z.string())).optional().catch({}),
 });
 
 /**
@@ -734,7 +734,7 @@ const KcGroupSchema = z.object({
  * @param entry - Schema of one entry.
  * @returns A schema for the list of valid entries.
  */
-function validEntries<T>(entry: z.ZodType<T, z.ZodTypeDef, unknown>) {
+function validEntries<T>(entry: z.ZodType<T, unknown>) {
   return z.array(z.unknown()).transform((items) =>
     items.flatMap((item) => {
       const parsed = entry.safeParse(item);
@@ -758,7 +758,7 @@ const KcTokenSchema = z.object({ access_token: z.string().min(1), expires_in: z.
  */
 async function readJson<T>(
   res: Response,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  schema: z.ZodType<T, unknown>,
   op: string,
 ): Promise<IdpResult<T>> {
   const invalid: IdpResult<T> = {

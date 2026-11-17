@@ -259,7 +259,7 @@ describe('jsonFetch', () => {
     expect(err).toBeInstanceOf(ResponseShapeError);
     const summary = err instanceof ResponseShapeError ? err.issueSummary() : [];
     expect(summary).toEqual([
-      { path: 'status', code: 'invalid_enum_value' },
+      { path: 'status', code: 'invalid_value' },
       { path: 'count', code: 'invalid_type' },
     ]);
     expect(JSON.stringify(summary)).not.toContain('secret-value');

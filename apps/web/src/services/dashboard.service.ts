@@ -41,14 +41,14 @@ export const DashboardRollupSchema = z
   .object({
     total_items: z.number(),
     complete_profiles: z.number(),
-    by_status: z.record(z.number()),
+    by_status: z.record(z.string(), z.number()),
     has_applications: z.number().optional(),
-    by_initiated_action_status: z.record(z.number()).optional(),
-    by_received_action_status: z.record(z.number()).optional(),
+    by_initiated_action_status: z.record(z.string(), z.number()).optional(),
+    by_received_action_status: z.record(z.string(), z.number()).optional(),
     total_users: z.number().optional(),
     avg_items_per_user: z.number().optional(),
     avg_actions_per_user: z.number().optional(),
-    mode_wise_counts: z.record(z.number()).optional(),
+    mode_wise_counts: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();
 export type DashboardRollup = z.infer<typeof DashboardRollupSchema>;
@@ -58,7 +58,7 @@ export const DashboardDomainSliceSchema = z
   .object({
     rollup: DashboardRollupSchema,
     /** One row per item. */
-    items: z.array(z.record(z.unknown())),
+    items: z.array(z.record(z.string(), z.unknown())),
     total_matching: z.number(),
     next_cursor: z.string().nullable(),
   })
@@ -79,7 +79,7 @@ export type DashboardMetadata = z.infer<typeof DashboardMetadataSchema>;
 /** Full dashboard payload, with every domain keyed by id in `by_domain`. */
 export const DashboardPageSchema = z
   .object({
-    by_domain: z.record(DashboardDomainSliceSchema),
+    by_domain: z.record(z.string(), DashboardDomainSliceSchema),
     metadata: DashboardMetadataSchema,
   })
   .passthrough();
