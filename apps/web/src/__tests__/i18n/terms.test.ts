@@ -18,13 +18,13 @@ const collectStrings = (value: unknown, out: string[] = []): string[] => {
 describe('fillTerms', () => {
   it('fills English placeholders with the English words', () => {
     expect(fillTerms('Invite [[users]] to your [[org]]', 'en')).toBe(
-      'Invite users to your organisation',
+      'Invite team members to your organisation',
     );
   });
 
   it("fills a translated string with its locale's words", () => {
-    expect(fillTerms('[[user]] पंजीकरण', 'hi')).toBe('उपयोगकर्ता पंजीकरण');
-    expect(fillTerms('[[user]]ರು', 'kn')).toBe('ಬಳಕೆದಾರರು');
+    expect(fillTerms('[[user]] पंजीकरण', 'hi')).toBe('टीम सदस्य पंजीकरण');
+    expect(fillTerms('[[user]]ರು', 'kn')).toBe('ತಂಡದ ಸದಸ್ಯರು');
   });
 
   it('fills an untranslated English string in the hi file with the English words', () => {
@@ -36,7 +36,7 @@ describe('fillTerms', () => {
   });
 
   it('falls back to English for a term the locale does not define', () => {
-    expect(fillTerms('[[Users]] सूची', 'hi')).toBe('Users सूची');
+    expect(fillTerms('[[Users]] सूची', 'hi')).toBe('Team Members सूची');
   });
 
   it('leaves unknown placeholders and plain text unchanged', () => {
@@ -50,7 +50,7 @@ describe('applyTerms', () => {
   it('fills nested strings and keeps other values', () => {
     expect(applyTerms({ a: { b: '[[Org]]' }, c: ['[[user]]'], d: 3, e: null }, 'en')).toEqual({
       a: { b: 'Organisation' },
-      c: ['user'],
+      c: ['team member'],
       d: 3,
       e: null,
     });

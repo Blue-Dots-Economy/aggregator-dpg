@@ -4,7 +4,8 @@
  * The Default org and the root are read-only. Only the org's owner edits its
  * details, the name included; the network admin sees them read-only. The owner
  * of the parent org sets the org's "known as" value; the org's owner defines
- * the values for the organisations under it. Only the network admin can
+ * the values for the organisations under it. "Known as" shows only with
+ * `ORG_KNOWN_AS_ENABLED`. Only the network admin can
  * re-grant an active org's owner access or move it under another parent. An
  * owner also views, read-only, the organisations directly under its own; the
  * users of such an organisation stay with its own owner.
@@ -15,6 +16,7 @@ import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Building2, CalendarDays, Clock, Layers, Network, Users } from 'lucide-react';
 import { getConsoleActor } from '@/lib/console-actor';
+import { isKnownAsEnabled } from '@/lib/known-as-flag';
 import { consoleRead } from '@/lib/console-api.server';
 import { isUuid } from '@/lib/console-proxy';
 import { Topbar } from '@/components/shell/Topbar';
@@ -93,12 +95,13 @@ export default async function ConsoleOrgPage({
     ? await consoleRead('/v1/org/hierarchy', OrgHierarchyResponseSchema)
     : null;
   const canMove = hierarchy !== null && access.movable;
+  const knownAs = isKnownAsEnabled();
   return (
     <>
       <div>
         <BackLink href="/console/orgs">{t('orgs.heading')}</BackLink>
         <Topbar
-          right={topbarActions(data, canMove, access.showUsers, t)}
+          right={topbarActions(data, canMove, access.showUsers, knownAs, t)}
           leading={
             <span
               aria-hidden="true"
@@ -111,7 +114,7 @@ export default async function ConsoleOrgPage({
             <span className="flex flex-wrap items-center gap-3">
               {org.name}
               <ConsoleStatusPill status={org.status} />
-              {(org.known_as_name ?? org.known_as) ? (
+              {knownAs && (org.known_as_name ?? org.known_as) ? (
                 <span className="rounded-full bg-(--bd-primary-50) px-2.5 py-0.5 text-[12px] font-semibold text-(--bd-primary-600)">
                   {org.known_as_name ?? org.known_as}
                 </span>
@@ -124,7 +127,7 @@ export default async function ConsoleOrgPage({
       <div className="flex flex-col gap-6">
         {ownerCard(data, access, t)}
         {orgTiles(data, access, hierarchy?.limits.max_children ?? null, t)}
-        {access.parent ? (
+        {knownAs && access.parent ? (
           <ConsoleSection title={t('org.known_as_pick_title')}>
             <KnownAsPicker org={org} parentValues={access.parent.known_as_values} />
           </ConsoleSection>
@@ -135,6 +138,7 @@ export default async function ConsoleOrgPage({
           canEdit={access.isOwner}
           orgSchema={orgSchema}
           knownAsPicked={access.parent !== null}
+          showKnownAs={knownAs}
         />
       </div>
     </>
@@ -142,13 +146,24 @@ export default async function ConsoleOrgPage({
 }
 
 /** The Move button and the link to the org's users, for an aggregator org. */
-function topbarActions(data: OrgData, canMove: boolean, showUsers: boolean, t: Translate) {
+function topbarActions(
+  data: OrgData,
+  canMove: boolean,
+  showUsers: boolean,
+  knownAs: boolean,
+  t: Translate,
+) {
   const { org } = data;
   if (org.org_type !== 'aggregator') return null;
   return (
     <>
       {canMove ? (
-        <OrgMoveDialog orgId={org.id} orgName={org.name} parentId={org.parent_id} />
+        <OrgMoveDialog
+          orgId={org.id}
+          orgName={org.name}
+          parentId={org.parent_id}
+          showKnownAs={knownAs}
+        />
       ) : null}
       {showUsers ? (
         <Link className={buttonClass('soft')} href={`/console/coordinators?org_id=${org.id}`}>

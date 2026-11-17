@@ -8,6 +8,7 @@ import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('@/lib/support-enabled.server', () => ({ fetchSupportEnabled: vi.fn(async () => false) }));
 const sidebarProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }));
 vi.mock('@/components/console/ConsoleSidebar', () => ({
   ConsoleSidebar: (props: Record<string, unknown>) => {
@@ -32,6 +33,7 @@ vi.mock('next/headers', () => ({
 import ConsoleLayout from '@/app/(console)/console/layout';
 import { getSession } from '@/lib/server-session';
 import { getConsoleActor } from '@/lib/console-actor';
+import { fetchSupportEnabled } from '@/lib/support-enabled.server';
 import { redirect } from 'next/navigation';
 
 const session = {
@@ -62,6 +64,17 @@ describe('<ConsoleLayout />', () => {
     const el = await ConsoleLayout({ children: <p>child</p> });
     expect(el).toBeTruthy();
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('offers Contact support when the API reports it enabled, and not otherwise', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
+    vi.mocked(fetchSupportEnabled).mockResolvedValueOnce(true);
+    const on = (await ConsoleLayout({ children: null })) as { props: { supportEnabled: boolean } };
+    expect(on.props.supportEnabled).toBe(true);
+    vi.mocked(fetchSupportEnabled).mockResolvedValueOnce(false);
+    const off = (await ConsoleLayout({ children: null })) as { props: { supportEnabled: boolean } };
+    expect(off.props.supportEnabled).toBe(false);
   });
 
   it('gives the network admin no My Team and no Profile in the sidebar', async () => {

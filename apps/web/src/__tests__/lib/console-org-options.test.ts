@@ -42,12 +42,15 @@ const row = (
 
 describe('orgOptionsInTreeOrder', () => {
   it('orders parents before children and siblings by name, with path labels', () => {
-    const options = orgOptionsInTreeOrder([
-      row('m', 'Mysuru', 'k', { known_as_name: 'District' }),
-      row('z', 'zeta', 'root'),
-      row('k', 'Karnataka', 'root', { known_as_name: 'State' }),
-      row('b', 'Bengaluru', 'k', { known_as_name: 'District' }),
-    ]);
+    const options = orgOptionsInTreeOrder(
+      [
+        row('m', 'Mysuru', 'k', { known_as_name: 'District' }),
+        row('z', 'zeta', 'root'),
+        row('k', 'Karnataka', 'root', { known_as_name: 'State' }),
+        row('b', 'Bengaluru', 'k', { known_as_name: 'District' }),
+      ],
+      true,
+    );
     expect(options.map((o) => o.label)).toEqual([
       'Karnataka (State)',
       'Karnataka › Bengaluru (District)',
@@ -58,19 +61,31 @@ describe('orgOptionsInTreeOrder', () => {
   });
 
   it('shows the raw key when the value is not configured', () => {
-    const [o] = orgOptionsInTreeOrder([
-      row('a', 'Alpha', null, { known_as: 'old', known_as_name: null }),
-    ]);
+    const [o] = orgOptionsInTreeOrder(
+      [row('a', 'Alpha', null, { known_as: 'old', known_as_name: null })],
+      true,
+    );
     expect(o?.label).toBe('Alpha (old)');
   });
 
   it('starts a path at an org whose parent is not listed', () => {
-    const options = orgOptionsInTreeOrder([row('m', 'Mysuru', 'not-reachable')]);
+    const options = orgOptionsInTreeOrder([row('m', 'Mysuru', 'not-reachable')], true);
     expect(options.map((o) => o.label)).toEqual(['Mysuru (Aggregator)']);
   });
 
+  it('leaves "known as" out of every label when it is turned off', () => {
+    const options = orgOptionsInTreeOrder(
+      [
+        row('k', 'Karnataka', 'root', { known_as_name: 'State' }),
+        row('m', 'Mysuru', 'k', { known_as_name: 'District' }),
+      ],
+      false,
+    );
+    expect(options.map((o) => o.label)).toEqual(['Karnataka', 'Karnataka › Mysuru']);
+  });
+
   it('returns nothing for no orgs', () => {
-    expect(orgOptionsInTreeOrder([])).toEqual([]);
+    expect(orgOptionsInTreeOrder([], true)).toEqual([]);
   });
 });
 

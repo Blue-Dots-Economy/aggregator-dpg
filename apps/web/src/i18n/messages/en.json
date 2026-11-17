@@ -270,7 +270,7 @@
   "nav": {
     "my": "My {brand}",
     "onboarding": "Onboarding",
-    "profile": "Profile",
+    "profile": "Account Details",
     "overview": "Overview",
     "portal_label": "Aggregator Portal",
     "sign_out": "Sign Out",
@@ -462,12 +462,12 @@
   },
   "profile": {
     "view": {
-      "topbar_title": "Aggregator Profile",
+      "topbar_title": "Account Details",
       "topbar_subtitle": "Manage your aggregator identity and settings.",
-      "loading": "Loading profile…",
+      "loading": "Loading account details…",
       "readonly_note": "This is the information captured at registration. It cannot be edited here.",
       "btn_request_update": "Request an update",
-      "update_request_heading": "Request a profile update",
+      "update_request_heading": "Request a change to your account details",
       "update_request_desc": "Describe the change you need. Your request will be sent to the admin who approves your aggregator.",
       "update_request_placeholder": "e.g. Please update our registered address to …",
       "btn_submit_request": "Submit request",
@@ -478,9 +478,9 @@
       "col_current": "Current",
       "col_requested": "New",
       "new_value_placeholder": "Enter the new value",
-      "toast_saved": "Profile saved",
-      "error_load_title": "Could not load profile",
-      "error_load_detail": "We hit an error fetching the aggregator profile. Please try again shortly.",
+      "toast_saved": "Account details saved",
+      "error_load_title": "Could not load account details",
+      "error_load_detail": "We hit an error fetching your account details. Please try again shortly.",
       "badge_aggregator": "Aggregator",
       "badge_verified": "Verified",
       "badge_active": "Active",
@@ -516,10 +516,10 @@
       "update_request_none": "Enter at least one new value."
     },
     "edit": {
-      "heading": "Edit Profile",
+      "heading": "Edit Account Details",
       "tagline": "Update your [[org]], contact and personas. Slug + status are read-only.",
-      "loading": "Loading profile…",
-      "error_load_title": "Could not load profile",
+      "loading": "Loading account details…",
+      "error_load_title": "Could not load account details",
       "btn_cancel": "Cancel",
       "btn_save": "Save changes",
       "btn_saving": "Saving…",
@@ -710,7 +710,7 @@
       "dashboard": "Dashboard",
       "my_blue_dots": "My Blue Dots",
       "my_team": "My Team",
-      "profile": "Profile"
+      "profile": "Account Details"
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -878,7 +878,7 @@
       "unsaved": "Unsaved changes",
       "discard": "Discard",
       "save_domains": "Save profile types",
-      "domains_saved": "Profile types saved. The coordinator is signed out and sees the change at the next sign-in.",
+      "domains_saved": "Profile types saved. The [[user]] is signed out and sees the change at the next sign-in.",
       "remove_domains_note": "Removing {domains} stops this [[user]] working with those profiles.",
       "remove_domains_confirm": "Remove and save",
       "back": "Back to [[users]]",
@@ -931,10 +931,21 @@
           }
         }
       },
+      "user": {
+        "can_do": "What invited [[users]] can do",
+        "can_participants": "Onboard Seekers & Providers",
+        "can_participants_hint": "They register seekers and providers and run campaigns.",
+        "can_export": "Data Export",
+        "can_export_hint": "They download profile lists, with personal details masked.",
+        "can_pii": "PII Access",
+        "can_pii_hint": "They see and export the full personal details of profiles.",
+        "always_on": "Every invited [[user]] gets all of these.",
+        "role_hint": "Set from what invited [[users]] can do.",
+        "role_default": "Team Member"
+      },
       "inviting_to": "Inviting to",
       "recipients": "Email addresses",
       "recipients_hint": "Paste a list, or type and press <kbd>Enter</kbd> or <kbd>,</kbd>",
-      "count": "{count} of {max}",
       "placeholder": "asha@example.org, ravi@example.org",
       "add_more": "Add more…",
       "remove": "Remove {email}",
@@ -959,6 +970,9 @@
         "other": "couldn't be sent"
       },
       "too_many": "That's more emails than can be sent at once. Remove some and try again.",
+      "limit_hint": "Invite up to {max} in one go",
+      "too_many_title": "Too many emails",
+      "ok": "OK",
       "dismiss": "Dismiss",
       "help": {
         "heading": "How it works",
@@ -973,20 +987,17 @@
         "approve": {
           "title": "They verify their email",
           "body": "They sign in with the code we email them and are added to <link>[[Users]]</link>. No approval is needed."
-        },
-        "limits": "Up to {max} emails per send."
+        }
       },
       "no_orgs": "None of your [[orgs]] can send invites yet.",
-      "role": "Role: [[User]]",
       "breadcrumb": "Breadcrumb",
       "breadcrumb_current": "Invite",
       "limit_reached": "Limit reached",
-      "skipped_note": "You've added the most you can send at once ({max}). {count, plural, one {# more email was} other {# more emails were}} not added. Send these invites, then add the rest.",
+      "skipped_note": "You've added the most you can send at once ({max}). {count, plural, one {# more email was not added and is} other {# more emails were not added and are}} still in the box. Send these invites, then add the rest.",
       "remove_invalid": "Remove them",
       "note_empty": "Add at least one email to continue.",
       "note_fix": "Fix the highlighted emails to continue.",
       "sending": "Sending…",
-      "limit_note": "You've added the most you can send at once ({max}). Send these invites, then add more.",
       "breadcrumb_parent": "[[Users]]",
       "error": {
         "network": "We couldn't reach the server. Check your internet connection and try again.",
@@ -1018,7 +1029,7 @@
       "rate_limited": "Too many changes in a short time. Wait a minute and try again.",
       "not_found": "We couldn't find this. It may have been removed. Refresh the page and try again.",
       "name_taken": "That name is already taken.",
-      "role_not_allowed": "This role cannot be given to this user here.",
+      "role_not_allowed": "This role cannot be given to this [[user]] here.",
       "role_invalid": "This role's permissions or where it can be held aren't allowed together. Change them and try again.",
       "role_exists": "A role with that name already exists. Choose another name.",
       "role_builtin": "Built-in roles can't be changed.",
@@ -1045,7 +1056,6 @@
       "subtitle": "Additional roles add to the base role in this [[org]].",
       "base_tag": "Base role",
       "base_desc": "Comes with membership of this [[org]].",
-      "locked": "Can't be removed",
       "assigned": "Assigned",
       "personal_data": "Personal data",
       "until": "Until {date}",
@@ -1065,7 +1075,8 @@
       "this_person": "This person",
       "recorded": "Every change is recorded.",
       "assigned_note": "{role} assigned.",
-      "removed_note": "{role} removed."
+      "removed_note": "{role} removed.",
+      "base_role_name": "Onboard Seekers & Providers"
     },
     "roles_admin": {
       "title": "Roles",

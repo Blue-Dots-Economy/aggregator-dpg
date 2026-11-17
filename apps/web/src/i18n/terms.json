@@ -1,22 +1,22 @@
 {
   "en": {
-    "user": "user",
-    "users": "users",
-    "User": "User",
-    "Users": "Users",
+    "user": "team member",
+    "users": "team members",
+    "User": "Team Member",
+    "Users": "Team Members",
     "org": "organisation",
     "orgs": "organisations",
     "Org": "Organisation",
     "Orgs": "Organisations"
   },
   "hi": {
-    "user": "उपयोगकर्ता",
-    "users_obl": "उपयोगकर्ताओं",
+    "user": "टीम सदस्य",
+    "users_obl": "टीम सदस्यों",
     "org": "संगठन",
     "orgs_obl": "संगठनों"
   },
   "kn": {
-    "user": "ಬಳಕೆದಾರ",
+    "user": "ತಂಡದ ಸದಸ್ಯ",
     "org": "ಸಂಸ್ಥೆ"
   }
 }

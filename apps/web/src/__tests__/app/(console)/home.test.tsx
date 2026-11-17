@@ -188,7 +188,7 @@ describe('console home — owner', () => {
     expect(screen.queryByText('Old Reject')).toBeNull();
     expect(screen.getAllByRole('row')).toHaveLength(5);
     expect(screen.getByRole('button', { name: /^Invited\s*3/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Users\s*4/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Team Members\s*4/ })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Resend/ }).length).toBeGreaterThan(0);
     expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
       filter: { org_id: 'org-1' },

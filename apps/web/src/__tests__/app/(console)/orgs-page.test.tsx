@@ -3,7 +3,7 @@
  * organisations and the unused invites together under a card with the Invite
  * button; the network admin's hierarchy settings get the network's values.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type {
   KnownAsValues,
@@ -86,9 +86,31 @@ const NETWORK_ADMIN: MeResponse = {
 
 const VALUES: KnownAsValues = [{ key: 'state', name: 'State', default: true }];
 
+describe('console orgs page — "known as" turned off', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('reads the hierarchy without values and shows no hierarchy settings', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: NETWORK_ADMIN } as never);
+    vi.mocked(consoleRead).mockImplementation(async (path: string) => {
+      if (path === '/v1/org/hierarchy') {
+        return {
+          network: { id: 'root', name: 'The Network' },
+          limits: { max_depth: 2, max_children: null, max_total_orgs: 50 },
+          total_orgs: 0,
+        } satisfies OrgHierarchyResponse as never;
+      }
+      throw new Error(`unexpected read ${path}`);
+    });
+    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryByTestId('hierarchy-settings')).toBeNull();
+  });
+});
+
 describe('console orgs page — hierarchy settings', () => {
+  afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('ORG_KNOWN_AS_ENABLED', 'true');
     vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: NETWORK_ADMIN } as never);
     vi.mocked(consoleRead).mockImplementation(async (path: string) => {
       if (path === '/v1/org/hierarchy?fields=known_as_values') {
@@ -199,7 +221,11 @@ describe('console orgs page — owner view', () => {
     render(await page.type(page.props));
   }
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('ORG_KNOWN_AS_ENABLED', 'true');
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('hides Invite organisations from an owner without orgs.onboard', async () => {
     mockOwner();

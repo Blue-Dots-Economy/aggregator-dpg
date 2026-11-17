@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * A modal confirmation: a title, a sentence and two buttons. Escape and
- * Cancel close it. The confirm button gets focus on open, Tab stays inside
+ * A modal confirmation: a title, a sentence and two buttons, or one button
+ * when there is nothing to cancel. Escape and Cancel close it. The confirm button gets focus on open, Tab stays inside
  * the dialog, and focus returns to where it was on close.
  */
 
@@ -25,7 +25,8 @@ export function ConfirmDialog({
   title: string;
   body: string;
   confirmLabel: string;
-  cancelLabel: string;
+  /** Omitted for a message that only needs acknowledging: one button, which confirms. */
+  cancelLabel?: string;
   /** Red confirm button, for an action that takes something away. */
   danger?: boolean;
   busy?: boolean;
@@ -89,9 +90,11 @@ export function ConfirmDialog({
           </p>
         </div>
         <div className="flex justify-end gap-2 border-t border-(--bd-border-soft) px-[22px] py-3.5">
-          <Button kind="ghost" onClick={onCancel} disabled={busy}>
-            {cancelLabel}
-          </Button>
+          {cancelLabel ? (
+            <Button kind="ghost" onClick={onCancel} disabled={busy}>
+              {cancelLabel}
+            </Button>
+          ) : null}
           <button
             ref={confirmRef}
             type="button"

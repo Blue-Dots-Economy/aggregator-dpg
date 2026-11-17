@@ -3,7 +3,8 @@
 /**
  * Invites coordinators to an organisation, or (`target.kind = 'org'`) other
  * organisations to register under it. Addresses are typed or pasted into
- * a chip box, up to the per-send cap; each valid address can carry an optional
+ * a chip box, up to the per-send cap; addresses past the cap stay in the box
+ * and a pop-up says how many. Each valid address can carry an optional
  * name for the email greeting. Sending with no address or an invalid one shows
  * the problem under the box and sends nothing; reloading or closing the page with unsent emails asks
  * first. After sending, one line says how many invites went out and
@@ -34,6 +35,7 @@ import { ConsoleSection } from './ConsoleUi';
 import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '../../lib/console-client';
 import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SelectField } from '@/components/ui/SelectField';
 import { FieldMessage, messageWhen } from '../forms/useHandFieldErrors';
 import { useFieldErrorCopy } from '../forms/useFieldErrors';
@@ -102,16 +104,22 @@ export function parseRecipients(text: string, current: readonly Recipient[]): Re
 /**
  * Appends the addresses in `text` to `current`, up to `max` in total.
  *
- * @returns The new list and how many addresses did not fit.
+ * @returns The new list, how many addresses did not fit, and those addresses
+ *   as text to put back in the box.
  */
 function appendCapped(
   text: string,
   current: readonly Recipient[],
   max: number,
-): { list: Recipient[]; skipped: number } {
+): { list: Recipient[]; skipped: number; rest: string } {
   const added = parseRecipients(text, current);
   const room = Math.max(max - current.length, 0);
-  return { list: [...current, ...added.slice(0, room)], skipped: Math.max(added.length - room, 0) };
+  const left = added.slice(room);
+  return {
+    list: [...current, ...added.slice(0, room)],
+    skipped: left.length,
+    rest: left.map((r) => r.email).join(', '),
+  };
 }
 
 /** The addresses the API did not email, with the reason key for each. */
@@ -150,11 +158,12 @@ function renderKbd(chunks: ReactNode) {
   );
 }
 
-/** The role pill text: the coordinator role, or the invited organisation's role name. */
-function roleText(t: ReturnType<typeof useTranslations<'console'>>, target: InviteTarget): string {
-  return target.kind === 'org'
-    ? t('invite.org.role_pill', { role: target.roleLabel })
-    : t('invite.role');
+/** The role an invitee is shown with: the invited organisation's role name, or Team Member. */
+function roleLabelOf(
+  t: ReturnType<typeof useTranslations<'console'>>,
+  target: InviteTarget,
+): string {
+  return target.kind === 'org' ? target.roleLabel : t('invite.user.role_default');
 }
 
 /** Sends one batch of invites: coordinators into the org, or organisations under it. */
@@ -203,7 +212,8 @@ export function InviteForm({
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [skipped, setSkipped] = useState(0);
+  // How many addresses the last add left out because the list was full; shown in a pop-up.
+  const [overflow, setOverflow] = useState(0);
   // The name of a chip moved back into the box, given back when it is added again.
   const [heldName, setHeldName] = useState('');
   const [result, setResult] = useState<{ sent: number; notSent: NotSent[] } | null>(null);
@@ -220,7 +230,7 @@ export function InviteForm({
 
   function update(list: Recipient[], skippedNow = 0) {
     setRecipients(list);
-    setSkipped(skippedNow);
+    if (skippedNow > 0) setOverflow(skippedNow);
   }
 
   /** Gives the held name to the first address added from the box, then drops it. */
@@ -234,7 +244,7 @@ export function InviteForm({
   function add(text: string) {
     const next = appendCapped(text, recipients, maxRecipients);
     update(withHeldName(next.list), next.skipped);
-    setDraft('');
+    setDraft(next.rest);
     setResult(null);
   }
 
@@ -271,21 +281,22 @@ export function InviteForm({
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    // Text still in the box counts, as if the user had pressed Enter.
+    // Text still in the box counts, as if the user had pressed Enter. Addresses
+    // past the cap stay in the box for the next send; the rest are sent now.
     const next = draft.trim()
       ? appendCapped(draft, recipients, maxRecipients)
-      : { list: recipients, skipped: 0 };
+      : { list: recipients, skipped: 0, rest: '' };
     const all = withHeldName(next.list);
-    setDraft('');
+    setDraft(next.rest);
     setAttempted(true);
     if (!orgId) {
-      update(all, next.skipped);
+      update(all);
       setError(t('invite.error.org_unavailable'));
       return;
     }
     // Nothing valid, or an invalid address still in the list: show the list and its message.
     if (!all.some((r) => r.valid) || all.some((r) => !r.valid)) {
-      update(all, next.skipped);
+      update(all);
       requestAnimationFrame(() => document.getElementById('invite-emails')?.focus());
       return;
     }
@@ -305,7 +316,7 @@ export function InviteForm({
       setError(t(failureKey(r)));
       router.refresh();
     } else {
-      update(all, next.skipped);
+      update(all);
       setResult(null);
       setError(t(failureKey(r)));
     }
@@ -334,7 +345,12 @@ export function InviteForm({
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
       <ConsoleSection flush className="min-w-0 overflow-visible">
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col text-[13.5px]" noValidate>
-          <OrgHeader orgs={orgs} orgId={orgId} onChange={setOrgId} role={roleText(t, target)} />
+          <OrgHeader
+            orgs={orgs}
+            orgId={orgId}
+            onChange={setOrgId}
+            role={t('invite.org.role_pill', { role: roleLabelOf(t, target) })}
+          />
 
           <div className="flex flex-1 flex-col gap-2.5 p-[22px]">
             {result ? <ResultBanner result={result} onDismiss={() => setResult(null)} /> : null}
@@ -343,7 +359,6 @@ export function InviteForm({
               <label htmlFor="invite-emails" className="text-[14px] font-bold text-ink-900">
                 {t('invite.recipients')}
               </label>
-              <CountMeter count={recipients.length} max={maxRecipients} />
             </div>
 
             <div className="flex max-h-[180px] min-h-24 flex-wrap content-start items-center gap-2 overflow-auto rounded-[12px] border-[1.5px] border-(--bd-border) bg-(--bd-bg) p-3 transition-[border-color,box-shadow] focus-within:border-(--bd-primary) focus-within:bg-(--bd-card) focus-within:shadow-[0_0_0_4px_var(--bd-primary-50)]">
@@ -378,14 +393,14 @@ export function InviteForm({
                 autoCapitalize="none"
                 spellCheck={false}
                 value={draft}
-                disabled={full}
                 onChange={(e) => {
                   setDraft(e.target.value);
                   if (!e.target.value) setHeldName('');
                 }}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
-                onBlur={() => draft.trim() && add(draft)}
+                // A full list leaves the text in the box; Enter still explains why.
+                onBlur={() => draft.trim() && !full && add(draft)}
                 placeholder={placeholder}
                 aria-describedby="invite-emails-hint invite-emails__error"
                 aria-invalid={fieldInvalid || undefined}
@@ -397,8 +412,6 @@ export function InviteForm({
               {t.rich('invite.recipients_hint', { kbd: renderKbd })}
             </span>
 
-            {full ? <LimitNote skipped={skipped} max={maxRecipients} /> : null}
-
             {invalidCount ? (
               <InvalidBanner count={invalidCount} onRemove={() => update(valid)} />
             ) : null}
@@ -406,7 +419,7 @@ export function InviteForm({
 
             {valid.length ? <NamesList people={valid} onName={setName} onRemove={remove} /> : null}
 
-            <OrgCapabilities target={target} />
+            <Capabilities target={target} roleLabel={roleLabelOf(t, target)} />
 
             {error ? (
               <p role="alert" className="text-rose-700">
@@ -449,6 +462,15 @@ export function InviteForm({
         maxRecipients={maxRecipients}
         coordinatorsHref={coordinatorsHref}
         ns={HELP_NS[target.kind]}
+      />
+
+      <ConfirmDialog
+        open={overflow > 0}
+        title={t('invite.too_many_title')}
+        body={t('invite.skipped_note', { max: maxRecipients, count: overflow })}
+        confirmLabel={t('invite.ok')}
+        onConfirm={() => setOverflow(0)}
+        onCancel={() => setOverflow(0)}
       />
     </div>
   );
@@ -525,46 +547,6 @@ function ResultBanner({
       >
         <X className="h-4 w-4" />
       </button>
-    </output>
-  );
-}
-
-/** "N of max" with a small bar; amber once the list is full. */
-function CountMeter({ count, max }: Readonly<{ count: number; max: number }>) {
-  const t = useTranslations('console');
-  const full = count >= max;
-  return (
-    <span
-      className={cn(
-        'flex items-center gap-2 text-[12.5px] font-semibold tabular-nums',
-        full ? 'text-amber-700' : 'text-ink-500',
-      )}
-    >
-      {t('invite.count', { count, max })}
-      <span aria-hidden className="h-[5px] w-20 overflow-hidden rounded-full bg-(--bd-bg)">
-        <span
-          className={cn(
-            'block h-full rounded-full transition-[width]',
-            full ? 'bg-amber-600' : 'bg-(--bd-primary)',
-          )}
-          style={{ width: `${Math.min(100, (count / max) * 100)}%` }}
-        />
-      </span>
-    </span>
-  );
-}
-
-/** Says that only `max` can be sent at a time, and how many emails were not added. */
-function LimitNote({ skipped, max }: Readonly<{ skipped: number; max: number }>) {
-  const t = useTranslations('console');
-  return (
-    <output className="flex items-start gap-2.5 rounded-[10px] bg-(--bd-primary-50) px-3 py-2.5 text-[13px] text-(--bd-primary-600)">
-      <Info size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-      <span>
-        {skipped
-          ? t('invite.skipped_note', { max, count: skipped })
-          : t('invite.limit_note', { max })}
-      </span>
     </output>
   );
 }
@@ -693,32 +675,61 @@ function HelpCard({
           </ol>
         </div>
         <p className="border-t border-(--bd-border-soft) px-5 py-3.5 text-[12px] text-ink-500">
-          {t('invite.help.limits', { max: maxRecipients })}
+          {t('invite.limit_hint', { max: maxRecipients })}
         </p>
       </aside>
     </ConsoleSection>
   );
 }
 
-/** What an invited organisation can do, fixed for now, and the role it is shown with; nothing for coordinators. */
-function OrgCapabilities({ target }: Readonly<{ target: InviteTarget }>) {
-  const t = useTranslations('console');
-  if (target.kind !== 'org') return null;
-  const { roleLabel } = target;
-  const items = [
-    { key: 'orgs', label: t('invite.org.can_orgs'), hint: t('invite.org.can_orgs_hint') },
+/** One capability row of the invite form. */
+interface CapabilityItem {
+  key: string;
+  label: string;
+  hint: string;
+}
+
+/** The capabilities each kind of invitee gets, all on and fixed for now. */
+function capabilityItems(
+  t: ReturnType<typeof useTranslations<'console'>>,
+  kind: InviteTarget['kind'],
+): CapabilityItem[] {
+  if (kind === 'org') {
+    return [
+      { key: 'orgs', label: t('invite.org.can_orgs'), hint: t('invite.org.can_orgs_hint') },
+      {
+        key: 'participants',
+        label: t('invite.org.can_participants'),
+        hint: t('invite.org.can_participants_hint'),
+      },
+    ];
+  }
+  return [
     {
       key: 'participants',
-      label: t('invite.org.can_participants'),
-      hint: t('invite.org.can_participants_hint'),
+      label: t('invite.user.can_participants'),
+      hint: t('invite.user.can_participants_hint'),
     },
+    { key: 'export', label: t('invite.user.can_export'), hint: t('invite.user.can_export_hint') },
+    { key: 'pii', label: t('invite.user.can_pii'), hint: t('invite.user.can_pii_hint') },
   ];
+}
+
+/** What an invitee can do, ticked and locked, and the role it is shown with. */
+function Capabilities({
+  target,
+  roleLabel,
+}: Readonly<{ target: InviteTarget; roleLabel: string }>) {
+  const t = useTranslations('console');
+  const ns = target.kind === 'org' ? 'invite.org' : 'invite.user';
+  const items = capabilityItems(t, target.kind);
   return (
     <div className="mt-2 flex flex-col gap-4">
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-2 text-[14px] font-bold text-ink-900">
-          {t('invite.org.can_do')}
-        </legend>
+        <legend className="mb-2 text-[14px] font-bold text-ink-900">{t(`${ns}.can_do`)}</legend>
+        {target.kind === 'user' ? (
+          <p className="-mt-1 text-[12.5px] text-ink-500">{t('invite.user.always_on')}</p>
+        ) : null}
         {items.map((item) => (
           <div key={item.key} className="flex items-start gap-3">
             <input
@@ -746,7 +757,7 @@ function OrgCapabilities({ target }: Readonly<{ target: InviteTarget }>) {
           {t('invite.org.role_label')}
         </label>
         <input id="invite-role" className="bd-input sm:max-w-xs" value={roleLabel} readOnly />
-        <span className="text-[12.5px] text-ink-500">{t('invite.org.role_hint')}</span>
+        <span className="text-[12.5px] text-ink-500">{t(`${ns}.role_hint`)}</span>
       </div>
     </div>
   );

@@ -232,7 +232,9 @@ describe('console coordinators page — filters', () => {
   });
 
   it('lists organisations in tree order with their path and label', async () => {
+    vi.stubEnv('ORG_KNOWN_AS_ENABLED', 'true');
     show(await renderWith({}));
+    vi.unstubAllEnvs();
     const options = screen
       .getAllByRole('option')
       .map((o) => o.textContent)

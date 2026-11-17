@@ -3,8 +3,8 @@
 /**
  * The organisation console's sidebar, in the same shell as the coordinator
  * portal's ({@link AppSidebar}): Dashboard, My Team inside the My Blue Dots group,
- * Onboarded Organisations and Profile. My Team needs `org.manage` in an owned
- * organisation (the API also checks it), so the network admin has none; Profile
+ * Onboarded Organisations and Account Details. My Team needs `org.manage` in an owned
+ * organisation (the API also checks it), so the network admin has none; Account Details
  * is the caller's own organisation. "My account" opens from the account card
  * at the foot of the sidebar (`SidebarAccount.details`).
  */

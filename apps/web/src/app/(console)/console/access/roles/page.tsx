@@ -6,6 +6,7 @@
  */
 
 import { notFound } from 'next/navigation';
+import { withRoleDisplayNames } from '@/lib/role-display';
 import { getTranslations } from 'next-intl/server';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
@@ -20,6 +21,7 @@ import {
 
 export default async function ConsoleAccessRolesPage() {
   const t = await getTranslations('console.access');
+  const baseRoleName = (await getTranslations('console'))('roles.base_role_name');
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
@@ -31,7 +33,11 @@ export default async function ConsoleAccessRolesPage() {
     <>
       <Topbar title={t('title')} />
       {roles && permissions ? (
-        <AccessCatalogue tab="roles" roles={roles.roles} permissions={permissions.permissions} />
+        <AccessCatalogue
+          tab="roles"
+          roles={withRoleDisplayNames(roles.roles, baseRoleName)}
+          permissions={permissions.permissions}
+        />
       ) : (
         <ConsoleSection>
           <p className="text-[13.5px] text-ink-500">{t('off')}</p>

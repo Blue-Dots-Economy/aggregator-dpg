@@ -7,7 +7,8 @@
  * The dialog reads the candidate parents when it opens. A candidate the move
  * would fail for is disabled and shows the reason. The moved org keeps its
  * "known as" value when the new parent's list has it; otherwise the API gives
- * it the new parent's default.
+ * it the new parent's default. With "known as" turned off the dialog does not
+ * mention it.
  */
 
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
@@ -47,10 +48,13 @@ export function OrgMoveDialog({
   orgId,
   orgName,
   parentId,
+  showKnownAs,
 }: Readonly<{
   orgId: string;
   orgName: string;
   parentId: string | null;
+  /** Whether "known as" is turned on for the deployment (`ORG_KNOWN_AS_ENABLED`). */
+  showKnownAs: boolean;
 }>) {
   const t = useTranslations('console');
   const [open, setOpen] = useState(false);
@@ -68,6 +72,7 @@ export function OrgMoveDialog({
           orgId={orgId}
           orgName={orgName}
           currentParentId={parentId}
+          showKnownAs={showKnownAs}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -80,11 +85,13 @@ function MoveDialog({
   orgId,
   orgName,
   currentParentId,
+  showKnownAs,
   onClose,
 }: Readonly<{
   orgId: string;
   orgName: string;
   currentParentId: string | null;
+  showKnownAs: boolean;
   onClose: () => void;
 }>) {
   const t = useTranslations('console');
@@ -125,7 +132,7 @@ function MoveDialog({
   });
 
   const optionText = (o: ParentOption) => {
-    const label = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const label = showKnownAs && o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
     const name = o.id === currentParentId ? `${label} — ${t('org.move_current')}` : label;
     if (o.ok) return name;
     return `${name} — ${t(REASONS[o.reason ?? ''] ?? 'org.move_reason_other')}`;
@@ -184,7 +191,9 @@ function MoveDialog({
               />
               <FieldMessage id={fe.errorId('parent')} message={fe.message('parent')} />
             </div>
-            <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
+            {showKnownAs ? (
+              <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
+            ) : null}
             <p className="text-[13px] text-ink-600">
               {t('org.move_count', { count: data.subtree_size })}
             </p>
