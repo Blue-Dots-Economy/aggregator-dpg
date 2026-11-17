@@ -13,6 +13,19 @@
 import type { RoleDefinition } from './interface.js';
 
 /**
+ * What every team member can do through the base role it holds by membership.
+ * Export and personal details are included, so no team member needs a
+ * per-person grant for them.
+ */
+const TEAM_MEMBER_PERMISSIONS: RoleDefinition['permissions'] = [
+  'profiles.view',
+  'profiles.onboard',
+  'campaigns.run',
+  'profiles.export',
+  'profiles.view_pii',
+];
+
+/**
  * The six built-in roles, sorted by key. The three base roles (`baseFor` set)
  * follow membership. The three additional roles (`assignedBy` set) are granted
  * by a permission holder.
@@ -28,7 +41,7 @@ export const BUILTIN_ROLES: readonly RoleDefinition[] = [
     assignableOrgTypes: ['aggregator'],
     assignedBy: null,
     maxDays: null,
-    permissions: ['profiles.view', 'profiles.onboard', 'campaigns.run'],
+    permissions: TEAM_MEMBER_PERMISSIONS,
   },
   {
     key: 'data_export',

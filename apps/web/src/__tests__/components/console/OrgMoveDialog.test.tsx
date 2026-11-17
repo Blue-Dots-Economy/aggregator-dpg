@@ -58,7 +58,7 @@ function renderIt() {
   render(
     <StrictMode>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <OrgMoveDialog orgId={ORG} orgName="Mysuru" parentId="s1" />
+        <OrgMoveDialog orgId={ORG} orgName="Mysuru" parentId="s1" showKnownAs />
       </NextIntlClientProvider>
     </StrictMode>,
   );

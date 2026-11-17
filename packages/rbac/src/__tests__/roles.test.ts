@@ -36,7 +36,13 @@ const MATRIX: Record<string, string[]> = {
     'profiles.view',
   ],
   org_onboarder: ['orgs.onboard', 'profiles.move', 'profiles.verify'],
-  coordinator: ['campaigns.run', 'profiles.onboard', 'profiles.view'],
+  coordinator: [
+    'campaigns.run',
+    'profiles.export',
+    'profiles.onboard',
+    'profiles.view',
+    'profiles.view_pii',
+  ],
   pii_access: ['profiles.view_pii'],
   data_export: ['profiles.export'],
 };

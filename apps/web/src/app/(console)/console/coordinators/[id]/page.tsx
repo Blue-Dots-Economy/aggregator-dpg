@@ -7,6 +7,7 @@
  */
 
 import { notFound } from 'next/navigation';
+import { withRoleDisplayNames } from '@/lib/role-display';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Briefcase, CalendarDays, Mail, Phone } from 'lucide-react';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
@@ -112,7 +113,7 @@ export default async function ConsoleCoordinatorPage({
             userId={user.id}
             orgId={user.org_id}
             initial={userRoles}
-            roles={catalogue.roles}
+            roles={withRoleDisplayNames(catalogue.roles, t('roles.base_role_name'))}
             personName={displayName}
           />
         ) : null}

@@ -79,6 +79,7 @@ function form(org: Org, v: Viewer) {
         canEdit={v.canEdit ?? false}
         orgSchema={v.orgSchema === undefined ? ORG_SCHEMA : v.orgSchema}
         knownAsPicked={v.knownAsPicked ?? false}
+        showKnownAs
       />
     </NextIntlClientProvider>
   );

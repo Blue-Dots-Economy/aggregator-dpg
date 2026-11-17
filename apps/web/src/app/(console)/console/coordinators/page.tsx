@@ -3,19 +3,22 @@
  * and served domain; each active filter shows as a chip that removes it.
  *
  * Newest first, paged by the API's cursor. Each row names the organisation the
- * coordinator belongs to, with its "known as" label. With access control on,
+ * coordinator belongs to, with its "known as" label when `ORG_KNOWN_AS_ENABLED`
+ * is on. With access control on,
  * an Access column shows each coordinator's additional roles. The invite
  * button is hidden from a viewer who cannot invite.
  */
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { withRoleDisplayNames } from '@/lib/role-display';
 import { getTranslations } from 'next-intl/server';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
+import { isKnownAsEnabled } from '@/lib/known-as-flag';
 import { canInvite, canViewCoordinators } from '@/lib/capabilities';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
@@ -144,7 +147,8 @@ export default async function ConsoleCoordinatorsPage({
   const ownedIds = new Set(actor.ok ? actor.me.orgs.map((o) => o.id) : []);
   const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
   const counts = await countCoordinators(ownOrgs, orgId, serves);
-  const orgOptions = orgOptionsInTreeOrder(ownOrgs);
+  const knownAs = isKnownAsEnabled();
+  const orgOptions = orgOptionsInTreeOrder(ownOrgs, knownAs);
   const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
   // Same gate the sidebar link used to apply, now checked here instead.
   const showInvite = actor.ok && canInvite(actor.me);
@@ -159,7 +163,12 @@ export default async function ConsoleCoordinatorsPage({
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
   const catalogue = showAccess ? await consoleReadOptional('/v1/roles', RolesResponseSchema) : null;
-  const roleNames = Object.fromEntries((catalogue?.roles ?? []).map((r) => [r.key, r.name]));
+  const roleNames = Object.fromEntries(
+    withRoleDisplayNames(catalogue?.roles ?? [], t('roles.base_role_name')).map((r) => [
+      r.key,
+      r.name,
+    ]),
+  );
   return (
     <>
       <Topbar title={t('coordinators.heading')} subtitle={t('coordinators.subtitle')} />
@@ -279,6 +288,7 @@ export default async function ConsoleCoordinatorsPage({
                       </td>
                       <td>
                         <OrgCell
+                          showKnownAs={knownAs}
                           org={u.org_id ? orgById.get(u.org_id) : undefined}
                           registeredName={u.name}
                         />
@@ -329,16 +339,18 @@ export default async function ConsoleCoordinatorsPage({
   );
 }
 
-/** The organisation a coordinator belongs to, linked, with its "known as" label. */
+/** The organisation a coordinator belongs to, linked, with its "known as" label when shown. */
 function OrgCell({
   org,
   registeredName,
+  showKnownAs,
 }: Readonly<{
   org: UserSearchOrg | undefined;
   registeredName: string;
+  showKnownAs: boolean;
 }>) {
   if (!org) return <span className="text-ink-700">{registeredName}</span>;
-  const knownAs = org.known_as_name ?? org.known_as;
+  const knownAs = showKnownAs ? (org.known_as_name ?? org.known_as) : null;
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex flex-wrap items-center gap-2">

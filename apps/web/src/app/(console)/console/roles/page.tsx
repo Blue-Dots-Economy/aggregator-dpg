@@ -5,6 +5,7 @@
  */
 
 import { notFound } from 'next/navigation';
+import { withRoleDisplayNames } from '@/lib/role-display';
 import { getTranslations } from 'next-intl/server';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
@@ -26,7 +27,10 @@ export default async function ConsoleRolesPage() {
     <div className="flex flex-col gap-4">
       <h1 className="font-display text-[22px] font-bold text-ink-900">{t('roles_admin.title')}</h1>
       {data ? (
-        <RolesAdmin initial={data.roles} permissions={data.permissions} />
+        <RolesAdmin
+          initial={withRoleDisplayNames(data.roles, t('roles.base_role_name'))}
+          permissions={data.permissions}
+        />
       ) : (
         <Card className="p-4 text-[13.5px]">{t('roles_admin.off')}</Card>
       )}

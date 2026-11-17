@@ -32,6 +32,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0036_invite_role',
   // Adds `users.locations` (default `[]`); idempotent.
   '0037_user_locations',
+  // Adds profiles.export and profiles.view_pii to the built-in Coordinator role; idempotent.
+  '0038_coordinator_base_permissions',
 ];
 
 const journal: JournalEntry[] = [

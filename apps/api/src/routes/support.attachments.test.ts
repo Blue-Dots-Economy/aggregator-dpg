@@ -8,6 +8,11 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import {
+  ActorResolverFake,
+  buildCoordinatorActor,
+  _setActorResolver,
+} from '../services/auth/actor/index.js';
 import { _setSupportRateChecker } from '../services/support-rate.js';
 
 /** Base64 payload of a given decoded size. */
@@ -30,6 +35,13 @@ function validBody(overrides: Record<string, unknown> = {}) {
     consent: true,
     ...overrides,
   };
+}
+
+/** Registers the token's coordinator (`agg-9`) with the actor resolver the route uses. */
+function seedCoordinator(): void {
+  const resolver = new ActorResolverFake();
+  resolver.seed('agg-9', buildCoordinatorActor());
+  _setActorResolver(resolver);
 }
 
 describe('POST /v1/support — attachments', () => {
@@ -60,6 +72,7 @@ describe('POST /v1/support — attachments', () => {
 
     mailer = new FakeMailer();
     _setMailer(mailer);
+    seedCoordinator();
     app = await buildApp();
   });
 
@@ -67,6 +80,7 @@ describe('POST /v1/support — attachments', () => {
     await app?.close();
     _setMailer(null);
     _setAccessTokenVerifier(null);
+    _setActorResolver(null);
     _setSupportRateChecker(null);
     delete process.env.SUPPORT_ATTACHMENT_MAX_FILES;
     delete process.env.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES;
@@ -244,6 +258,7 @@ describe('POST /v1/support — rate limit', () => {
     }));
     mailer = new FakeMailer();
     _setMailer(mailer);
+    seedCoordinator();
     app = await buildApp();
   });
 
@@ -251,6 +266,7 @@ describe('POST /v1/support — rate limit', () => {
     await app?.close();
     _setMailer(null);
     _setAccessTokenVerifier(null);
+    _setActorResolver(null);
     _setSupportRateChecker(null);
   });
 

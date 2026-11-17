@@ -69,14 +69,15 @@ export function orgsInTreeOrder(orgs: readonly OrgRow[]): OrgTreeEntry[] {
 
 /**
  * Orders orgs as their tree (parents before children, siblings by name) and
- * labels each with its path.
+ * labels each with its path, and its "known as" value when shown.
  *
  * @param orgs - The reachable orgs, in any order.
+ * @param showKnownAs - Whether each label ends with the org's "known as" value.
  * @returns The options in tree order.
  */
-export function orgOptionsInTreeOrder(orgs: readonly OrgRow[]): OrgOption[] {
+export function orgOptionsInTreeOrder(orgs: readonly OrgRow[], showKnownAs: boolean): OrgOption[] {
   return orgsInTreeOrder(orgs).map(({ org, path }) => {
-    const knownAs = org.known_as_name ?? org.known_as;
+    const knownAs = showKnownAs ? (org.known_as_name ?? org.known_as) : null;
     const suffix = knownAs ? ` (${knownAs})` : '';
     return {
       id: org.id,

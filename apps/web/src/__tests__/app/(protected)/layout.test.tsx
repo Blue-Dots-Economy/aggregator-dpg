@@ -260,7 +260,7 @@ describe('<ProtectedLayout />', () => {
     expect(screen.getByTestId('support-enabled')).toHaveTextContent('false');
     expect(logWarn).toHaveBeenCalledWith(
       expect.objectContaining({
-        operation: 'protectedLayout.fetchSupportEnabled',
+        operation: 'supportEnabled.fetch',
         status: 'failure',
       }),
     );

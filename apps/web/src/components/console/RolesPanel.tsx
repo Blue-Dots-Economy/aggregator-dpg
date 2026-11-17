@@ -7,7 +7,9 @@
  * API applies every rule and audits every change.
  *
  * A role with a day limit is assigned for a chosen number of days. A role that
- * reveals personal data, and every removal, asks for confirmation first.
+ * reveals personal data, and every removal, asks for confirmation first. An
+ * additional role whose permissions the base role already grants shows as held,
+ * with no expiry and no assign or remove action.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -97,6 +99,13 @@ export function RolesPanel({
   ].sort(compareCodeUnits);
 
   if (base.length === 0 && shown.length === 0) return null;
+
+  // Permissions the user already holds through its base role here. An additional
+  // role made only of these adds nothing, so it reads as held, with no expiry
+  // and nothing to assign or remove.
+  const basePermissions = new Set(base.flatMap((b) => roleOf(b.role_key)?.permissions ?? []));
+  const coveredByBase = (role: Role | undefined) =>
+    !!role && role.permissions.length > 0 && role.permissions.every((p) => basePermissions.has(p));
 
   const daysFor = (key: string): number | null => {
     const max = roleOf(key)?.max_days ?? null;
@@ -207,21 +216,19 @@ export function RolesPanel({
               </div>
               <div className="text-[12.5px] text-ink-500">{t('roles.base_desc')}</div>
             </div>
-            <span className="col-span-2 inline-flex items-center gap-1.5 text-[12.5px] text-ink-500 sm:col-span-1">
-              <Lock size={13} aria-hidden="true" />
-              {t('roles.locked')}
-            </span>
           </li>
         ))}
         {shown.map((key) => {
           const role = roleOf(key);
           const live = liveOf(key);
+          const covered = coveredByBase(role);
           const pii = isPersonalData(role);
           const max = role?.max_days ?? null;
           let tone: 'primary' | 'rose' | 'muted' = 'muted';
-          if (live) tone = pii ? 'rose' : 'primary';
+          if (live || covered) tone = pii ? 'rose' : 'primary';
           let status = t('roles.none');
-          if (live) {
+          if (covered) status = t('roles.no_expiry');
+          else if (live) {
             status = live.expires_at
               ? t('roles.until', { date: dateOf(live.expires_at) })
               : t('roles.no_expiry');
@@ -235,7 +242,7 @@ export function RolesPanel({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2 font-bold text-ink-900">
                   {nameOf(key)}
-                  {live ? <Tag tone="green">{t('roles.assigned')}</Tag> : null}
+                  {live || covered ? <Tag tone="green">{t('roles.assigned')}</Tag> : null}
                   {pii ? <Tag tone="rose">{t('roles.personal_data')}</Tag> : null}
                 </div>
                 <div data-testid={`role-${key}`} className="text-[12.5px] text-ink-500">
@@ -244,7 +251,7 @@ export function RolesPanel({
                 </div>
               </div>
               <div className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-1 sm:justify-end">
-                {live && assignable.has(key) ? (
+                {live && !covered && assignable.has(key) ? (
                   <Button
                     kind="danger"
                     disabled={busy}
@@ -253,7 +260,7 @@ export function RolesPanel({
                     {t('roles.revoke')}
                   </Button>
                 ) : null}
-                {live ? null : (
+                {live || covered ? null : (
                   <>
                     {max ? (
                       <SelectField

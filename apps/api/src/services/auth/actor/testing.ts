@@ -58,3 +58,25 @@ export function buildAdminActor(overrides: Partial<Actor> = {}): Actor {
     ...overrides,
   };
 }
+
+/**
+ * Builds an active coordinator actor, a member of one aggregator org.
+ *
+ * @param overrides - Fields to replace.
+ * @returns A valid actor.
+ */
+export function buildCoordinatorActor(overrides: Partial<Actor> = {}): Actor {
+  return buildAdminActor({
+    userId: '00000000-0000-4000-8000-0000000000c1',
+    userType: 'coordinator',
+    orgs: [
+      {
+        id: '00000000-0000-4000-8000-0000000000f1',
+        orgType: 'aggregator',
+        relation: 'member',
+        isDefault: false,
+      },
+    ],
+    ...overrides,
+  });
+}

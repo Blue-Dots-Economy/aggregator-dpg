@@ -3,7 +3,8 @@
  *
  * An org owner sees, for each organisation it owns at the top of its tree, the
  * organisations under it and the invites nobody has used yet in one list, and,
- * closed by default, the "known as" values it defines for them.
+ * closed by default, the "known as" values it defines for them. "Known as" and
+ * the hierarchy settings show only with `ORG_KNOWN_AS_ENABLED`.
  *
  * The network admin sees the same for the organisations directly under the
  * network. `?status=` opens the list with a filter.
@@ -15,6 +16,7 @@ import { redirect } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { KnownAsValues, OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
+import { isKnownAsEnabled } from '@/lib/known-as-flag';
 import { canOnboardOrgsUnder } from '@/lib/capabilities';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgsPage } from '@/lib/console-hierarchy.server';
@@ -48,6 +50,7 @@ export default async function ConsoleOrgsPage({
   if (!actor.ok) return null;
   const me = actor.me;
   const canInviteOrgs = me.orgs.some((o) => o.role === 'owner' && canOnboardOrgsUnder(me, o));
+  const knownAs = isKnownAsEnabled();
   if (!me.is_network_admin) {
     return (
       <OwnerOrgs
@@ -55,11 +58,12 @@ export default async function ConsoleOrgsPage({
         ownerIds={me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
         canInviteOrgs={canInviteOrgs}
         initialFilter={initialFilter}
+        knownAs={knownAs}
       />
     );
   }
   const hierarchy = await consoleRead(
-    '/v1/org/hierarchy?fields=known_as_values',
+    knownAs ? '/v1/org/hierarchy?fields=known_as_values' : '/v1/org/hierarchy',
     OrgHierarchyResponseSchema,
   );
   const [network, invites] = await Promise.all([
@@ -81,12 +85,15 @@ export default async function ConsoleOrgsPage({
           { kind: 'org', orgId: hierarchy.network.id },
           !network.more,
           initialFilter,
+          knownAs,
         )}
-        <HierarchySettings
-          orgId={hierarchy.network.id}
-          orgName={hierarchy.network.name}
-          values={hierarchy.network.known_as_values ?? []}
-        />
+        {knownAs ? (
+          <HierarchySettings
+            orgId={hierarchy.network.id}
+            orgName={hierarchy.network.name}
+            values={hierarchy.network.known_as_values ?? []}
+          />
+        ) : null}
       </div>
     </>
   );
@@ -100,24 +107,29 @@ export default async function ConsoleOrgsPage({
  * @param ownedIds - The organisations the viewer belongs to.
  * @param ownerIds - Those it owns, the only ones whose values it can edit.
  * @param canInviteOrgs - Whether it may invite organisations under any of them.
+ * @param knownAs - Whether "known as" and the hierarchy settings are shown.
  */
 async function OwnerOrgs({
   ownedIds,
   ownerIds,
   canInviteOrgs,
   initialFilter,
+  knownAs,
 }: Readonly<{
   ownedIds: string[];
   ownerIds: string[];
   canInviteOrgs: boolean;
   initialFilter: MemberFilter;
+  knownAs: boolean;
 }>) {
   const t = await getTranslations('console');
   const { orgs, more } = await readReachableOrgsPage();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
   const [values, lists] = await Promise.all([
-    Promise.all(roots.map((root) => knownAsValuesToEdit(root, ownerIds))),
+    knownAs
+      ? Promise.all(roots.map((root) => knownAsValuesToEdit(root, ownerIds)))
+      : Promise.resolve(roots.map(() => null)),
     Promise.all(
       roots.map(async (root) =>
         orgList(
@@ -126,6 +138,7 @@ async function OwnerOrgs({
           { kind: 'org', orgId: root.id },
           !more,
           initialFilter,
+          knownAs,
         ),
       ),
     ),
@@ -161,6 +174,7 @@ async function OwnerOrgs({
  * @param resend - Where an expired invite is sent again from.
  * @param complete - Whether `orgs` holds every organisation.
  * @param initialFilter - The filter the list opens on.
+ * @param knownAs - Whether each organisation's "known as" value is shown.
  */
 async function orgList(
   orgs: readonly OrgRow[],
@@ -168,6 +182,7 @@ async function orgList(
   resend: { kind: 'org'; orgId: string },
   complete: boolean,
   initialFilter: MemberFilter,
+  knownAs: boolean,
 ) {
   const t = await getTranslations('console');
   const format = await getFormatter();
@@ -177,7 +192,7 @@ async function orgList(
     .map((o) => ({
       id: o.id,
       name: o.name,
-      detail: o.is_default ? null : (o.known_as_name ?? o.known_as ?? null),
+      detail: o.is_default || !knownAs ? null : (o.known_as_name ?? o.known_as ?? null),
       status: o.status,
       href: `/console/orgs/${o.id}`,
       cells: [

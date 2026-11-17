@@ -8,7 +8,7 @@
  * limits, a plain message for each kind of failure, and switching the chosen organisation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
@@ -74,6 +74,21 @@ describe('<InviteForm />', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.getByText('Inviting to')).toBeInTheDocument();
     expect(screen.getByText('First Org')).toBeInTheDocument();
+  });
+
+  it('shows the three team-member capabilities ticked and locked, and the Team Member role', () => {
+    renderForm([orgs[0]!]);
+    const copy = messages.console.invite.user;
+    for (const label of [copy.can_participants, copy.can_export, copy.can_pii]) {
+      const box = screen.getByRole('checkbox', { name: label });
+      expect(box).toBeChecked();
+      expect(box).toBeDisabled();
+    }
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+    expect(screen.getByText(`Role: ${copy.role_default}`)).toBeInTheDocument();
+    const role = screen.getByLabelText(messages.console.invite.org.role_label);
+    expect(role).toHaveValue(copy.role_default);
+    expect(role).toHaveAttribute('readonly');
   });
 
   it('shows a select defaulting to the first organisation when there are several', async () => {
@@ -251,7 +266,7 @@ describe('<InviteForm />', () => {
     expect(help).toHaveTextContent(
       `They sign in with the code we email them and are added to ${term('Users')}. No approval is needed.`,
     );
-    expect(help).toHaveTextContent('Up to 5 emails per send.');
+    expect(help).toHaveTextContent('Invite up to 5 in one go');
   });
 
   it('links to the coordinators list only when the page passes a link', () => {
@@ -269,22 +284,23 @@ describe('<InviteForm />', () => {
     );
   });
 
-  it('shows the default limits when the page passes none', () => {
+  it('says how many can be invited in one go, with no running count', () => {
     renderForm();
-    expect(screen.getByText('Up to 10 emails per send.')).toBeInTheDocument();
+    // Said once, in the side card; nothing beside the email box.
+    expect(screen.getAllByText('Invite up to 10 in one go')).toHaveLength(1);
+    typeAddresses('a@x.org');
+    expect(screen.queryByText(/\d+ of \d+/)).not.toBeInTheDocument();
   });
 
-  it('shows the at-a-time note when the list is exactly full, with nothing left out', () => {
+  it('shows no pop-up when the list is exactly full', () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} maxRecipients={2} />
       </NextIntlClientProvider>,
     );
     typeAddresses('a@x.org b@x.org');
-    expect(screen.getByRole('status')).toHaveTextContent(
-      "You've added the most you can send at once (2). Send these invites, then add more.",
-    );
-    expect(screen.queryByText(/not added/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(emailBox()).toBeEnabled();
   });
 
   it('renders in Hindi when the Hindi catalogue is active', () => {
@@ -297,7 +313,7 @@ describe('<InviteForm />', () => {
     expect(screen.getByRole('button', { name: /आमंत्रण भेजें/ })).toBeInTheDocument();
   });
 
-  it('stops at the configured cap and says how many addresses were not added', () => {
+  it('keeps the first addresses up to the cap, leaves the rest in the box and explains', () => {
     global.fetch = respond({}, 200) as never;
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -305,19 +321,56 @@ describe('<InviteForm />', () => {
       </NextIntlClientProvider>,
     );
     typeAddresses('a@x.org b@x.org c@x.org d@x.org');
-    expect(screen.getByText('2 of 2')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(
-      "You've added the most you can send at once (2). 2 more emails were not added. Send these invites, then add the rest.",
+    const dialog = screen.getByRole('dialog', { name: 'Too many emails' });
+    expect(dialog).toHaveTextContent(
+      "You've added the most you can send at once (2). 2 more emails were not added and are still in the box. Send these invites, then add the rest.",
     );
-    expect(emailBox()).toBeDisabled();
-    expect(emailBox()).toHaveAttribute('placeholder', 'Limit reached');
+    expect(within(dialog).getAllByRole('button')).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove c@x.org' })).not.toBeInTheDocument();
     expect(sendButton()).toHaveTextContent('Send 2 invites');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Remove b@x.org' })[0]!);
-    expect(emailBox()).toBeEnabled();
-    expect(screen.queryByText(/not added/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/at once/)).not.toBeInTheDocument();
+    expect(emailBox()).toHaveValue('c@x.org, d@x.org');
+    // Leaving the box while the list is full keeps the text and opens nothing.
+    fireEvent.blur(emailBox());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(emailBox()).toHaveValue('c@x.org, d@x.org');
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('shows the pop-up when one more address is typed into a full list', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <InviteForm orgs={orgs} maxRecipients={2} />
+      </NextIntlClientProvider>,
+    );
+    typeAddresses('a@x.org b@x.org');
+    typeAddresses('c@x.org');
+    expect(screen.getByRole('dialog', { name: 'Too many emails' })).toHaveTextContent(
+      '1 more email was not added',
+    );
+  });
+
+  it('sends the addresses that fit and leaves the rest in the box', async () => {
+    global.fetch = respond({ sent: 2, resent: 0, invalid: [], existing: [] }, 200) as never;
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <InviteForm orgs={[orgs[0]!]} maxRecipients={2} />
+      </NextIntlClientProvider>,
+    );
+    typeAddresses('a@x.org b@x.org c@x.org');
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    expect(emailBox()).toHaveValue('c@x.org');
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(screen.getByText('2 invites sent')).toBeInTheDocument());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(
+      (vi.mocked(global.fetch).mock.calls[0]![1] as RequestInit).body as string,
+    ) as { recipients: Array<{ email: string }> };
+    expect(body.recipients.map((r) => r.email)).toEqual(['a@x.org', 'b@x.org']);
+    expect(emailBox()).toHaveValue('c@x.org');
   });
 
   it('clears the previous result once the list is edited', async () => {

@@ -5,7 +5,7 @@
  * the owner, do not. A viewer who picks the org's "known as" value gets the
  * picker, the matching banner, and a details form without that value.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
@@ -34,8 +34,18 @@ vi.mock('@/components/shell/Topbar', () => ({
   ),
 }));
 vi.mock('@/components/console/OrgEditForm', () => ({
-  OrgEditForm: ({ knownAsPicked }: { knownAsPicked?: boolean }) => (
-    <div data-testid="org-edit-form" data-known-as-picked={String(knownAsPicked)} />
+  OrgEditForm: ({
+    knownAsPicked,
+    showKnownAs,
+  }: {
+    knownAsPicked?: boolean;
+    showKnownAs?: boolean;
+  }) => (
+    <div
+      data-testid="org-edit-form"
+      data-known-as-picked={String(knownAsPicked)}
+      data-show-known-as={String(showKnownAs)}
+    />
   ),
 }));
 vi.mock('@/components/console/KnownAsPicker', () => ({
@@ -165,8 +175,26 @@ describe('console org detail — child organisations', () => {
   });
 });
 
-describe('console org detail — "known as" picker', () => {
+describe('console org detail — "known as" turned off', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('shows no picker, and the details form leaves "known as" out', async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: { id: 'parent', name: 'Parent', known_as_values: [{ key: 'block', name: 'Block' }] },
+    });
+    await show();
+    expect(screen.queryByTestId('known-as-picker')).toBeNull();
+    expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-show-known-as', 'false');
+  });
+});
+
+describe('console org detail — "known as" picker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('ORG_KNOWN_AS_ENABLED', 'true');
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   const PARENT = {
     id: 'parent',

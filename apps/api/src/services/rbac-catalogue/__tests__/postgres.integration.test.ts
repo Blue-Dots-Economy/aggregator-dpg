@@ -96,9 +96,7 @@ suite('rbac catalogue (migrations 0030/0031) — integration', () => {
     if (!loaded.ok) return;
     expect(loaded.value.revision).toMatch(/^[0-9a-f]{32}$/);
     const seeded = byKey(loaded.value.roles.filter((r) => r.isBuiltin));
-    expect(seeded).toEqual(
-      builtins.map((r) => ({ ...r, permissions: [...r.permissions].sort() })),
-    );
+    expect(seeded).toEqual(builtins.map((r) => ({ ...r, permissions: [...r.permissions].sort() })));
   });
 
   it('seeds built-in roles that pass the catalogue rules and reference known permissions', async () => {
@@ -115,10 +113,11 @@ suite('rbac catalogue (migrations 0030/0031) — integration', () => {
 
   it('changes the revision on a role edit and back on its reversal', async () => {
     const before = await revision();
-    await pool.query(`INSERT INTO role_permission VALUES ('coordinator', 'profiles.export')`);
+    // A permission the coordinator role does not hold, so the edit is a real change.
+    await pool.query(`INSERT INTO role_permission VALUES ('coordinator', 'profiles.verify')`);
     expect(await revision()).not.toBe(before);
     await pool.query(
-      `DELETE FROM role_permission WHERE role_key = 'coordinator' AND permission_key = 'profiles.export'`,
+      `DELETE FROM role_permission WHERE role_key = 'coordinator' AND permission_key = 'profiles.verify'`,
     );
     expect(await revision()).toBe(before);
   });

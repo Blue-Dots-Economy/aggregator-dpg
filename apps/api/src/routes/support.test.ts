@@ -15,6 +15,12 @@ import { buildApp } from '../app.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSupportRateChecker } from '../services/support-rate.js';
+import {
+  ActorResolverFake,
+  buildAdminActor,
+  buildCoordinatorActor,
+  _setActorResolver,
+} from '../services/auth/actor/index.js';
 
 /** A complete, valid submission body; override per-test. */
 function validBody(overrides: Record<string, unknown> = {}) {
@@ -47,6 +53,16 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
           phone_number: '+919000000000',
         };
       }
+      // An organisation owner signed in to the console: no `aggregator_id`.
+      if (token === 'owner-token') {
+        return { sub: 'owner-sub', email: 'owner@org.com', preferred_username: 'owner@org.com' };
+      }
+      if (token === 'pending-token') {
+        return { sub: 'p1', aggregator_id: 'agg-pending', email: 'p@org.com' };
+      }
+      if (token === 'stranger-token') {
+        return { sub: 'stranger-sub', email: 'x@org.com', preferred_username: 'x@org.com' };
+      }
       throw new Error('invalid token');
     });
 
@@ -59,6 +75,12 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     // limit itself is covered in `support.attachments.test.ts`.
     _setSupportRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
+    const resolver = new ActorResolverFake();
+    resolver.seed('owner-sub', buildAdminActor());
+    resolver.seed('agg-9', buildCoordinatorActor());
+    resolver.seed('agg-pending', buildCoordinatorActor({ active: false }));
+    _setActorResolver(resolver);
+
     app = await buildApp();
   });
 
@@ -67,6 +89,50 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     _setMailer(null);
     _setAccessTokenVerifier(null);
     _setSupportRateChecker(null);
+    _setActorResolver(null);
+  });
+
+  it('lets an organisation owner read the config and send a message', async () => {
+    const config = await app.inject({
+      method: 'GET',
+      url: '/v1/support/config',
+      headers: { authorization: 'Bearer owner-token' },
+    });
+    expect(config.statusCode).toBe(200);
+    expect(config.json()).toMatchObject({ enabled: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer owner-token' },
+      payload: validBody({ name: 'Org Owner', email: 'owner@org.com' }),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mailer.outbox).toHaveLength(1);
+    expect(mailer.outbox[0]!.replyTo).toBe('owner@org.com');
+  });
+
+  it('refuses a coordinator who has not activated yet', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer pending-token' },
+      payload: validBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: { code: 'NOT_APPROVED' } });
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('refuses a token with no aggregator_id that belongs to no account', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer stranger-token' },
+      payload: validBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('sends the support email to all TO + CC recipients and returns 201, with Reply-To + reference', async () => {

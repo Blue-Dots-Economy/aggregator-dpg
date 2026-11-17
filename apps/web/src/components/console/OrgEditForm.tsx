@@ -11,8 +11,8 @@
  *
  * Only the org's owner edits the details, the name included. The "known as"
  * value is shown read-only here; the owner of the parent org sets it with
- * `KnownAsPicker`. When the page shows that picker, this form leaves the value
- * out. The network admin sees the details read-only. The Default
+ * `KnownAsPicker`. When the page shows that picker, or "known as" is turned
+ * off, this form leaves the value out. The network admin sees the details read-only. The Default
  * org, the root and an org below the viewer's own are read-only.
  */
 
@@ -60,12 +60,48 @@ function pick(profile: JsonRecord, fields: readonly string[]): JsonRecord {
   return Object.fromEntries(fields.filter((f) => f in profile).map((f) => [f, profile[f]]));
 }
 
+/**
+ * The fixed details the owner changed, plus the changed schema fields, as one
+ * PATCH body; empty when nothing changed.
+ */
+function detailsPatch(
+  current: Org,
+  edits: { name: string; legalName: string; description: string },
+  profileChanges: JsonRecord,
+): JsonRecord {
+  const patch: JsonRecord = {};
+  if (edits.name.trim() !== current.name) patch['name'] = edits.name.trim();
+  if (orNull(edits.legalName) !== current.legal_name) patch['legal_name'] = orNull(edits.legalName);
+  if (orNull(edits.description) !== current.description) {
+    patch['description'] = orNull(edits.description);
+  }
+  if (Object.keys(profileChanges).length > 0) patch['profile'] = profileChanges;
+  return patch;
+}
+
+/**
+ * The server's per-field messages from a 400 answer, for the fields this form
+ * shows; `null` when the answer carries none.
+ */
+function knownFieldErrors(
+  status: number,
+  errorFields: JsonRecord | undefined,
+  fields: readonly string[],
+): JsonRecord | null {
+  const serverErrors = errorFields?.['field_errors'];
+  if (status !== 400 || !serverErrors || typeof serverErrors !== 'object') return null;
+  return Object.fromEntries(
+    Object.entries(serverErrors).filter(([field]) => fields.includes(field)),
+  );
+}
+
 export function OrgEditForm({
   org,
   editable,
   canEdit,
   orgSchema,
   knownAsPicked = false,
+  showKnownAs,
 }: Readonly<{
   org: Org;
   /** False for the Default org, the root and an org below the viewer's own. */
@@ -76,8 +112,11 @@ export function OrgEditForm({
   orgSchema: { schema: RJSFSchema; uiSchema: JsonRecord } | null;
   /** The page shows `KnownAsPicker` for this org, so the form leaves "known as" out. */
   knownAsPicked?: boolean;
+  /** Whether "known as" is turned on for the deployment (`ORG_KNOWN_AS_ENABLED`). */
+  showKnownAs: boolean;
 }>) {
   const t = useTranslations('console');
+  const omitKnownAs = knownAsPicked || !showKnownAs;
   const router = useRouter();
   const editing = editable && canEdit;
   const view = useMemo(
@@ -156,14 +195,9 @@ export function OrgEditForm({
       );
       return;
     }
-    const patch: JsonRecord = {};
-    if (editing) {
-      if (name.trim() !== current.name) patch['name'] = name.trim();
-      if (orNull(legalName) !== current.legal_name) patch['legal_name'] = orNull(legalName);
-      if (orNull(description) !== current.description) patch['description'] = orNull(description);
-      const changes = profileChanges();
-      if (Object.keys(changes).length > 0) patch['profile'] = changes;
-    }
+    const patch = editing
+      ? detailsPatch(current, { name, legalName, description }, profileChanges())
+      : {};
     if (Object.keys(patch).length === 0) {
       setMessage(t('org.saved'));
       return;
@@ -180,13 +214,8 @@ export function OrgEditForm({
     }
     // The change may have been saved: reload the page's copy.
     if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
-    const serverErrors = r.error.fields?.['field_errors'];
-    if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
-      const known = Object.fromEntries(
-        Object.entries(serverErrors as JsonRecord).filter(([field]) => fields.includes(field)),
-      );
-      if (fieldErrors.setServerErrors({ field_errors: known }).complete) return;
-    }
+    const known = knownFieldErrors(r.status, r.error.fields, fields);
+    if (known && fieldErrors.setServerErrors({ field_errors: known }).complete) return;
     setMessage(t(errorKey(r)));
   }
 
@@ -208,44 +237,15 @@ export function OrgEditForm({
   );
 
   if (!editing) {
-    // Read-only details (the Default org, the root, an org below the viewer's
-    // own, or not the owner): plain text, not disabled inputs.
-    const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
-    const ui = view?.uiSchema ?? {};
-    const schemaItems = fields.map((field) => ({
-      label: String(props[field]?.['title'] ?? field),
-      value:
-        orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
-        '—',
-    }));
-    const items: Array<{ label: string; value: ReactNode }> = [
-      { label: t('org.name'), value: current.name },
-      ...(current.known_as === null || knownAsPicked
-        ? []
-        : [{ label: t('org.known_as'), value: knownAsText(current) }]),
-      { label: t('org.legal_name'), value: current.legal_name ?? '—' },
-      ...schemaItems,
-      {
-        label: t('org.description'),
-        value: current.description ? (
-          <span className="whitespace-pre-line">{current.description}</span>
-        ) : (
-          t('org.no_description')
-        ),
-      },
-      {
-        label: t('org.locations'),
-        value: addresses.length ? addresses.join('; ') : t('org.no_locations'),
-      },
-    ];
-    let note: string | null = null;
-    if (current.is_default) note = t('org.read_only');
-    else if (editable) note = t('org.details_owner_only');
     return (
-      <ConsoleSection title={t('org.details')}>
-        {note ? <p className="text-[13px] text-ink-500 mb-4">{note}</p> : null}
-        <DetailList items={items} />
-      </ConsoleSection>
+      <OrgDetailsReadOnly
+        current={current}
+        view={view}
+        fields={fields}
+        addresses={addresses}
+        showKnownAs={!omitKnownAs}
+        editable={editable}
+      />
     );
   }
 
@@ -262,7 +262,7 @@ export function OrgEditForm({
             />
             <FieldMessage id={nameFe.errorId('name')} message={nameFe.message('name')} />
           </div>
-          {knownAsPicked ? null : (
+          {omitKnownAs ? null : (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
               <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
@@ -335,6 +335,73 @@ export function OrgEditForm({
         </div>
         {status}
       </form>
+    </ConsoleSection>
+  );
+}
+
+/**
+ * The organisation's details as plain text, for a viewer who cannot edit them:
+ * the Default org, the root, an org below the viewer's own, or not the owner.
+ */
+function OrgDetailsReadOnly({
+  current,
+  view,
+  fields,
+  addresses,
+  showKnownAs,
+  editable,
+}: Readonly<{
+  current: Org;
+  view: ReturnType<typeof consoleOrgSchema> | null;
+  fields: readonly string[];
+  /** The org's locations, one line each. */
+  addresses: readonly string[];
+  /** Whether the "known as" value is shown. */
+  showKnownAs: boolean;
+  /** False for the Default org, the root and an org below the viewer's own. */
+  editable: boolean;
+}>) {
+  const t = useTranslations('console');
+  const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
+  const ui = view?.uiSchema ?? {};
+  /** A field's schema title, or its name when the schema gives no text title. */
+  const labelOf = (field: string) => {
+    const title = props[field]?.['title'];
+    return typeof title === 'string' ? title : field;
+  };
+  const schemaItems = fields.map((field) => ({
+    label: labelOf(field),
+    value:
+      orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
+      '—',
+  }));
+  const items: Array<{ label: string; value: ReactNode }> = [
+    { label: t('org.name'), value: current.name },
+    ...(current.known_as === null || !showKnownAs
+      ? []
+      : [{ label: t('org.known_as'), value: knownAsText(current) }]),
+    { label: t('org.legal_name'), value: current.legal_name ?? '—' },
+    ...schemaItems,
+    {
+      label: t('org.description'),
+      value: current.description ? (
+        <span className="whitespace-pre-line">{current.description}</span>
+      ) : (
+        t('org.no_description')
+      ),
+    },
+    {
+      label: t('org.locations'),
+      value: addresses.length ? addresses.join('; ') : t('org.no_locations'),
+    },
+  ];
+  let note: string | null = null;
+  if (current.is_default) note = t('org.read_only');
+  else if (editable) note = t('org.details_owner_only');
+  return (
+    <ConsoleSection title={t('org.details')}>
+      {note ? <p className="text-[13px] text-ink-500 mb-4">{note}</p> : null}
+      <DetailList items={items} />
     </ConsoleSection>
   );
 }

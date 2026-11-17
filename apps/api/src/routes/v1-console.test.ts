@@ -2328,7 +2328,15 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(res.assignable.map((r) => r.role_key).sort()).toEqual(['data_export', 'pii_access']);
       });
 
-      it('assigns PII Access for 90 days, takes effect, then revokes it', async () => {
+      it('assigns PII Access for 90 days and revokes it; the base role keeps personal data', async () => {
+        // Every team member sees personal details through the base role.
+        const before = (await get('/v1/user/read/me', 'coord')).json() as {
+          capabilities: string[];
+        };
+        expect(before.capabilities).toEqual(
+          expect.arrayContaining(['profiles.view_pii', 'profiles.export']),
+        );
+
         const res = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A });
         expect(res.statusCode).toBe(200);
         const body = res.json() as { live: boolean; expires_at: string };
@@ -2346,7 +2354,7 @@ describe('console routes /v1/user, /v1/org', () => {
         });
         expect(off.json()).toEqual({ revoked: true });
         const after = (await get('/v1/user/read/me', 'coord')).json() as { capabilities: string[] };
-        expect(after.capabilities).not.toContain('profiles.view_pii');
+        expect(after.capabilities).toContain('profiles.view_pii');
         const audit = (getRoleStore() as InMemoryRoleStore).audit.map((e) => e.event);
         expect(audit).toEqual(['role.assign', 'role.revoke']);
       });
@@ -2587,7 +2595,7 @@ describe('console routes /v1/user, /v1/org', () => {
           action: 'view_pii',
           personal_data: true,
           retired: false,
-          granted_by_roles: ['pii_access'],
+          granted_by_roles: ['coordinator', 'pii_access'],
         });
         expect(permissions.find((p) => p.key === 'profiles.view')).toMatchObject({
           personal_data: false,

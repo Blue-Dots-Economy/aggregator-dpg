@@ -6,13 +6,12 @@
  *   POST /v1/support        → emails the submission and any image/video/audio
  *                             attachments to SUPPORT_EMAIL.
  *
- * Any authenticated coordinator may submit, approved or not.
+ * An active coordinator, an organisation owner or the network admin may submit.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderSupportRequest,
@@ -30,7 +29,8 @@ import {
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { requireActor, type ResolvedCaller } from '../services/auth/actor/index.js';
 
 const SupportRequestSchema = z
   .object({
@@ -91,12 +91,12 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
             /** Picker hint only — validation is MIME-based. */
             allowedExtensions: z.array(z.string()),
           }),
-          ...errorResponses(401),
+          ...errorResponses(401, 403),
         },
       },
     },
     async (req, reply) => {
-      await requireAuth(req);
+      await requireSupportCaller(req);
       // Served to the web form so its checks match this API's.
       const limits = supportAttachmentLimits();
       return reply.send({
@@ -122,7 +122,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
         body: SupportRequestSchema,
         response: {
           201: z.object({ ok: z.boolean(), reference: z.string() }),
-          ...errorResponses(400, 401, 429, 502, 503),
+          ...errorResponses(400, 401, 403, 429, 502, 503),
         },
       },
       // Body limit derived from the attachment budget (base64 adds about a third).
@@ -130,8 +130,8 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'support.submit', actor: auth.userId });
+      const { actor, auth } = await requireSupportCaller(req);
+      const log = req.log.child({ operation: 'support.submit', actor: auth.subject });
       const start = Date.now();
 
       const recipient = supportEmail();
@@ -143,10 +143,10 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       // phone; the coordinator may have edited the prefilled values.
       const { name, email, phone, type, details, attachments } = req.body;
 
-      // Count against the per-coordinator cap before validating the body, so
+      // Count against the per-user cap before validating the body, so
       // rejected submissions also use a slot. Runs after the 503 check. Fails open
       // on a Redis error.
-      const rate = await checkSupportRate(auth.userId);
+      const rate = await checkSupportRate(auth.subject);
       if (!rate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many support submissions; please try again later.',
@@ -207,7 +207,8 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.aggregatorId ?? null,
+        caller_type: actor.userType,
         reference,
         attachment_count: checked.attachments.length,
         attachment_bytes: checked.attachments.reduce((sum, a) => sum + a.bytes, 0),
@@ -217,16 +218,17 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
   );
 }
 
-/** Returns the auth context or throws the catalogue error. */
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) {
-    await recordRouteCaller(req, callerFromAuth(result.context));
-    return result.context;
-  }
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
+/**
+ * Returns the caller, resolved as the console resolves it: an active
+ * coordinator, an organisation owner or the network admin.
+ *
+ * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
+ *   account or wrong client), `USER_NOT_PROVISIONED`, `NOT_APPROVED` (a
+ *   coordinator not active yet), `NOT_ORG_ADMIN` (an owner with no active
+ *   organisation).
+ */
+async function requireSupportCaller(req: FastifyRequest): Promise<ResolvedCaller> {
+  const caller = await requireActor(req, { allowCoordinator: true });
+  await recordRouteCaller(req, callerFromAny(caller.auth));
+  return caller;
 }

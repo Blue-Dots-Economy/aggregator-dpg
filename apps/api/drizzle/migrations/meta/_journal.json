@@ -267,6 +267,13 @@
       "when": 1792200000000,
       "tag": "0037_user_locations",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792300000000,
+      "tag": "0038_coordinator_base_permissions",
+      "breakpoints": true
     }
   ]
 }

@@ -6,8 +6,8 @@
  * to `/dashboard`; admins the API does not know, or without an active org, are
  * signed out with a reason.
  *
- * Uses the coordinator portal's sidebar frame. Contact support is off because
- * the support API accepts coordinators only.
+ * Uses the coordinator portal's sidebar frame, with the same Contact support
+ * entry when the API reports it enabled.
  */
 
 import { redirect } from 'next/navigation';
@@ -18,6 +18,7 @@ import { getConsoleActor, type ConsoleActorFailure } from '@/lib/console-actor';
 import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
+import { fetchSupportEnabled } from '@/lib/support-enabled.server';
 import { canViewCoordinators, coordinatorsHref, ownProfileOrgId } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -32,13 +33,16 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   if (!actor.ok) leaveConsole(actor.reason, path);
   if (actor.me.kind === 'coordinator') redirect('/dashboard');
 
-  const t = await getTranslations('console');
+  const [t, supportEnabled] = await Promise.all([
+    getTranslations('console'),
+    fetchSupportEnabled(),
+  ]);
   const me = actor.me;
   const name = me.user.contact.name ?? me.user.contact.email;
   return (
     <AuthProvider
       initialUser={{ id: me.user.id, name, org: '', email: me.user.contact.email }}
-      supportEnabled={false}
+      supportEnabled={supportEnabled}
       capabilities={me.capabilities ?? null}
     >
       {/* Column below `lg` (menu bar above the page), row from `lg` up, as in
