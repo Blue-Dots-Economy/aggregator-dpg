@@ -91,7 +91,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
             /** Picker hint only — validation is MIME-based. */
             allowedExtensions: z.array(z.string()),
           }),
-          ...errorResponses(401),
+          ...errorResponses(401, 403),
         },
       },
     },
@@ -122,7 +122,7 @@ export async function registerSupportRoutes(base: FastifyInstance): Promise<void
         body: SupportRequestSchema,
         response: {
           201: z.object({ ok: z.boolean(), reference: z.string() }),
-          ...errorResponses(400, 401, 429, 502, 503),
+          ...errorResponses(400, 401, 403, 429, 502, 503),
         },
       },
       // Body limit derived from the attachment budget (base64 adds about a third).

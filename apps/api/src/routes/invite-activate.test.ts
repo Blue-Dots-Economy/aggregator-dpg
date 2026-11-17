@@ -14,6 +14,8 @@ import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { _setRbacRuntime } from '../services/authz/runtime.js';
+import { testRbacRuntime } from '../services/authz/testing.js';
 
 const ROOT = '00000000-0000-4000-8000-000000000001';
 const PARENT = '00000000-0000-4000-8000-0000000000c1';
@@ -82,7 +84,14 @@ describe('POST /v1/user/activate', () => {
       }
       const sub = subjects[token];
       if (!sub) throw new Error('invalid token');
-      return { sub, azp: 'aggregator-portal', preferred_username: token };
+      // `<name>:<aggregator id>` stands for the refreshed token of an activated coordinator.
+      const [, aggregatorId] = token.split(':');
+      return {
+        sub,
+        azp: 'aggregator-portal',
+        preferred_username: token,
+        ...(aggregatorId ? { aggregator_id: aggregatorId } : {}),
+      };
     });
     orgs.seedRoot(
       buildOrganisation({
@@ -143,6 +152,27 @@ describe('POST /v1/user/activate', () => {
       expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
       expect(mailer.outbox.map((m) => m.to)).toEqual(['owner@parent.org']);
       expect(mailer.outbox[0]?.subject).toContain('has joined');
+    });
+
+    it('lets the activated team member export and see personal details through the base role', async () => {
+      _setRbacRuntime(await testRbacRuntime('enforce'));
+      try {
+        subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+        expect((await activate('coord')).statusCode).toBe(200);
+        subjects[`coord:${COORD}`] = subjects.coord;
+
+        const me = await app.inject({
+          method: 'GET',
+          url: '/v1/user/read/me',
+          headers: { authorization: `Bearer coord:${COORD}` },
+        });
+        expect(me.statusCode).toBe(200);
+        expect((me.json() as { capabilities: string[] }).capabilities).toEqual(
+          expect.arrayContaining(['profiles.export', 'profiles.view_pii']),
+        );
+      } finally {
+        _setRbacRuntime(null);
+      }
     });
 
     it('answers 200 with activated false when already active', async () => {
