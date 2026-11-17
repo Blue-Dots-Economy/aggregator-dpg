@@ -25049,7 +25049,7 @@
         "tags": [
           "campaign"
         ],
-        "description": "Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per file named in CAMPAIGN_DUMP_FILES (names without the .ndjson.gz extension; default: user, items, item_actions, aggregators), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Configured files absent from S3 are left out of files and listed in missing (their keys); only when none is present does it return 404 DUMP_NOT_AVAILABLE.",
+        "description": "Returns a short-lived pre-signed URL for each file in CAMPAIGN_DUMP_FILES (default: user, items, item_actions, aggregators). URLs expire after CAMPAIGN_DUMP_URL_TTL_SECONDS. Requires the campaign-manager system token (client_credentials). Files differ in last_modified when the export was caught mid-run; re-fetch then. Files absent from S3 are listed in missing; 404 DUMP_NOT_AVAILABLE when none is present.",
         "security": [
           {
             "bearerAuth": []

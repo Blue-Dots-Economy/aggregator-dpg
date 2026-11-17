@@ -1,32 +1,6 @@
 /**
- * Campaign-manager non-PII dump download (aggregator-dpg#692).
- *
- *   GET /v1/campaign/dump → 200 { network, instance, expires_at, files[] }
- *
- * Hands the campaign manager short-lived pre-signed URLs for the objects
- * the Signals `signals-s3-export` cron publishes, so that system no longer
- * needs S3 IAM credentials of its own. The route is an authorisation gate: it
- * never streams the data through the aggregator.
- *
- * This is the ONE campaign route with no org scoping — the caller is the
- * campaign manager's own service account, not a coordinator, and it needs every
- * aggregator's rows. The identity check in `requireCampaignSystemAuth` is
- * therefore the only control, so EVERY exit — success, a denied caller, and a
- * misconfigured deployment, not just the happy path — emits one
- * `campaignDump.serve` log line. Once identity is verified, every outcome
- * (served or failed) additionally writes exactly one row to the append-only
- * `campaign_pii_audit` table (aggregator-dpg#617), best-effort via
- * `safeAudit` — that row, not this log line, is the durable/queryable trail
- * compliance reads. It carries no `actorOrgId`: the caller's token has no org
- * claim, and this route serves the whole network, so an org would misrepresent
- * the access. An outright denial (bad/missing/wrong-client token) is not
- * audited there, only logged — no row is possible without a verified actor.
- *
- * The exporter writes one FIXED key per table, overwriting them in place with no
- * manifest and no cross-object atomicity, so there is no run to resolve and no
- * "latest" to look up. The per-file `last_modified` values are the freshness
- * contract: a caller that lands mid-run sees them disagree and decides what to
- * do. Belongs to `@aggregator-dpg/api`.
+ * `GET /v1/campaign/dump`: pre-signed URLs for the non-PII Signals dump, for
+ * the campaign manager's system token. Whole-network, not org-scoped.
  *
  * @module apps/api/routes/campaign-dump
  */
@@ -64,14 +38,14 @@ const dumpResponseSchema = z.object({
   missing: z.array(z.string()),
 });
 
-/** One dump key paired with its resolved HEAD, before the presence gate. */
+/** A dump key with its HEAD result. */
 interface DumpKeyHead {
   table: string;
   key: string;
   head: ObjectHead | null;
 }
 
-/** {@link DumpKeyHead}, narrowed to a key confirmed present in the bucket. */
+/** A dump key that exists in the bucket. */
 interface PresentDumpKeyHead extends DumpKeyHead {
   head: ObjectHead;
 }
@@ -85,13 +59,12 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
   app.get(
     '/v1/campaign/dump',
     {
-      // The campaign manager's system token; requireCampaignSystemAuth checks which account.
       config: { rbac: { access: 'service' } },
       schema: {
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per file named in CAMPAIGN_DUMP_FILES (names without the .ndjson.gz extension; default: user, items, item_actions, aggregators), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Configured files absent from S3 are left out of files and listed in missing (their keys); only when none is present does it return 404 DUMP_NOT_AVAILABLE.',
+          'Returns a short-lived pre-signed URL for each file in CAMPAIGN_DUMP_FILES (default: user, items, item_actions, aggregators). URLs expire after CAMPAIGN_DUMP_URL_TTL_SECONDS. Requires the campaign-manager system token (client_credentials). Files differ in last_modified when the export was caught mid-run; re-fetch then. Files absent from S3 are listed in missing; 404 DUMP_NOT_AVAILABLE when none is present.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
@@ -104,12 +77,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
 
       const authResult = await requireCampaignSystemAuth(req);
       if (!authResult.ok) {
-        // The identity check is this route's only control, so a denial is as
-        // audit-worthy as a success — log it before the generic error handler's
-        // undifferentiated line, with the fields that handler doesn't carry
-        // (`operation`, `latency_ms`, `request_id`). `subject` is present only
-        // when the token itself verified (the NOT_SYSTEM_CLIENT case) — see
-        // `CampaignSystemAuthResult`.
+        // Identity is the route's only control, so denials are logged too.
         logger.warn(
           {
             operation: 'campaignDump.serve',
@@ -126,12 +94,8 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
       }
       const auth: CampaignSystemContext = authResult.context;
 
-      // The dump is synchronous and has no job to borrow a correlation id
-      // from, so one is minted per request (#617); it ties this request's
-      // single audit row together whether the request succeeds or fails.
       const dumpCorrelationId = randomUUID();
-      // Caller-supplied header — cap it so an oversized value can't bloat the
-      // audit row (#617 cheap item).
+      // Caller-supplied, so capped before it goes into the audit row.
       const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
 
       try {
@@ -160,9 +124,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           config.CAMPAIGN_DUMP_FILES,
         );
 
-        // HEAD every object before signing anything: absent keys are left out of
-        // `files` and reported in `missing`, so a short `files` array never reads
-        // as a complete snapshot. No URL is minted for a key that failed this gate.
+        // Sign only objects that exist; report the rest in `missing`.
         let heads: DumpKeyHead[];
         try {
           heads = await Promise.all(
@@ -225,11 +187,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           url: s.url.url,
         }));
 
-        // `last_modified` is the caller's ONLY signal that the objects came
-        // from different runs, so a null quietly removes the one control the
-        // torn-snapshot design depends on. S3 should always return LastModified
-        // on a successful HEAD; if it did not, say so rather than shipping a
-        // silent null.
+        // `last_modified` is how the caller spots a torn snapshot; warn if S3 omitted it.
         const undated = files.filter((f) => f.last_modified === null).map((f) => f.table);
         if (undated.length > 0) {
           logger.warn(
@@ -245,10 +203,6 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           );
         }
 
-        // The primary trail this whole-network, un-org-scoped,
-        // un-rate-limited read leaves — kept alongside the append-only
-        // `campaign_pii_audit` row (#617) written just below, which is the
-        // durable/queryable copy compliance reads from directly.
         logger.info(
           {
             operation: 'campaignDump.serve',
@@ -266,11 +220,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           'non-PII dump download URLs issued',
         );
 
-        // Best-effort audit row (#617) — never blocks or fails the response;
-        // see `../services/campaign-audit/index.ts`. No `actorOrgId`: this
-        // route is whole-network by design and the caller's token carries no
-        // org claim, so one must never be fabricated here (see
-        // `DumpAuditInput`).
+        // Best-effort; no org on the row, as the access is whole-network.
         await safeAudit(
           () =>
             getCampaignAuditWriter().recordDumpAccess({
@@ -305,10 +255,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
             missing,
           });
       } catch (cause) {
-        // Every failure past this point in the request is audited too — the
-        // identity check above is the route's control, but once it has
-        // passed, a failed attempt to serve the dump is as much a PII-adjacent
-        // access event as a served one (#617).
+        // A failed serve after identity passed is audited too.
         await safeAudit(
           () =>
             getCampaignAuditWriter().recordDumpAccess({
@@ -331,12 +278,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
 }
 
 /**
- * The advertised expiry for the whole response.
- *
- * The presigns run concurrently, so their `expiresAt` values can differ
- * by however long the slowest one took. Reporting the earliest — never an
- * arbitrary one of them — guarantees the caller never sees an expiry that
- * outlives one of the URLs it describes.
+ * The earliest expiry among the signed URLs, so the advertised one never outlives a URL.
  *
  * @param signed - The presigned objects.
  * @returns The earliest `expiresAt`, as an ISO 8601 string.
@@ -347,15 +289,7 @@ function earliestExpiry(signed: Array<{ url: SignedDownloadUrl }>): string {
 }
 
 /**
- * Logs an S3 transport failure and builds the 503 to throw.
- *
- * A missing object is not a transport failure — `headObject` returns `null` for
- * `NotFound`/`NoSuchKey`, which drives the 404 instead.
- *
- * The raw SDK message is logged here but never sent to the client: `cause` is
- * attached to the thrown `HttpError` (log-only, per `HttpErrorOptions`) so the
- * response carries only the catalogue's generic `DUMP_STORAGE_UNAVAILABLE`
- * detail, never a raw S3 error string.
+ * Logs an S3 transport failure and builds the 503 to throw; the SDK message is logged, not returned.
  *
  * @param subOperation - The storage call that failed.
  * @param cause - The thrown value.
@@ -382,20 +316,14 @@ function storageUnavailable(
       subject,
       request_id: requestId,
       latency_ms: Date.now() - started,
-      // Neither of these is transient, so the catalogue's "retry shortly" is
-      // wrong for them and the operator needs to know which they hit.
+      // Not transient: tell the operator which one.
       ...(isAccessDenied(cause) ? { likely_cause: 'S3_ACCESS_DENIED' } : {}),
       ...(subOperation === 'signDownloadUrl' ? { likely_cause: 'S3_CREDENTIALS' } : {}),
     },
     'non-PII dump storage call failed',
   );
   if (isAccessDenied(cause)) {
-    // A HEAD on a key the caller cannot list returns 403, not 404, so a bucket
-    // policy without `s3:ListBucket` turns the ordinary "not published yet"
-    // cold start into a 503 that never clears. Deliberately NOT remapped to
-    // 404: `infra/env.template` already requires `s3:ListBucket`, so a 403 here
-    // means the deployment has deviated from that policy — and reporting it as
-    // "not published yet" would hide a real IAM fault rather than surface it.
+    // Without s3:ListBucket a missing key returns 403, not 404; kept as 503 so the IAM fault shows.
     logger.error(
       {
         operation: 'campaignDump.serve',

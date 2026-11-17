@@ -1,23 +1,13 @@
 /**
- * S3 reads for the non-PII campaign dump (`@aggregator-dpg/api`).
- *
- * The dump objects are written by the Signals `signals-s3-export` cron under
- * `[<prefix>/]<network>/<instance_id>/`, outside the areas the shared
- * `@aggregator-dpg/object-storage` package manages, so the dump route reads them
- * here: a HEAD to confirm each object exists and a pre-signed GET URL for the
- * campaign manager to download it. Works with S3 and MinIO; MinIO needs
- * `S3_ENDPOINT` and path-style addressing. Uses the same `S3_*` / `STORAGE_*`
- * settings as the shared package.
+ * S3 reads for the campaign dump (`@aggregator-dpg/api`): HEAD and pre-signed GET.
+ * The dump keys sit outside the shared object-storage package's areas; same `S3_*` settings.
  */
 
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../../config.js';
 
-// Two S3 clients:
-//   - `getInternalClient()` uses S3_ENDPOINT for server-side calls (HEAD).
-//   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT, the host the campaign
-//     manager can reach; pre-signed URLs must use it. Defaults to S3_ENDPOINT.
+// HEAD goes to S3_ENDPOINT; URLs are signed for S3_PUBLIC_ENDPOINT, the host the caller reaches.
 let cachedInternalClient: S3Client | null = null;
 let cachedPresignerClient: S3Client | null = null;
 
@@ -26,7 +16,6 @@ function buildClient(endpoint: string | undefined): S3Client {
     region: config.S3_REGION,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
-    // Only the connect phase has a timeout; retries use the SDK's backoff.
     maxAttempts: config.STORAGE_MAX_ATTEMPTS,
     requestHandler: { connectionTimeout: config.STORAGE_CONNECT_TIMEOUT_MS },
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
@@ -54,15 +43,11 @@ function getPresignerClient(): S3Client {
 export interface ObjectHead {
   etag: string;
   contentLength: number;
-  /**
-   * S3 `LastModified`, if S3 returns it. The dump route reports it per object
-   * so consumers can detect a run caught mid-write.
-   */
   lastModified?: Date;
 }
 
 /**
- * HEADs a dump object to confirm it exists and read its size and ETag.
+ * HEADs a dump object.
  *
  * @param key - The S3 object key.
  * @returns The object's metadata, or null when it does not exist.
@@ -81,7 +66,6 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
     };
   } catch (err: unknown) {
     const code = typeof err === 'object' && err !== null && 'name' in err ? String(err.name) : '';
-    // S3 returns NotFound or NoSuchKey for missing objects.
     if (code === 'NotFound' || code === 'NoSuchKey') return null;
     throw err;
   }
@@ -91,13 +75,11 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
 export interface SignedDownloadUrl {
   url: string;
   key: string;
-  /** ISO 8601 expiry timestamp. */
   expiresAt: string;
 }
 
 /**
- * Issues a pre-signed GET URL for a dump object, signed against the public
- * endpoint since the caller is outside the cluster.
+ * Issues a pre-signed GET URL for a dump object.
  *
  * @param key - The S3 object key to grant GET access to.
  * @param opts.ttlSeconds - URL lifetime in seconds.
@@ -120,7 +102,7 @@ export async function signDownloadUrl(
   return { url, key, expiresAt };
 }
 
-/** Test-only: clears the cached clients so fresh instances are built on the next call. */
+/** Test-only: clears the cached clients. */
 export function _resetDumpStorageClients(): void {
   cachedInternalClient = null;
   cachedPresignerClient = null;

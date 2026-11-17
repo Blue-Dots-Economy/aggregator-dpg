@@ -157,16 +157,13 @@ const ConfigSchema = z.object({
   CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
-  /**
-   * Key prefix of the non-PII dump in `S3_BUCKET`. Signals writes
-   * `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`. A wrong value returns 404.
-   */
+  /** Key prefix of the non-PII dump in `S3_BUCKET`. */
   CAMPAIGN_DUMP_PREFIX: z.string().default(''),
-  /** Signals instance whose dump this deployment serves. Unset makes the dump route return 503. */
+  /** Signals instance whose dump this deployment serves; unset returns 503. */
   CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
-  /** Lifetime of the pre-signed dump URLs; short, because the caller downloads at once. */
+  /** Lifetime of the pre-signed dump URLs. */
   CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
-  /** Tables served from the dump, comma-separated; one object per table. */
+  /** Dump files to serve, comma-separated. */
   CAMPAIGN_DUMP_FILES: dumpFilesSchema,
   // ─── Campaign email channel ─────────────────────────────────────────────
   /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
@@ -336,12 +333,7 @@ export function campaignManagerAllowedAzp(): string[] {
 }
 
 /**
- * Keycloak `preferred_username` of the campaign-manager system caller on the non-PII dump route.
- *
- * The dump is whole-network with no org scope, so this identity is its only control.
- * Coordinators and the system caller share one `azp`, so the username tells
- * them apart. Keycloak names the service account `service-account-<client-id>`,
- * which no human can hold. Read from the environment at call time.
+ * Keycloak `preferred_username` of the campaign manager's system token on the dump route.
  *
  * @returns The expected username; the default when the env var is unset or blank.
  */
@@ -351,9 +343,7 @@ export function campaignDumpServiceAccount(): string {
 }
 
 /**
- * The Signals instance whose non-PII dump this deployment serves.
- *
- * Read from the environment at call time.
+ * The Signals instance whose dump this deployment serves.
  *
  * @returns The instance id, or `undefined` when unset or blank (the route then returns 503).
  */

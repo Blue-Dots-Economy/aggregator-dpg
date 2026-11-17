@@ -63,21 +63,13 @@ export interface CampaignSystemContext {
   username: string;
 }
 
-/**
- * Outcome of {@link requireCampaignSystemAuth}.
- *
- * Returned rather than thrown so the route can audit-log denials too.
- * `subject` is set only when the token was valid but failed the username match.
- */
+/** Outcome of {@link requireCampaignSystemAuth}; returned so the route can log denials. */
 export type CampaignSystemAuthResult =
   { ok: true; context: CampaignSystemContext } | { ok: false; error: HttpError; subject?: string };
 
 /**
- * Authenticates the campaign-manager system caller for the whole-network non-PII dump route.
- *
- * Needs no `aggregator_id` or `signalstack_org_id`. This check is the route's
- * only control, so it requires an exact `preferred_username` match rather than
- * relying on a missing claim.
+ * Authenticates the campaign manager's system token for the dump route, by exact
+ * `preferred_username` match.
  *
  * @param req - The inbound request carrying the Bearer token.
  * @returns The verified context, or the error to throw and the subject when known.
@@ -88,7 +80,6 @@ export async function requireCampaignSystemAuth(
 ): Promise<CampaignSystemAuthResult> {
   const result = await authenticateAny(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (!result.ok) {
-    // Wrong client is 403; missing or invalid token is 401. No subject is known here.
     const isAzp = result.error.code === 'AZP_NOT_ALLOWED';
     return {
       ok: false,
