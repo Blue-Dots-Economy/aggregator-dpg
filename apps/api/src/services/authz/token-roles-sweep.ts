@@ -77,7 +77,7 @@ export function defaultSweepDeps(): SweepDeps {
       return true;
     },
     sync: (userId, reason) => syncTokenRoles(userId, reason),
-    ensureDefaultRoles: ensureDefaultRolesForAll,
+    ensureDefaultRoles: () => ensureDefaultRolesForAll(),
     now: () => Date.now(),
   };
 }
@@ -191,33 +191,53 @@ export interface DefaultRolesSummary {
   failed: number;
 }
 
+/** An active coordinator and its organisation, as the default-role check reads them. */
+export interface ActiveCoordinatorRow {
+  id: string;
+  orgId: string | null;
+  orgType: 'network_facilitator' | 'aggregator';
+  /** The organisation's owner, recorded as the grantor. */
+  owner: string;
+}
+
+/** What {@link ensureDefaultRolesForAll} needs; injectable for tests. */
+export interface DefaultRolesDeps {
+  /** Every active coordinator with its organisation. May throw on a database error. */
+  listActiveCoordinators(): Promise<ActiveCoordinatorRow[]>;
+  /** Grants the missing default roles to one coordinator. */
+  grant: typeof grantInviteDefaultRoles;
+}
+
+/** Reads every active coordinator with its organisation's type and owner. */
+async function listActiveCoordinators(): Promise<ActiveCoordinatorRow[]> {
+  return getDb()
+    .select({
+      id: users.id,
+      orgId: users.orgId,
+      orgType: organisations.orgType,
+      owner: organisations.orgOwner,
+    })
+    .from(users)
+    .innerJoin(organisations, eq(organisations.id, users.orgId))
+    .where(and(eq(users.userType, 'coordinator'), eq(users.status, 'active')));
+}
+
 /**
  * Gives every active coordinator the invite default roles it does not hold,
  * audited as granted by its organisation's owner. Backfills coordinators who
  * joined before the defaults existed, and repairs a grant that failed at
  * activation. Never throws; the reconcile that calls it syncs the claims.
  *
+ * @param deps - Dependencies; the app's own by default.
  * @returns Counts of what was checked, granted and failed.
  */
-export async function ensureDefaultRolesForAll(): Promise<DefaultRolesSummary> {
+export async function ensureDefaultRolesForAll(
+  deps: DefaultRolesDeps = { listActiveCoordinators, grant: grantInviteDefaultRoles },
+): Promise<DefaultRolesSummary> {
   const summary: DefaultRolesSummary = { checked: 0, granted: 0, failed: 0 };
-  let rows: Array<{
-    id: string;
-    orgId: string | null;
-    orgType: 'network_facilitator' | 'aggregator';
-    owner: string;
-  }>;
+  let rows: ActiveCoordinatorRow[];
   try {
-    rows = await getDb()
-      .select({
-        id: users.id,
-        orgId: users.orgId,
-        orgType: organisations.orgType,
-        owner: organisations.orgOwner,
-      })
-      .from(users)
-      .innerJoin(organisations, eq(organisations.id, users.orgId))
-      .where(and(eq(users.userType, 'coordinator'), eq(users.status, 'active')));
+    rows = await deps.listActiveCoordinators();
   } catch (e) {
     logger.warn({
       operation: 'rbac.roles.ensureDefaults',
@@ -232,7 +252,7 @@ export async function ensureDefaultRolesForAll(): Promise<DefaultRolesSummary> {
     const results = await Promise.all(
       batch.map((r) =>
         r.orgId
-          ? grantInviteDefaultRoles(r.id, { id: r.orgId, orgType: r.orgType }, r.owner, {
+          ? deps.grant(r.id, { id: r.orgId, orgType: r.orgType }, r.owner, {
               reason: 'default_backfill',
               syncToken: false,
             })
