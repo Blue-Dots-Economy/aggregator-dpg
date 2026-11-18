@@ -126,7 +126,7 @@ const CleanupResponseSchema = z
     orgsPruned: z.number(),
     orgsPrunedIds: z.array(z.string()),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Registers the route that deletes stale pending registrations and orgs.

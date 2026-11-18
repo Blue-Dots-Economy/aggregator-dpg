@@ -123,7 +123,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     // fetch use the same URL. A malformed URL is an error, not a fallback.
     const override = this.opts.networkSourceOverride;
     if (override !== undefined) {
-      const checked = z.string().url().safeParse(override);
+      const checked = z.url().safeParse(override);
       if (!checked.success) {
         return err({
           code: 'CONFIG_PARSE_FAILED',
@@ -155,7 +155,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     // on-disk copy. A malformed override URL is still an error.
     const consentOverride = this.opts.consentSourceOverride;
     if (consentOverride !== undefined) {
-      const checked = z.string().url().safeParse(consentOverride);
+      const checked = z.url().safeParse(consentOverride);
       if (!checked.success) {
         return err({
           code: 'CONFIG_PARSE_FAILED',

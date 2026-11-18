@@ -123,7 +123,7 @@ const ConfigSchema = z.object({
   /** Voice campaign provider (currently only `raya` is supported). */
   CAMPAIGN_VOICE_PROVIDER: z.enum(['raya']).default('raya'),
   /** Raya API base URL. */
-  RAYA_BASE_URL: z.string().url().default('https://v1.getraya.app/api'),
+  RAYA_BASE_URL: z.url().default('https://v1.getraya.app/api'),
   /** Raya API key. Checked when the voice provider is first used. */
   RAYA_API_KEY: z.string().min(1).optional(),
   /** HTTP timeout for Raya API calls (milliseconds). */

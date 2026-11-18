@@ -78,7 +78,7 @@ const DashboardRollupSchema = z
     avg_actions_per_user: z.number(),
     mode_wise_counts: CountMapSchema,
   })
-  .passthrough();
+  .loose();
 
 const DashboardDomainSliceSchema = z
   .object({
@@ -87,7 +87,7 @@ const DashboardDomainSliceSchema = z
     total_matching: z.number(),
     next_cursor: z.string().nullable(),
   })
-  .passthrough();
+  .loose();
 
 /** Response from `GET /api/v1/aggregator/dashboard`. */
 export const DashboardResponseSchema = z
@@ -99,9 +99,9 @@ export const DashboardResponseSchema = z
         ttl_seconds: z.number(),
         refreshed: z.boolean(),
       })
-      .passthrough(),
+      .loose(),
   })
-  .passthrough();
+  .loose();
 
 const ContactValueSchema = z.object({
   value: z.string().nullable(),
@@ -125,7 +125,7 @@ const DecryptedProfileRowSchema = z
     created_at: z.string(),
     updated_at: z.string(),
   })
-  .passthrough();
+  .loose();
 
 /** Response from `POST /api/v1/admin/participant/decrypt`. */
 export const DecryptProfilesResponseSchema = z.object({

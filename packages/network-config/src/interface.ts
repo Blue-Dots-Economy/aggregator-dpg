@@ -161,8 +161,8 @@ export const BrandConfigSchema = z.object({
     .regex(/^[a-z0-9-]+$/, 'url_slug must be kebab-case alphanumeric'),
   primary_color: HexColorSchema.optional(),
   accent_color: HexColorSchema.optional(),
-  logo_url: z.string().url().optional(),
-  favicon_url: z.string().url().optional(),
+  logo_url: z.url().optional(),
+  favicon_url: z.url().optional(),
   palette: BrandPaletteSchema.optional(),
   typography: BrandTypographySchema.optional(),
   logo: BrandLogoSchema.optional(),
@@ -183,7 +183,7 @@ export const NetworkBindingSchema = z.object({
    * Can be set by `AGGREGATOR_NETWORK_SOURCE` instead. `load()` fails when
    * neither is set.
    */
-  source: z.string().url().optional(),
+  source: z.url().optional(),
   /**
    * URL of the upstream participant `consent.json` (Terms, Privacy, profile creation).
    *
@@ -191,7 +191,7 @@ export const NetworkBindingSchema = z.object({
    * by `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` instead. When unset, the web
    * app uses the on-disk participant `consent.json`.
    */
-  consent_source: z.string().url().optional(),
+  consent_source: z.url().optional(),
   field_overrides: z.record(z.string(), IdentitySelectorsSchema).optional(),
   csv_array_delimiter: z.string().min(1).default('|'),
 });
@@ -205,7 +205,7 @@ export const ConsentDocVersionSchema = z
     content: z.string(),
     effective_from: z.string().optional(),
   })
-  .passthrough();
+  .loose();
 
 /** One statement-only version entry (profile-creation consent). */
 export const ConsentStatementVersionSchema = z
@@ -214,7 +214,7 @@ export const ConsentStatementVersionSchema = z
     statement: z.string(),
     effective_from: z.string().optional(),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Participant `consent.json` fetched from {@link NetworkBindingSchema.consent_source}.
@@ -231,26 +231,26 @@ export const ParticipantConsentDocSchema = z
             current_version: z.number(),
             versions: z.array(ConsentDocVersionSchema),
           })
-          .passthrough()
+          .loose()
           .optional(),
         privacy: z
           .object({
             current_version: z.number(),
             versions: z.array(ConsentDocVersionSchema),
           })
-          .passthrough()
+          .loose()
           .optional(),
         profile_creation: z
           .object({
             current_version: z.number(),
             versions: z.array(ConsentStatementVersionSchema),
           })
-          .passthrough()
+          .loose()
           .optional(),
       })
-      .passthrough(),
+      .loose(),
   })
-  .passthrough();
+  .loose();
 export type ParticipantConsentDoc = z.infer<typeof ParticipantConsentDocSchema>;
 
 /**
@@ -334,12 +334,12 @@ export const AggregatorYamlSchema = z.object({
   aggregator: z.object({
     name: z.string().min(1),
     legal_name: z.string().optional(),
-    contact_email: z.string().email().optional(),
+    contact_email: z.email().optional(),
     network: NetworkBindingSchema,
     brand: BrandConfigSchema,
     domain_labels: z.record(z.string(), DomainLabelsSchema).optional(),
     onboarding: OnboardingConfigSchema.prefault({}),
-    admin_emails: z.array(z.string().email()).default([]),
+    admin_emails: z.array(z.email()).default([]),
     registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).prefault({
       form: {
         label_i18n_key: 'registration_mode.form.label',
@@ -367,7 +367,7 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
  * `network.json` still loads. The loader lists each dropped block in
  * {@link ResolvedNetworkConfig.warnings}.
  */
-function droppedWhenMalformed<T extends z.ZodTypeAny>(schema: T) {
+function droppedWhenMalformed<T extends z.ZodType>(schema: T) {
   return schema.optional().catch(undefined);
 }
 
@@ -378,9 +378,7 @@ function droppedWhenMalformed<T extends z.ZodTypeAny>(schema: T) {
  * aggregator reads the precomputed value. An unknown `field` skips the tile
  * and logs a warning.
  */
-export const DashboardTileDefSchema = z
-  .object({ field: z.string(), label: z.string() })
-  .passthrough();
+export const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() }).loose();
 export type DashboardTileDef = z.infer<typeof DashboardTileDefSchema>;
 
 /**
@@ -396,7 +394,7 @@ export const DashboardTilesSchema = z
     profile_title: z.string().optional(),
     user_title: z.string().optional(),
   })
-  .passthrough();
+  .loose();
 export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
 
 /**
@@ -429,7 +427,7 @@ export const DashboardBucketsSchema = z
     by_initiated_action_status: BucketLabelsSchema.optional(),
     by_received_action_status: BucketLabelsSchema.optional(),
   })
-  .passthrough();
+  .loose();
 export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;
 
 /**
@@ -445,7 +443,7 @@ export const StatusRuleSchema = z
     description: z.string().optional(),
     when: z.unknown().optional(),
   })
-  .passthrough();
+  .loose();
 export type StatusRule = z.infer<typeof StatusRuleSchema>;
 
 /**
@@ -485,7 +483,7 @@ export const NetworkDomainSchema = z
     },
     { error: 'each domain must declare `id`' },
   )
-  .passthrough();
+  .loose();
 export type NetworkDomain = z.infer<typeof NetworkDomainSchema>;
 
 /** A JSON object; rejects null and arrays. */
@@ -504,7 +502,7 @@ const DomainWithNamedErrorsSchema = z
     },
     { error: 'each domain must declare `id`' },
   )
-  .passthrough()
+  .loose()
   .superRefine((domain, ctx) => {
     const itemSchemas = JsonObjectSchema.safeParse(domain.item_schemas);
     if (!itemSchemas.success) {
@@ -555,7 +553,7 @@ export const SignalstackNetworkSchema = z
       error: 'network.json must be an object',
     },
   )
-  .passthrough();
+  .loose();
 export type SignalstackNetwork = z.infer<typeof SignalstackNetworkSchema>;
 
 // ─── Resolved config (what callers read) ─────────────────────────────────────

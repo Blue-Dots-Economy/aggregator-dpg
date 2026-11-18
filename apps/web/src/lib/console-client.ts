@@ -60,7 +60,7 @@ async function readJson(res: Response): Promise<unknown> {
  * @returns The parsed body, or the `RESPONSE_SHAPE` error. Logs field paths only.
  * @throws {Error} Any failure other than a `ResponseShapeError`.
  */
-async function readOkBody<S extends z.ZodTypeAny>(
+async function readOkBody<S extends z.ZodType>(
   res: Response,
   url: string,
   schema: S,
@@ -83,7 +83,7 @@ async function readOkBody<S extends z.ZodTypeAny>(
  * @param body - JSON body.
  * @returns The outcome; an OK body that does not match gives the `RESPONSE_SHAPE` error code. Never throws.
  */
-export async function sendConsole<S extends z.ZodTypeAny>(
+export async function sendConsole<S extends z.ZodType>(
   url: string,
   method: 'POST' | 'PATCH',
   schema: S,
@@ -112,7 +112,7 @@ export async function sendConsole<S extends z.ZodTypeAny>(
  * @param schema - The expected OK body.
  * @returns The outcome; an OK body that does not match gives the `RESPONSE_SHAPE` error code. Never throws.
  */
-export async function getConsole<S extends z.ZodTypeAny>(
+export async function getConsole<S extends z.ZodType>(
   url: string,
   schema: S,
 ): Promise<ConsoleSendResult<z.output<S>>> {

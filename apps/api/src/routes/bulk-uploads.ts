@@ -104,7 +104,7 @@ const CreateBulkUploadBodySchema = z
       .min(1)
       .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
   })
-  .passthrough();
+  .loose();
 
 /** Path params for routes addressing a single bulk-upload job. */
 const BulkUploadParamsSchema = z.object({
@@ -120,7 +120,7 @@ const StartBulkUploadBodySchema = z
   .object({
     attestation: z.boolean().optional().describe('Operator attestation of authority to upload.'),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Pagination query for the bulk-uploads list.
@@ -156,7 +156,7 @@ const BulkUploadResponseSchema = z
     created_at: z.string(),
     completed_at: z.string().nullable(),
   })
-  .passthrough();
+  .loose();
 
 /** 201 payload for POST /v1/bulk-uploads — pre-signed upload reservation. */
 const CreateBulkUploadResponseSchema = z
@@ -179,7 +179,7 @@ const CreateBulkUploadResponseSchema = z
     schema_version: z.string(),
     status: z.string(),
   })
-  .passthrough();
+  .loose();
 
 /** 200 payload for the paginated bulk-uploads list. */
 const ListBulkUploadsResponseSchema = z
@@ -189,7 +189,7 @@ const ListBulkUploadsResponseSchema = z
     limit: z.number(),
     offset: z.number(),
   })
-  .passthrough();
+  .loose();
 
 /** 200 payload for the errors.csv signed-download endpoint. */
 const ErrorsCsvResponseSchema = z
@@ -206,9 +206,9 @@ const ErrorsCsvResponseSchema = z
         failed: z.number(),
         skipped: z.number(),
       })
-      .passthrough(),
+      .loose(),
   })
-  .passthrough();
+  .loose();
 
 export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();

@@ -26,7 +26,7 @@ export const emailContentSchema = z
   .object({
     subject: z.string().trim().min(1).max(SUBJECT_MAX),
     body_markdown: z.string().min(1).max(BODY_MAX),
-    reply_to: z.string().email().optional(),
+    reply_to: z.email().optional(),
   })
   .strict();
 

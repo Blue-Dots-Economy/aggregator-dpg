@@ -26,7 +26,7 @@ import { callApi } from './upstream-client';
  * @throws Navigation (redirect / notFound) on failure, as Next.js does.
  * @throws {ResponseShapeError} When an OK body does not match `schema`.
  */
-export async function consoleRead<S extends z.ZodTypeAny>(
+export async function consoleRead<S extends z.ZodType>(
   path: string,
   schema: S,
   body?: unknown,
@@ -74,7 +74,7 @@ export async function consoleRead<S extends z.ZodTypeAny>(
  * @param schema - The expected response body.
  * @returns The schema's output, or null.
  */
-export async function consoleReadOptional<S extends z.ZodTypeAny>(
+export async function consoleReadOptional<S extends z.ZodType>(
   path: string,
   schema: S,
 ): Promise<z.output<S> | null> {

@@ -27,7 +27,7 @@ const ParamsSchema = z.object({
 
 const QuerySchema = z
   .object({
-    email: z.string().trim().email().optional(),
+    email: z.string().trim().check(z.email()).optional(),
     phone_number: z.string().trim().min(1).optional(),
     network: z.string().trim().min(1),
     domain: z.string().trim().min(1),
@@ -48,12 +48,12 @@ const LookupResponseSchema = z
             item_id: z.string(),
             lifecycle_status: z.enum(['draft', 'live', 'paused']),
           })
-          .passthrough(),
+          .loose(),
       })
-      .passthrough()
+      .loose()
       .nullable(),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Registers the public lookup route.

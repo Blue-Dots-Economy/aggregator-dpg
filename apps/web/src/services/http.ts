@@ -131,7 +131,7 @@ function forceLogout(): void {
  * Fetches a BFF endpoint and parses the JSON response with `schema`.
  *
  * Redirects to logout when the server reports `NO_ACTIVE_SESSION`. Fields the
- * schema does not declare are dropped, unless the schema keeps them (`.passthrough()`).
+ * schema does not declare are dropped, unless the schema keeps them (`.loose()`).
  *
  * @param input - The request URL or object.
  * @param schema - The expected shape of an OK response body.
@@ -140,7 +140,7 @@ function forceLogout(): void {
  * @throws {HttpError} When the request fails or the response is not OK.
  * @throws {ResponseShapeError} When an OK body is not JSON or does not match `schema`.
  */
-export async function jsonFetch<S extends z.ZodTypeAny>(
+export async function jsonFetch<S extends z.ZodType>(
   input: RequestInfo,
   schema: S,
   init?: RequestInit,

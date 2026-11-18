@@ -23,7 +23,7 @@ const REQUEST_ID_HEADER = 'x-request-id';
 /** Same rules as the API's public lookup `QuerySchema`. */
 const LookupQuerySchema = z
   .object({
-    email: z.string().trim().email().optional(),
+    email: z.string().trim().check(z.email()).optional(),
     phone_number: z.string().trim().min(1).optional(),
     network: z.string().trim().min(1),
     domain: z.string().trim().min(1),

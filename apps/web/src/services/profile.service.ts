@@ -29,10 +29,10 @@ const BecknContactSchema = z.object({
 /** One profile location. Kept whole, because the profile form renders it as received. */
 const BecknLocationSchema = z
   .object({
-    geo: z.object({ type: z.string(), coordinates: z.unknown().optional() }).passthrough(),
+    geo: z.object({ type: z.string(), coordinates: z.unknown().optional() }).loose(),
     address: z.record(z.string(), z.string().optional()).optional(),
   })
-  .passthrough();
+  .loose();
 
 /** Response of `GET /v1/aggregators/profile/me`, plus the Keycloak `identity` fragment. */
 export const ProfileApiResponseSchema = z.object({

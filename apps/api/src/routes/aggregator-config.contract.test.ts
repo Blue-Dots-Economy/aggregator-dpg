@@ -234,7 +234,7 @@ const JsonSchemaNode: z.ZodType<JsonSchema> = z.lazy(() =>
       additionalProperties: z.union([z.boolean(), JsonSchemaNode]).optional(),
       required: z.array(z.string()).optional(),
     })
-    .passthrough(),
+    .loose(),
 );
 interface JsonSchema {
   properties?: Record<string, JsonSchema> | undefined;

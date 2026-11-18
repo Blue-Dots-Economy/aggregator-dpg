@@ -18,7 +18,7 @@ import { ConfigError } from '../errors/index.js';
  */
 export const signalStackConfigFields = {
   /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
-  SIGNALSTACK_BASE_URL: z.string().url().optional(),
+  SIGNALSTACK_BASE_URL: z.url().optional(),
   /** Admin api-key for signalstack onboard. Required when SIGNALSTACK_BASE_URL is set. */
   SIGNALSTACK_ADMIN_KEY: z.string().optional(),
   /** item_network sent on every onboard call. */

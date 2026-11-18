@@ -35,7 +35,7 @@ import { requireActor, type ResolvedCaller } from '../services/auth/actor/index.
 const SupportRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
-    email: z.string().email().max(320).optional(),
+    email: z.email().max(320).optional(),
     phone: z
       .string()
       .max(20)

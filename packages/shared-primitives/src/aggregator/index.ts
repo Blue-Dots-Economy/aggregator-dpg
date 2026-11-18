@@ -71,8 +71,8 @@ export type DecisionMade = z.infer<typeof DecisionMadeSchema>;
 export const ConsentRecordSchema = z
   .object({
     value: z.boolean(),
-    given_at: z.string().datetime(),
-    valid_till: z.string().datetime(),
+    given_at: z.iso.datetime(),
+    valid_till: z.iso.datetime(),
   })
   .strict();
 
@@ -115,7 +115,7 @@ export const RegistrationPayloadSchema = z
           message: 'domain ids must not repeat',
         }),
     ]),
-    url: z.string().url().max(2048).optional(),
+    url: z.url().max(2048).optional(),
     /**
      * Sub-org, division or institution name. Present only when the
      * deployment's registration schema asks for it. Stored in

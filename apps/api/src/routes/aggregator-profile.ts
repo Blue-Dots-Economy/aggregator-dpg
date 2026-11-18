@@ -40,7 +40,7 @@ import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 const AggregatorPatchSchema = z
   .object({
     name: z.string().min(2).max(200).optional(),
-    url: z.string().url().max(2048).nullable().optional(),
+    url: z.url().max(2048).nullable().optional(),
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
   })
@@ -65,7 +65,7 @@ const ProfileIdentitySchema = z
     phone_verified: z.boolean(),
     active: z.boolean(),
   })
-  .passthrough();
+  .loose();
 
 // PII sub-objects use the full entity schemas so undeclared keys are never serialized.
 const ProfileCommonResponseShape = {
@@ -91,14 +91,14 @@ const ProfileReadResponseSchema = z
     identity: ProfileIdentitySchema,
     created_at: z.string(),
   })
-  .passthrough();
+  .loose();
 
 const ProfileUpdateResponseSchema = z
   .object({
     ...ProfileCommonResponseShape,
     name: z.string(),
   })
-  .passthrough();
+  .loose();
 
 export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
