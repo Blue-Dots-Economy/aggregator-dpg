@@ -225,7 +225,7 @@
     },
     "onboardingGroup": {
       "title": "Onboarding",
-      "helper": "Rolled up across your network",
+      "helper": "All profile types, rolled up across your network",
       "view": "View onboarding",
       "total": "Total submissions",
       "total_sub": "All entry modes",
@@ -323,7 +323,7 @@
       "download_template_xlsx": "Download Excel template",
       "drag_prompt": "Drag your CSV here or",
       "browse": "click to browse",
-      "hint": ".csv only · UTF-8 encoded · uploaded as {type}s",
+      "hint": ".csv only · UTF-8 encoded · uploaded as {type}",
       "upload_button": "Upload",
       "uploading": "Uploading…",
       "success_note": "Accounts will be live once the user logs in on the platform or via the call.",
@@ -416,9 +416,9 @@
     "your_links": {
       "title": "Your Registration Links",
       "loading": "Loading links…",
-      "empty": "No {type} links yet. Create one above.",
+      "empty": "No links for {type} yet. Create one above.",
       "active_count": "{count} active",
-      "type_pill": "{type} links",
+      "type_pill": "Links for {type}",
       "draft_created": "Link created as a draft — click \"Make Live\" to publish it.",
       "load_failed": "Couldn't load your links. Refresh the page to try again."
     },

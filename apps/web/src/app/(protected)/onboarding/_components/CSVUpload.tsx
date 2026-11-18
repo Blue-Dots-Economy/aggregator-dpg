@@ -12,7 +12,6 @@ import { useActiveDomain } from '../../../../hooks/useActiveDomain';
 import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import { useAggregatorConfig } from '@/hooks/useAggregatorConfig';
 import { HttpError } from '@/services/http';
-import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import {
   BulkUploadEmptyError,
@@ -71,7 +70,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const [attested, setAttested] = useState(false);
   // Participant type: the active domain. Empty until the profile loads; the
   // API checks it against the domains the coordinator serves.
-  const { domains: servedDomains, active, setActive } = useActiveDomain();
+  const { domains: servedDomains, active } = useActiveDomain();
   const participantType = active ?? '';
   // Plural label for the active domain, sourced from network config.
   const participantTypeLabel =
@@ -202,21 +201,17 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           <div className="text-[12.5px] text-ink-400 mt-0.5">{t('csv.subtitle')}</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {servedDomains.length > 1 ? (
-            <DomainSelect domains={servedDomains} value={active} onChange={setActive} />
-          ) : (
-            // One participant type, so this is a read-only label.
-            <div
-              className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
-              aria-label={`Participant type: ${participantTypeLabel}`}
-            >
-              {participantTypeLabel && (
-                <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
-                  {participantTypeLabel}
-                </div>
-              )}
-            </div>
-          )}
+          {/* The page's domain tabs choose the type; this names it next to the template. */}
+          <div
+            className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
+            aria-label={`Participant type: ${participantTypeLabel}`}
+          >
+            {participantTypeLabel && (
+              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
+                {participantTypeLabel}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={downloadTemplate}
@@ -284,7 +279,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
                 <span className="text-primary-600 underline-offset-2">{t('csv.browse')}</span>
               </div>
               <div className="text-[12px] text-ink-400 mt-1">
-                {t('csv.hint', { type: participantType })}
+                {t('csv.hint', { type: participantTypeLabel })}
               </div>
             </label>
           )}
@@ -337,7 +332,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 export function RecentUploadsBody() {
   const t = useTranslations('onboarding');
   const requestErrorText = useRequestErrorText();
-  const recent = useRecentBulkUploads(10);
+  const { active } = useActiveDomain();
+  const recent = useRecentBulkUploads(10, active);
   const items = recent.data?.items ?? [];
   const error = recent.error;
   const loading = recent.isLoading;

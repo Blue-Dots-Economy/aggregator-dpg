@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   onboardingService,
   type ApiRegistrationLink,
+  type BulkUploadList,
   type CreateLinkInput,
   type OnboardingBySource,
   type OnboardingSummary,
@@ -103,10 +104,22 @@ export function useBulkUpload() {
   });
 }
 
-export function useRecentBulkUploads(limit = 10) {
+/**
+ * Lists the most recent bulk uploads, polling while any is still processing.
+ *
+ * @param limit - How many recent uploads to fetch.
+ * @param domain - When set, keeps only uploads of this participant type. The
+ *   filter runs in the browser over one cached list shared by every domain, so
+ *   it can return fewer than `limit` items.
+ * @returns The react-query result for the upload list.
+ */
+export function useRecentBulkUploads(limit = 10, domain?: string) {
   return useQuery({
     queryKey: ['onboarding', 'bulk-uploads', 'list', limit],
     queryFn: () => onboardingService.listBulkUploads({ limit }),
+    // Filtered after the fetch, so every domain shares one cached list.
+    select: (list: BulkUploadList) =>
+      domain ? { ...list, items: list.items.filter((it) => it.participant_type === domain) } : list,
     refetchInterval: (q) => {
       const items = q.state.data?.items ?? [];
       const inFlight = items.some((it) =>

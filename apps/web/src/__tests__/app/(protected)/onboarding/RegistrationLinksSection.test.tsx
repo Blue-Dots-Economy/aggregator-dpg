@@ -16,6 +16,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { ACTIVE_DOMAIN_STORAGE_KEY } from '@/hooks/useActiveDomain';
 import { HttpError } from '@/services/http';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 import { chooseOption } from '@/__tests__/test-utils';
@@ -72,16 +73,6 @@ import {
   CreateLinkSection,
   YourLinksBody,
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
-
-/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
-async function pickDomain(name: RegExp): Promise<void> {
-  Element.prototype.scrollIntoView = vi.fn();
-  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
-  Element.prototype.setPointerCapture = vi.fn();
-  Element.prototype.releasePointerCapture = vi.fn();
-  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
-  fireEvent.click(await screen.findByRole('option', { name }));
-}
 
 const testMessages = {
   common: messages.common,
@@ -171,12 +162,15 @@ describe('<CreateLinkSection />', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('pins the read-only domain field to the org name + aggregator-registered domain', () => {
     renderCreate();
     expect(screen.getByDisplayValue('Acme Org')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Seekers')).toBeInTheDocument();
+    expect(screen.getByText('Seekers')).toBeInTheDocument();
   });
 
   it('keeps Create enabled and, on an empty submit, shows each missing field under it', async () => {
@@ -312,21 +306,17 @@ describe('<CreateLinkSection />', () => {
     expect(screen.queryByText(/DOMAIN_NOT_SERVED|request failed/)).not.toBeInTheDocument();
   });
 
-  it('lets a multi-domain coordinator pick the link domain', async () => {
+  it('creates the link for the active domain tab, with no domain dropdown', async () => {
     window.localStorage.clear();
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     createMutateAsync.mockResolvedValue(baseLink());
     const user = userEvent.setup();
     renderCreate();
 
-    const domainSelect = screen.getByRole('combobox', { name: 'Profile Type' });
-    expect(domainSelect).toHaveTextContent(/Seeker/);
-    expect(
-      screen.getByText('Profile Type', { selector: '.bd-label *, .bd-label' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Seekers / Providers')).toBeNull();
-    await pickDomain(/Provider/);
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+    expect(screen.getByText('Providers')).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
@@ -413,7 +403,10 @@ describe('<YourLinksBody />', () => {
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('shows a loading state', () => {
     useRegistrationLinks.mockReturnValue({ data: undefined, isLoading: true, error: null });
@@ -445,18 +438,18 @@ describe('<YourLinksBody />', () => {
   it('shows an empty state scoped to the aggregator type', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
+    expect(screen.getByText('No links for Seekers yet. Create one above.')).toBeInTheDocument();
   });
 
-  it('lists the active domain and switches domain from the header', async () => {
+  it('lists the links for the active domain tab, with no domain dropdown', () => {
     window.localStorage.clear();
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(useRegistrationLinks).toHaveBeenLastCalledWith('seeker');
-    await pickDomain(/Provider/);
     expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
   });
 
   it('shows no domain dropdown for a single-domain coordinator', () => {
@@ -476,7 +469,7 @@ describe('<YourLinksBody />', () => {
     });
     renderLinks();
     expect(screen.getByText('1 active')).toBeInTheDocument();
-    expect(screen.getByText('seeker links')).toBeInTheDocument();
+    expect(screen.getByText('Links for Seekers')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
   });

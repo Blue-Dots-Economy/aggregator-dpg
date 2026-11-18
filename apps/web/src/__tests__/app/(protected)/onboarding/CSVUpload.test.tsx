@@ -20,6 +20,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { ACTIVE_DOMAIN_STORAGE_KEY } from '@/hooks/useActiveDomain';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
 import {
   BulkUploadEmptyError,
@@ -76,16 +77,6 @@ vi.mock('@/services/onboarding.service', async (importOriginal) => ({
 }));
 
 import { CSVUpload, RecentUploadsBody } from '@/app/(protected)/onboarding/_components/CSVUpload';
-
-/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
-async function pickDomain(name: RegExp): Promise<void> {
-  Element.prototype.scrollIntoView = vi.fn();
-  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
-  Element.prototype.setPointerCapture = vi.fn();
-  Element.prototype.releasePointerCapture = vi.fn();
-  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
-  fireEvent.click(await screen.findByRole('option', { name }));
-}
 
 function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   return render(
@@ -151,13 +142,16 @@ describe('<CSVUpload />', () => {
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, refetch });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('renders the drag prompt, participant-type chip, and hint when no file is picked', () => {
     renderUpload();
     expect(screen.getByText('Drag your CSV here or')).toBeInTheDocument();
     expect(screen.getByLabelText('Participant type: Seekers')).toBeInTheDocument();
-    expect(screen.getByText(/uploaded as seekers/)).toBeInTheDocument();
+    expect(screen.getByText(/uploaded as Seekers/)).toBeInTheDocument();
   });
 
   it('shows the fallback attestation label when no attestation content is supplied', () => {
@@ -457,8 +451,9 @@ describe('<CSVUpload />', () => {
     expect(screen.getByText('Download Excel template').closest('button')).toBeDisabled();
   });
 
-  it('lets a multi-domain coordinator pick the participant type for the template', async () => {
+  it('uses the active domain tab for the template, with no type dropdown', async () => {
     window.localStorage.clear();
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
     const user = userEvent.setup();
     const origLocation = window.location;
@@ -469,9 +464,8 @@ describe('<CSVUpload />', () => {
     });
 
     renderUpload();
-    const select = screen.getByRole('combobox', { name: 'Profile Type' });
-    expect(select).toHaveTextContent(/Seeker/);
-    await pickDomain(/Provider/);
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Participant type: Providers')).toBeInTheDocument();
     await user.click(screen.getByText('Download Excel template'));
     expect(window.location.href).toBe(
       '/api/bulk-uploads/template?participant_type=provider&format=xlsx',

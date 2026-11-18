@@ -555,6 +555,12 @@ export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: 
   );
 }
 
+/** Sum of the known counts, or undefined when none is known yet. */
+function sumTotals(counts: readonly (number | undefined)[]): number | undefined {
+  const known = counts.filter((n): n is number => n !== undefined);
+  return known.length === 0 ? undefined : known.reduce((a, b) => a + b, 0);
+}
+
 /**
  * The coordinator portal's sidebar: Onboarding (with `profiles.onboard`),
  * Profile and the participant dashboard with its count badge.
@@ -563,15 +569,14 @@ export function Sidebar() {
   const t = useTranslations('nav');
   const { user } = useAuth();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Dashboard rollup feeds the participant-count badge, for the domain the
-  // coordinator is working with. `active` is undefined until the profile and
+  // The participant-count badge. `active` is undefined until the profile and
   // network config have loaded, so useDashboard skips the fetch until then.
-  const { active: activeDomain } = useActiveDomain();
+  const { active: activeDomain, domains } = useActiveDomain();
   const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
-  // Every served domain ships under `by_domain[<id>]`; the badge shows the
-  // active domain's rollup so the count matches /dashboard.
+  // Every served domain ships under `by_domain[<id>]`; the badge adds them up,
+  // so it stays the same whichever profile-type tab is open.
   const participantsBadge = activeDomain
-    ? dashboard?.by_domain[activeDomain]?.rollup.total_items
+    ? sumTotals(domains.map((d) => dashboard?.by_domain[d.id]?.rollup.total_items))
     : undefined;
 
   const can = useCan();

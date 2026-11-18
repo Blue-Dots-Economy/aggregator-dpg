@@ -27,7 +27,6 @@ import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
 import { useIsClient } from '@/hooks/useIsClient';
 import { useActiveDomain } from '@/hooks/useActiveDomain';
 import { useRequestErrorText } from '@/hooks/useRequestErrorText';
-import { DomainSelect } from '@/components/ui/DomainSelect';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 import { SelectField } from '@/components/ui/SelectField';
 
@@ -314,14 +313,11 @@ export function CreateLinkSection() {
   });
   const w = (key: LinkFieldKey) => wire(fe, key);
 
-  // Default to the active domain whenever the form holds no served domain,
-  // including after the form resets. The API rejects a domain not served.
+  // The page's domain tabs choose the link's domain, including after the form resets.
   useEffect(() => {
     if (!activeDomain) return;
-    setForm((f) =>
-      servedDomains.some((d) => d.id === f.domain) ? f : { ...f, domain: activeDomain },
-    );
-  }, [activeDomain, servedDomains, form.domain]);
+    setForm((f) => (f.domain === activeDomain ? f : { ...f, domain: activeDomain }));
+  }, [activeDomain, form.domain]);
 
   // Default the mode once config loads: `form` if declared, else the first
   // mode. Only fills while empty, so a user choice is kept.
@@ -463,23 +459,13 @@ export function CreateLinkSection() {
             />
           </Field>
           <Field label={t('create_link.field_domain')} required error={w('domain').error}>
-            {servedDomains.length > 1 ? (
-              <DomainSelect
-                domains={servedDomains}
-                value={form.domain}
-                onChange={(id) => setForm((f) => ({ ...f, domain: id }))}
-                className="w-full px-3 py-2.5 text-[14px]"
-              />
-            ) : (
-              // Read-only: the coordinator serves one domain.
-              <input
-                className="bd-input"
-                {...w('domain').control}
-                value={domainLabel}
-                readOnly
-                aria-readonly="true"
-              />
-            )}
+            {/* Set by the page's domain tabs, so plain text, not an input that looks editable. */}
+            <span
+              {...w('domain').control}
+              className="block rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2.5 text-[14px] text-(--bd-fg)"
+            >
+              {domainLabel}
+            </span>
           </Field>
           {/*
            * Registration mode, set at create time and fixed afterwards. Options
@@ -922,8 +908,10 @@ export function YourLinksBody() {
   // Show the create confirmation here, after navigation from the create page.
   const [dismissedLinkId, setDismissedLinkId] = useState<string | null>(null);
   const toast = newLinkId && newLinkId !== dismissedLinkId ? t('your_links.draft_created') : null;
-  const { domains: servedDomains, active, setActive } = useActiveDomain();
+  const { domains: servedDomains, active } = useActiveDomain();
   const aggregatorType: string = active ?? '';
+  const activeCfg = servedDomains.find((d) => d.id === aggregatorType);
+  const typeLabel = activeCfg?.plural_label ?? activeCfg?.label ?? aggregatorType;
   // Links are filtered to the active domain.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
   const requestMessage = useRequestErrorMessage();
@@ -940,11 +928,10 @@ export function YourLinksBody() {
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
             {t('your_links.active_count', { count: activeCount })}
           </span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold capitalize">
-            {t('your_links.type_pill', { type: aggregatorType })}
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold">
+            {t('your_links.type_pill', { type: typeLabel })}
           </span>
         </div>
-        <DomainSelect domains={servedDomains} value={active} onChange={setActive} />
       </div>
       <div className="flex flex-col gap-3 overflow-y-auto pr-1" style={{ maxHeight: 300 }}>
         {isLoading ? (
@@ -955,7 +942,7 @@ export function YourLinksBody() {
           </div>
         ) : links.length === 0 ? (
           <div className="text-center py-8 text-ink-400 text-[13px]">
-            {t('your_links.empty', { type: aggregatorType })}
+            {t('your_links.empty', { type: typeLabel })}
           </div>
         ) : (
           links.map((l) => (
