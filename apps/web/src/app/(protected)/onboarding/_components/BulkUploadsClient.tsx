@@ -1,13 +1,9 @@
 'use client';
 
 import type { JSX } from 'react';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Topbar } from '../../../../components/shell/Topbar';
-import { I } from '../../../../icons';
 import { CSVUpload } from './CSVUpload';
-import { DomainAccessGate } from '../../../../components/access/DomainAccessGate';
-import { ActiveDomainTabs } from '@/components/ui/ActiveDomainTabs';
+import { OnboardingSubpage } from './OnboardingSubpage';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 
 /** Props for {@link BulkUploadsClient}. */
@@ -23,39 +19,13 @@ export interface BulkUploadsClientProps {
  */
 export function BulkUploadsClient({ attestation }: BulkUploadsClientProps): JSX.Element {
   const t = useTranslations('onboarding');
-  const router = useRouter();
   return (
-    <div className="fade-up flex flex-col gap-5">
-      <Topbar
-        title={t('bulk_uploads_page.title')}
-        subtitle={t('bulk_uploads_page.subtitle')}
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => router.push('/onboarding')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-(--bd-border) bg-white text-[12.5px] font-semibold text-ink-700 hover:text-primary-600 hover:bg-(--bd-primary-50) transition-colors"
-            >
-              <I.chevL size={14} />
-              {t('bulk_uploads_page.back')}
-            </button>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              title={t('refresh')}
-              aria-label={t('refresh')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-(--bd-border) bg-white text-[12.5px] font-semibold text-ink-700 hover:text-primary-600 hover:bg-(--bd-primary-50) transition-colors"
-            >
-              <I.refresh size={14} />
-              {t('refresh')}
-            </button>
-          </div>
-        }
-      />
-      <DomainAccessGate>
-        <ActiveDomainTabs className="-mt-2" />
-        <CSVUpload attestation={attestation} />
-      </DomainAccessGate>
-    </div>
+    <OnboardingSubpage
+      title={t('bulk_uploads_page.title')}
+      subtitle={t('bulk_uploads_page.subtitle')}
+      backLabel={t('bulk_uploads_page.back')}
+    >
+      <CSVUpload attestation={attestation} />
+    </OnboardingSubpage>
   );
 }

@@ -16,6 +16,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { ACTIVE_DOMAIN_STORAGE_KEY } from '@/hooks/useActiveDomain';
 import { HttpError } from '@/services/http';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 import { chooseOption } from '@/__tests__/test-utils';
@@ -161,12 +162,15 @@ describe('<CreateLinkSection />', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('pins the read-only domain field to the org name + aggregator-registered domain', () => {
     renderCreate();
     expect(screen.getByDisplayValue('Acme Org')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Seekers')).toBeInTheDocument();
+    expect(screen.getByText('Seekers')).toBeInTheDocument();
   });
 
   it('keeps Create enabled and, on an empty submit, shows each missing field under it', async () => {
@@ -304,7 +308,7 @@ describe('<CreateLinkSection />', () => {
 
   it('creates the link for the active domain tab, with no domain dropdown', async () => {
     window.localStorage.clear();
-    window.localStorage.setItem('bd:active-domain', 'provider');
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     createMutateAsync.mockResolvedValue(baseLink());
@@ -312,14 +316,13 @@ describe('<CreateLinkSection />', () => {
     renderCreate();
 
     expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue('Providers')).toBeInTheDocument();
+    expect(screen.getByText('Providers')).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
 
     expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
-    window.localStorage.clear();
   });
 
   it('keeps the domain set after the form resets on success', async () => {
@@ -400,7 +403,10 @@ describe('<YourLinksBody />', () => {
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('shows a loading state', () => {
     useRegistrationLinks.mockReturnValue({ data: undefined, isLoading: true, error: null });
@@ -432,19 +438,18 @@ describe('<YourLinksBody />', () => {
   it('shows an empty state scoped to the aggregator type', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(screen.getByText('No Seekers links yet. Create one above.')).toBeInTheDocument();
+    expect(screen.getByText('No links for Seekers yet. Create one above.')).toBeInTheDocument();
   });
 
   it('lists the links for the active domain tab, with no domain dropdown', () => {
     window.localStorage.clear();
-    window.localStorage.setItem('bd:active-domain', 'provider');
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
     expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
     expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
-    window.localStorage.clear();
   });
 
   it('shows no domain dropdown for a single-domain coordinator', () => {
@@ -464,7 +469,7 @@ describe('<YourLinksBody />', () => {
     });
     renderLinks();
     expect(screen.getByText('1 active')).toBeInTheDocument();
-    expect(screen.getByText('Seekers links')).toBeInTheDocument();
+    expect(screen.getByText('Links for Seekers')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
   });

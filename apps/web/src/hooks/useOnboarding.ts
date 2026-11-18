@@ -104,6 +104,15 @@ export function useBulkUpload() {
   });
 }
 
+/**
+ * Lists the most recent bulk uploads, polling while any is still processing.
+ *
+ * @param limit - How many recent uploads to fetch.
+ * @param domain - When set, keeps only uploads of this participant type. The
+ *   filter runs in the browser over one cached list shared by every domain, so
+ *   it can return fewer than `limit` items.
+ * @returns The react-query result for the upload list.
+ */
 export function useRecentBulkUploads(limit = 10, domain?: string) {
   return useQuery({
     queryKey: ['onboarding', 'bulk-uploads', 'list', limit],

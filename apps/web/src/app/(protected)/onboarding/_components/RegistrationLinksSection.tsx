@@ -459,14 +459,13 @@ export function CreateLinkSection() {
             />
           </Field>
           <Field label={t('create_link.field_domain')} required error={w('domain').error}>
-            {/* Read-only: the page's domain tabs choose it. */}
-            <input
-              className="bd-input"
+            {/* Set by the page's domain tabs, so plain text, not an input that looks editable. */}
+            <span
               {...w('domain').control}
-              value={domainLabel}
-              readOnly
-              aria-readonly="true"
-            />
+              className="block rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2.5 text-[14px] text-(--bd-fg)"
+            >
+              {domainLabel}
+            </span>
           </Field>
           {/*
            * Registration mode, set at create time and fixed afterwards. Options

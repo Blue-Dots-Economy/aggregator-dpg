@@ -20,6 +20,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { ACTIVE_DOMAIN_STORAGE_KEY } from '@/hooks/useActiveDomain';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
 import {
   BulkUploadEmptyError,
@@ -141,7 +142,10 @@ describe('<CSVUpload />', () => {
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, refetch });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('renders the drag prompt, participant-type chip, and hint when no file is picked', () => {
     renderUpload();
@@ -449,7 +453,7 @@ describe('<CSVUpload />', () => {
 
   it('uses the active domain tab for the template, with no type dropdown', async () => {
     window.localStorage.clear();
-    window.localStorage.setItem('bd:active-domain', 'provider');
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
     useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
     const user = userEvent.setup();
     const origLocation = window.location;
@@ -472,7 +476,6 @@ describe('<CSVUpload />', () => {
       configurable: true,
       value: origLocation,
     });
-    window.localStorage.clear();
   });
 });
 
