@@ -2,7 +2,7 @@
  * Unit tests for Sidebar.
  *
  * Covers: nav item rendering + active-route highlighting, the participants
- * badge sourced from the dashboard rollup for the active domain, the
+ * badge, the total of the dashboard rollups across served domains, the
  * brand-logo vs BlueDotsLogo fallback (and its dark/light swap), the
  * conditional "Contact support" entry gated by `supportEnabled`, and the
  * sign-out control, plus the mobile menu bar + navigation drawer (#793): open /
@@ -141,7 +141,7 @@ describe('<Sidebar />', () => {
     expect(screen.getByText('42')).toBeInTheDocument();
   });
 
-  it('shows the badge for the active domain of a multi-domain coordinator', () => {
+  it('shows the total across every served domain for a multi-domain coordinator', () => {
     search.value = 'domain=provider';
     useAggregatorConfig.mockReturnValue({
       data: {
@@ -169,8 +169,9 @@ describe('<Sidebar />', () => {
       },
     });
     render(<Sidebar />);
-    expect(screen.getAllByText('7').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('49').length).toBeGreaterThan(0);
     expect(screen.queryByText('42')).toBeNull();
+    expect(screen.queryByText('7')).toBeNull();
     search.value = '';
   });
 
