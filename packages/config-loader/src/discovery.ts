@@ -35,7 +35,7 @@ export type ConfigSchemaModule = z.infer<typeof ConfigSchemaModuleSchema>;
  *
  * @param value - The `configSchema` export of a config.schema module.
  */
-function isZodSchema(value: unknown): value is z.ZodTypeAny {
+function isZodSchema(value: unknown): value is z.ZodType {
   return value !== null && typeof value === 'object' && '_def' in value;
 }
 
@@ -51,7 +51,7 @@ export interface RegisteredPackage {
   /** Top-level key in the merged config tree (e.g. "signalStack"). */
   configKey: string;
   /** Zod schema validating this package's config slice. */
-  configSchema: z.ZodTypeAny;
+  configSchema: z.ZodType;
   /**
    * Baseline config values for this package's slice.
    * Merged into the tree before env YAML overrides are applied.

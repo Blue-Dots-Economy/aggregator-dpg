@@ -100,8 +100,7 @@ const CreateLinkBodySchema = z.object({
     .string()
     .regex(/^[a-z][a-z0-9_]*$/)
     .optional(),
-  expires_at: z
-    .string()
+  expires_at: z.iso
     .datetime({ offset: true })
     .nullish()
     .transform((v) => (v ? new Date(v) : null)),
@@ -120,8 +119,7 @@ const UpdateLinkBodySchema = z
       .max(60)
       .optional(),
     context: z.record(z.string(), z.unknown()).optional(),
-    expires_at: z
-      .string()
+    expires_at: z.iso
       .datetime({ offset: true })
       .nullish()
       .transform((v) => (v === undefined ? undefined : v === null ? null : new Date(v))),
@@ -161,11 +159,11 @@ const LinkResponseSchema = z
         failed: z.number(),
         skipped: z.number(),
       })
-      .passthrough(),
+      .loose(),
     created_at: z.string(),
     updated_at: z.string(),
   })
-  .passthrough();
+  .loose();
 
 /** 200 payload for the paginated links list. */
 const ListLinksResponseSchema = z
@@ -175,7 +173,7 @@ const ListLinksResponseSchema = z
     limit: z.number(),
     offset: z.number(),
   })
-  .passthrough();
+  .loose();
 
 export async function registerRegistrationLinksRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();

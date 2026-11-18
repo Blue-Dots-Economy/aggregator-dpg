@@ -145,7 +145,7 @@ const SubmitResponseSchema = z.object({
  * @param body - The parsed body, or `null` when it was not JSON.
  * @param issues - The schema issues.
  */
-function logShapeError(url: string, body: unknown, issues: z.ZodIssue[]): void {
+function logShapeError(url: string, body: unknown, issues: z.core.$ZodIssue[]): void {
   console.error('[public-registration] unexpected response shape', {
     url,
     issues: body === null ? [] : summariseIssues(issues),

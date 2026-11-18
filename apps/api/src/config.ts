@@ -65,7 +65,7 @@ const ConfigSchema = z.object({
     .string()
     .trim()
     .transform((v) => v.toLowerCase())
-    .pipe(z.union([z.literal(''), z.string().email()]))
+    .pipe(z.union([z.literal(''), z.email()]))
     .default(''),
   /**
    * Per-domain Signals UI login URLs, as comma-separated `domain=url` pairs:
@@ -260,7 +260,7 @@ const ConfigSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   /** Base URL of the OPA sidecar. Validated at boot. */
-  OPA_URL: z.string().url().default('http://localhost:8181'),
+  OPA_URL: z.url().default('http://localhost:8181'),
   /** Per-attempt timeout for an OPA decision. */
   OPA_TIMEOUT_MS: z.coerce.number().int().positive().default(500),
   /** Retries after the first OPA attempt, for transient failures. */

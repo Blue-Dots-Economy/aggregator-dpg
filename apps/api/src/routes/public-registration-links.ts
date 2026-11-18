@@ -67,7 +67,7 @@ const ResolveLinkResponseSchema = z
     slug: z.string(),
     network: z.string().describe("Active signalstack network id (e.g. 'blue_dot')."),
     domain: z.string(),
-    context: z.object({}).passthrough().describe('Link context snapshot (free-form metadata).'),
+    context: z.object({}).loose().describe('Link context snapshot (free-form metadata).'),
     registration_mode: z.string(),
     submission_shape: z.string().describe("'account_and_profile' or 'account_only'."),
     public_hint_i18n_key: z.string().nullable(),
@@ -79,11 +79,11 @@ const ResolveLinkResponseSchema = z
       .describe("JSON Schema for the link's domain; null for account_only links."),
     identity: z
       .object({})
-      .passthrough()
+      .loose()
       .describe('Identity field selectors (name / phone / email) for this domain.'),
     expires_at: z.string().nullable(),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Submission body. The profile part is validated at runtime (Ajv) against the
@@ -92,7 +92,7 @@ const ResolveLinkResponseSchema = z
  */
 const PublicRegistrationSubmitBodySchema = z
   .object({})
-  .passthrough()
+  .loose()
   .describe(
     "Dynamic registration payload validated at runtime against the link domain's participant JSON Schema (identity fields such as name/phone/email plus profile fields). consent_terms / consent_privacy are accepted on account_only links. item_locations optionally carries coordinates the registrant picked from the address autocomplete.",
   );
@@ -130,13 +130,13 @@ const SubmitAcceptedResponseSchema = z
     lifecycle_status: z.enum(LIFECYCLE_STATUSES).nullable(),
     owned_elsewhere: z.boolean(),
   })
-  .passthrough();
+  .loose();
 
 /** 409 payload: the phone or email is already registered. */
 const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
   outcome: z.string().describe("'skipped'"),
   message: z.string(),
-}).passthrough();
+}).loose();
 
 export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();

@@ -23,8 +23,8 @@ import type { RegisteredPackage } from './discovery.js';
  */
 export function buildCompositeSchema(
   registry: ReadonlyMap<string, RegisteredPackage>,
-): z.ZodObject<Record<string, z.ZodTypeAny>> {
-  const shape: Record<string, z.ZodTypeAny> = {};
+): z.ZodObject<Record<string, z.ZodType>> {
+  const shape: Record<string, z.ZodType> = {};
   for (const [key, pkg] of registry) {
     shape[key] = pkg.configSchema;
   }

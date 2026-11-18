@@ -18,7 +18,7 @@ export interface IssueSummary {
  * @param issues - The schema issues.
  * @returns One entry per issue. Leaves out the received values, which can be personal data.
  */
-export function summariseIssues(issues: readonly z.ZodIssue[]): IssueSummary[] {
+export function summariseIssues(issues: readonly z.core.$ZodIssue[]): IssueSummary[] {
   return issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
 }
 
@@ -32,7 +32,7 @@ export class ResponseShapeError extends Error {
   override readonly name = 'ResponseShapeError';
 
   /** The schema issues; empty when the body was not JSON. They can hold received values: never log them. */
-  declare readonly issues: z.ZodIssue[];
+  declare readonly issues: z.core.$ZodIssue[];
 
   /**
    * @param url - The request URL.
@@ -40,7 +40,7 @@ export class ResponseShapeError extends Error {
    */
   constructor(
     readonly url: string,
-    issues: z.ZodIssue[],
+    issues: z.core.$ZodIssue[],
   ) {
     super(`unexpected response shape from ${url}`);
     Object.defineProperty(this, 'issues', { value: issues, enumerable: false });
@@ -65,7 +65,7 @@ export class ResponseShapeError extends Error {
  * @returns The schema's output.
  * @throws {ResponseShapeError} When the body is not JSON or does not match.
  */
-export async function parseResponseBody<S extends z.ZodTypeAny>(
+export async function parseResponseBody<S extends z.ZodType>(
   res: Response,
   url: string,
   schema: S,

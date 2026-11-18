@@ -21,8 +21,8 @@ import { errorResponses } from '../errors/openapi.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 const RangeQuerySchema = z.object({
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
 });
 
 /** Shared counter columns summed from the onboarding rollup table. */
@@ -37,16 +37,16 @@ const OnboardingSummaryResponseSchema = OnboardingCountersSchema.extend({
   aggregator_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
-}).passthrough();
+}).loose();
 
 const OnboardingBySourceResponseSchema = z
   .object({
     aggregator_id: z.string(),
     from: z.string().nullable(),
     to: z.string().nullable(),
-    by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).passthrough()),
+    by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).loose()),
   })
-  .passthrough();
+  .loose();
 
 export async function registerOnboardingRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();

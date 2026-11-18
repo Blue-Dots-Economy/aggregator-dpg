@@ -50,7 +50,7 @@ export const DashboardRollupSchema = z
     avg_actions_per_user: z.number().optional(),
     mode_wise_counts: z.record(z.string(), z.number()).optional(),
   })
-  .passthrough();
+  .loose();
 export type DashboardRollup = z.infer<typeof DashboardRollupSchema>;
 
 /** Per-domain slice of the dashboard payload: rollup and paginated items. */
@@ -62,7 +62,7 @@ export const DashboardDomainSliceSchema = z
     total_matching: z.number(),
     next_cursor: z.string().nullable(),
   })
-  .passthrough();
+  .loose();
 export type DashboardDomainSlice = z.infer<typeof DashboardDomainSliceSchema>;
 
 /** Signals metadata about the cached rollup, used for the "last updated" hint. */
@@ -73,7 +73,7 @@ export const DashboardMetadataSchema = z
     ttl_seconds: z.number().optional(),
     refreshed: z.boolean().optional(),
   })
-  .passthrough();
+  .loose();
 export type DashboardMetadata = z.infer<typeof DashboardMetadataSchema>;
 
 /** Full dashboard payload, with every domain keyed by id in `by_domain`. */
@@ -82,7 +82,7 @@ export const DashboardPageSchema = z
     by_domain: z.record(z.string(), DashboardDomainSliceSchema),
     metadata: DashboardMetadataSchema,
   })
-  .passthrough();
+  .loose();
 export type DashboardPage = z.infer<typeof DashboardPageSchema>;
 
 /**

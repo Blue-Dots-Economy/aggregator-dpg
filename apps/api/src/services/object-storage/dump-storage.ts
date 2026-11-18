@@ -3,8 +3,8 @@
  * The dump keys sit outside the shared object-storage package's areas; same `S3_*` settings.
  */
 
-// TODO(Blue-Dots-Economy/agg-campaign-manager-v2#5): remove with the dump once every deployment
-// syncs straight to the Campaign Manager; until then this bypasses @aggregator-dpg/object-storage.
+// Temporary: removed with the dump once every deployment syncs straight to the Campaign Manager
+// (Blue-Dots-Economy/agg-campaign-manager-v2#5). Until then this bypasses @aggregator-dpg/object-storage.
 
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';

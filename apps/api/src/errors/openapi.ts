@@ -22,9 +22,9 @@ export const ErrorEnvelopeSchema = z
         requestId: z.string(),
         timestamp: z.string(),
       })
-      .passthrough(),
+      .loose(),
   })
-  .passthrough();
+  .loose();
 
 /**
  * Fails to typecheck if the schema stops matching {@link ErrorEnvelope}.

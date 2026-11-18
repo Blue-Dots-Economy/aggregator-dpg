@@ -15,8 +15,8 @@ import { parseQuery } from '@/lib/bff-input';
 
 /** Same rules as the API's onboarding `RangeQuerySchema`: ISO datetimes with an offset or `Z`. */
 const RangeQuerySchema = z.object({
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
 });
 
 /**

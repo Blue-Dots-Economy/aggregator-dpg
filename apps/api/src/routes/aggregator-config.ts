@@ -107,7 +107,7 @@ const AggregatorConfigResponseSchema = z.object({
   /**
    * Per-domain Signals UI login URLs from `SIGNALS_UI_URLS`. Empty when unset.
    *
-   * Checked at boot with `new URL()`. A plain string here, since `z.string().url()`
+   * Checked at boot with `new URL()`. A plain string here, since `z.url()`
    * could reject a value that boot accepted and cause a 500.
    */
   signals_ui_urls: z.record(z.string(), z.string()),
@@ -225,7 +225,7 @@ export async function registerAggregatorConfigRoutes(base: FastifyInstance): Pro
         response: {
           200: z
             .object({ participant_consent: z.record(z.string(), z.unknown()).nullable() })
-            .passthrough(),
+            .loose(),
           ...errorResponses(500, 503),
         },
       },
