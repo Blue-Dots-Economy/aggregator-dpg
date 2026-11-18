@@ -19,6 +19,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
+vi.mock('@/components/ui/ActiveDomainTabs', () => ({
+  ActiveDomainTabs: () => null,
+}));
 vi.mock('@/components/access/DomainAccessGate', () => ({
   DomainAccessGate: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));

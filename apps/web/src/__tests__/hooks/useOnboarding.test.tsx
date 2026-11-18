@@ -146,6 +146,27 @@ describe('useOnboarding hooks', () => {
     expect(svc.listBulkUploads).toHaveBeenCalledWith({ limit: 5 });
   });
 
+  it('useRecentBulkUploads keeps only the given domain, from one shared fetch', async () => {
+    svc.listBulkUploads!.mockResolvedValue({
+      items: [
+        { upload_id: 'u1', status: 'completed', participant_type: 'seeker' },
+        { upload_id: 'u2', status: 'completed', participant_type: 'provider' },
+      ],
+      total: 2,
+      limit: 10,
+      offset: 0,
+    });
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () => ({ all: useRecentBulkUploads(10), provider: useRecentBulkUploads(10, 'provider') }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.provider.isSuccess).toBe(true));
+    expect(result.current.provider.data?.items.map((i) => i.upload_id)).toEqual(['u2']);
+    expect(result.current.all.data?.items).toHaveLength(2);
+    expect(svc.listBulkUploads).toHaveBeenCalledTimes(1);
+  });
+
   describe('useRecentBulkUploads polling', () => {
     const POLL_MS = 3000;
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   onboardingService,
   type ApiRegistrationLink,
+  type BulkUploadList,
   type CreateLinkInput,
   type OnboardingBySource,
   type OnboardingSummary,
@@ -103,10 +104,13 @@ export function useBulkUpload() {
   });
 }
 
-export function useRecentBulkUploads(limit = 10) {
+export function useRecentBulkUploads(limit = 10, domain?: string) {
   return useQuery({
     queryKey: ['onboarding', 'bulk-uploads', 'list', limit],
     queryFn: () => onboardingService.listBulkUploads({ limit }),
+    // Filtered after the fetch, so every domain shares one cached list.
+    select: (list: BulkUploadList) =>
+      domain ? { ...list, items: list.items.filter((it) => it.participant_type === domain) } : list,
     refetchInterval: (q) => {
       const items = q.state.data?.items ?? [];
       const inFlight = items.some((it) =>

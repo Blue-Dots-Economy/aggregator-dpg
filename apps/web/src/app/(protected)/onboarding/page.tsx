@@ -9,6 +9,7 @@ import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useActiveDomain } from '../../../hooks/useActiveDomain';
 import { DomainAccessGate } from '../../../components/access/DomainAccessGate';
+import { ActiveDomainTabs } from '@/components/ui/ActiveDomainTabs';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 import { OnboardingMetrics } from './_components/OnboardingMetrics';
@@ -34,6 +35,7 @@ export default function OnboardingPage() {
         }
       />
       <DomainAccessGate>
+        <ActiveDomainTabs className="-mt-2 mb-3" />
         {/* Onboarding summary and joins by entry mode. */}
         <OnboardingMetrics />
         <BulkUploadCard />
@@ -51,7 +53,8 @@ export default function OnboardingPage() {
 function BulkUploadCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
-  const recent = useRecentBulkUploads(50);
+  const { active } = useActiveDomain();
+  const recent = useRecentBulkUploads(50, active);
   const metrics = useMemo(() => {
     const items = recent.data?.items ?? [];
     let total = 0;

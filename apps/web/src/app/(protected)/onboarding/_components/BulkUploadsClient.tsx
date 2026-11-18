@@ -7,6 +7,7 @@ import { Topbar } from '../../../../components/shell/Topbar';
 import { I } from '../../../../icons';
 import { CSVUpload } from './CSVUpload';
 import { DomainAccessGate } from '../../../../components/access/DomainAccessGate';
+import { ActiveDomainTabs } from '@/components/ui/ActiveDomainTabs';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 
 /** Props for {@link BulkUploadsClient}. */
@@ -52,6 +53,7 @@ export function BulkUploadsClient({ attestation }: BulkUploadsClientProps): JSX.
         }
       />
       <DomainAccessGate>
+        <ActiveDomainTabs className="-mt-2" />
         <CSVUpload attestation={attestation} />
       </DomainAccessGate>
     </div>

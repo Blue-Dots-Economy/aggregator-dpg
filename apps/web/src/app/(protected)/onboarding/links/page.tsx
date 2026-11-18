@@ -6,6 +6,7 @@ import { Topbar } from '../../../../components/shell/Topbar';
 import { I } from '../../../../icons';
 import { CreateLinkSection } from '../_components/RegistrationLinksSection';
 import { DomainAccessGate } from '../../../../components/access/DomainAccessGate';
+import { ActiveDomainTabs } from '@/components/ui/ActiveDomainTabs';
 
 export default function RegistrationLinksPage() {
   const t = useTranslations('onboarding');
@@ -39,6 +40,7 @@ export default function RegistrationLinksPage() {
         }
       />
       <DomainAccessGate>
+        <ActiveDomainTabs className="-mt-2" />
         <CreateLinkSection />
       </DomainAccessGate>
     </div>

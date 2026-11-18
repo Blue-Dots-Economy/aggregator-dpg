@@ -73,16 +73,6 @@ import {
   YourLinksBody,
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
 
-/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
-async function pickDomain(name: RegExp): Promise<void> {
-  Element.prototype.scrollIntoView = vi.fn();
-  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
-  Element.prototype.setPointerCapture = vi.fn();
-  Element.prototype.releasePointerCapture = vi.fn();
-  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
-  fireEvent.click(await screen.findByRole('option', { name }));
-}
-
 const testMessages = {
   common: messages.common,
   onboarding: messages.onboarding,
@@ -312,27 +302,24 @@ describe('<CreateLinkSection />', () => {
     expect(screen.queryByText(/DOMAIN_NOT_SERVED|request failed/)).not.toBeInTheDocument();
   });
 
-  it('lets a multi-domain coordinator pick the link domain', async () => {
+  it('creates the link for the active domain tab, with no domain dropdown', async () => {
     window.localStorage.clear();
+    window.localStorage.setItem('bd:active-domain', 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     createMutateAsync.mockResolvedValue(baseLink());
     const user = userEvent.setup();
     renderCreate();
 
-    const domainSelect = screen.getByRole('combobox', { name: 'Profile Type' });
-    expect(domainSelect).toHaveTextContent(/Seeker/);
-    expect(
-      screen.getByText('Profile Type', { selector: '.bd-label *, .bd-label' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Seekers / Providers')).toBeNull();
-    await pickDomain(/Provider/);
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('Providers')).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
 
     expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+    window.localStorage.clear();
   });
 
   it('keeps the domain set after the form resets on success', async () => {
@@ -445,18 +432,19 @@ describe('<YourLinksBody />', () => {
   it('shows an empty state scoped to the aggregator type', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
+    expect(screen.getByText('No Seekers links yet. Create one above.')).toBeInTheDocument();
   });
 
-  it('lists the active domain and switches domain from the header', async () => {
+  it('lists the links for the active domain tab, with no domain dropdown', () => {
     window.localStorage.clear();
+    window.localStorage.setItem('bd:active-domain', 'provider');
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(useRegistrationLinks).toHaveBeenLastCalledWith('seeker');
-    await pickDomain(/Provider/);
     expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+    window.localStorage.clear();
   });
 
   it('shows no domain dropdown for a single-domain coordinator', () => {
@@ -476,7 +464,7 @@ describe('<YourLinksBody />', () => {
     });
     renderLinks();
     expect(screen.getByText('1 active')).toBeInTheDocument();
-    expect(screen.getByText('seeker links')).toBeInTheDocument();
+    expect(screen.getByText('Seekers links')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
   });
