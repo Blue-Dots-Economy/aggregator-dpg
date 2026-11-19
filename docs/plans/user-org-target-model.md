@@ -57,7 +57,8 @@ CREATE TABLE user_identities (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, provider),               -- one login per provider per account
   user_type  user_type NOT NULL,                 -- copied from the account
-  UNIQUE (provider, subject, user_type)          -- at most one account per type per external login
+  UNIQUE (provider, subject, user_type)          -- at most one account per type per external login;
+                                                 -- the root and Default owners hold no coordinator account
 );
 CREATE TYPE org_type  AS ENUM ('network_facilitator', 'aggregator');
 ALTER TYPE aggregator_status RENAME TO registration_status;   -- one status vocabulary for users and orgs (M6)

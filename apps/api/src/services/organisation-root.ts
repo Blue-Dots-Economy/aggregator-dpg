@@ -11,9 +11,10 @@
  * - root owner ← the first `ADMIN_EMAILS` entry;
  * - Default owner ← `DEFAULT_ORG_OWNER_EMAIL`, else the root's owner.
  *
- * A login holds at most one account per type, so an owner may also hold a
- * coordinator account on the same login. A Default owner who already owns
- * another org is refused: logged, and the current owner kept.
+ * A configured owner who is a coordinator, or a Default owner who already
+ * owns another org, is refused: logged, and the current owner kept. A login
+ * may hold one admin and one coordinator account, but the root and Default
+ * owners never hold a coordinator account.
  * In the IdP, an existing user that carries an `aggregator_id` (a coordinator
  * login) is not granted owner access: logged, and nothing linked or enabled.
  *
@@ -150,20 +151,24 @@ async function releaseIfUnowned(tx: DbExecutor, userId: string): Promise<boolean
 /**
  * Why a configured owner address may not own the root / Default org, or null.
  *
+ * - `owner_is_coordinator`: the address belongs to a coordinator.
  * - `owner_owns_other_org`: (Default only) the address already owns an org.
  */
 async function ownerConflict(
   tx: DbExecutor,
   email: string,
   which: 'root' | 'default',
-): Promise<'owner_owns_other_org' | null> {
-  const r = await tx.execute<{ other_owner: boolean }>(sql`
-    SELECT EXISTS (SELECT 1 FROM organisations o
+): Promise<'owner_is_coordinator' | 'owner_owns_other_org' | null> {
+  const r = await tx.execute<{ coordinator: boolean; other_owner: boolean }>(sql`
+    SELECT EXISTS (SELECT 1 FROM users x JOIN contact c ON c.id = x.contact_id
+                    WHERE c.email = ${email} AND x.user_type = 'coordinator') AS coordinator,
+           EXISTS (SELECT 1 FROM organisations o
                      JOIN users u ON u.id = o.org_owner
                      JOIN contact c ON c.id = u.contact_id
                     WHERE c.email = ${email} AND o.org_type = 'aggregator'
                       AND o.slug <> 'default') AS other_owner`);
   const row = r.rows[0];
+  if (row?.coordinator) return 'owner_is_coordinator';
   if (which === 'default' && row?.other_owner) return 'owner_owns_other_org';
   return null;
 }

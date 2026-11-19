@@ -650,30 +650,46 @@ describe('reconcileRootOrganisations', () => {
     expect(h.state.released).toEqual(['u-old', 'u-old']);
   });
 
-  it('applies a root owner whose email also has a coordinator account', async () => {
+  it('refuses a root owner address that is a coordinator’s, keeping the current owner', async () => {
     h.state = migratedState();
-    // A coordinator already exists on this address; the admin row is added next to it.
-    const coordinatorId = 'coord-1';
-    h.state.users.set(coordinatorId, {
+    h.state.users.set('coord-1', {
       email: 'ops@example.org',
       subject: 's-coord',
       coordinator: true,
     });
-    h.state.contacts.set('ops@example.org', 'c-ops');
     const warn = vi.spyOn(logger, 'warn');
     const state = await reconcileRootOrganisations(config());
-    expect(state?.changed.rootOwner).toBe(true);
-    expect(state?.root.ownerEmail).toBe('ops@example.org');
-    expect(state?.root.ownerUserId).toBe('admin-c-ops');
-    expect(state?.root.ownerUserId).not.toBe(coordinatorId);
-    expect(h.state.users.get(coordinatorId)?.subject).toBe('s-coord');
-    expect(h.state.released).not.toContain(coordinatorId);
-    expect(warn).not.toHaveBeenCalledWith(
-      expect.objectContaining({ org: 'root' }),
+    expect(state?.changed.rootOwner).toBe(false);
+    expect(state?.root.ownerEmail).toBe(PLACEHOLDER_OWNER_EMAIL);
+    expect(state?.root.ownerUserId).toBe('u-ph');
+    expect(state?.replacedOwners).toEqual([]);
+    expect(h.state.released).toEqual([]);
+    expect(h.state.users.get('coord-1')?.subject).toBe('s-coord');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'root', reason: 'owner_is_coordinator' }),
       expect.any(String),
     );
   });
 
+  it('refuses a Default owner address that is a coordinator’s, keeping the current owner', async () => {
+    h.state = migratedState();
+    h.state.users.set('coord-2', {
+      email: 'dflt@example.org',
+      subject: 's-coord2',
+      coordinator: true,
+    });
+    h.state.contacts.set('dflt@example.org', 'c-dflt');
+    const warn = vi.spyOn(logger, 'warn');
+    const state = await reconcileRootOrganisations(
+      config({ defaultOwnerEmail: 'dflt@example.org' }),
+    );
+    expect(state?.changed.defaultOwner).toBe(false);
+    expect(state?.defaultOrg.ownerEmail).not.toBe('dflt@example.org');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'default', reason: 'owner_is_coordinator' }),
+      expect.any(String),
+    );
+  });
   it('refuses a Default owner who already owns another org (C12)', async () => {
     h.state = migratedState({
       orgOwnerEmails: ['def@example.org'],
