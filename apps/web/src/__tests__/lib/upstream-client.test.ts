@@ -15,10 +15,11 @@ vi.mock('@/lib/session', () => ({
   getSessionStore: () => ({ destroy: destroyMock, update: updateMock }),
 }));
 
-const { getFreshAccessToken, callApi } = await import('@/lib/upstream-client');
+const { getFreshAccessToken, refreshAccessToken, callApi } = await import('@/lib/upstream-client');
 
 const FAR_FUTURE = Date.now() + 10 * 60_000;
 const NEAR_EXPIRY = Date.now() + 30_000; // within the 60s refresh window
+const ACCOUNT_ID = '7d0f2c1e-4b8a-4c3d-9e2f-1a2b3c4d5e6f';
 
 describe('getFreshAccessToken', () => {
   beforeEach(() => {
@@ -165,5 +166,90 @@ describe('callApi', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await callApi('/v1/links');
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:4000/v1/links', expect.anything());
+  });
+
+  it('sends no acting-account header when the session has no acting account', async () => {
+    getSessionMock.mockResolvedValue({ accessToken: 'AT-1', accessTokenExp: FAR_FUTURE });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await callApi('/v1/links');
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Headers).has('x-acting-account')).toBe(false);
+  });
+
+  it('sends the acting-account header when the session has an acting account', async () => {
+    getSessionMock.mockResolvedValue({
+      accessToken: 'AT-1',
+      accessTokenExp: FAR_FUTURE,
+      actingAccountId: ACCOUNT_ID,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await callApi('/v1/links');
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Headers).get('x-acting-account')).toBe(ACCOUNT_ID);
+  });
+
+  it('leaves the acting-account header out when asked to call as the signed-in account', async () => {
+    getSessionMock.mockResolvedValue({
+      accessToken: 'AT-1',
+      accessTokenExp: FAR_FUTURE,
+      actingAccountId: ACCOUNT_ID,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await callApi('/v1/user/read/me', { asSignedInAccount: true });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Headers).has('x-acting-account')).toBe(false);
+  });
+
+  it('drops a caller-supplied acting-account header', async () => {
+    getSessionMock.mockResolvedValue({ accessToken: 'AT-1', accessTokenExp: FAR_FUTURE });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await callApi('/v1/links', { headers: { 'X-Acting-Account': ACCOUNT_ID } });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Headers).has('x-acting-account')).toBe(false);
+  });
+});
+
+describe('refreshAccessToken', () => {
+  beforeEach(() => {
+    getSessionMock.mockReset();
+    cookiesGetMock.mockReset();
+    refreshMock.mockReset();
+    destroyMock.mockReset();
+    updateMock.mockReset();
+  });
+
+  it('refreshes even when the current token is far from expiry', async () => {
+    getSessionMock.mockResolvedValue({
+      accessToken: 'AT-OLD',
+      accessTokenExp: FAR_FUTURE,
+      refreshToken: 'RT-OLD',
+    });
+    cookiesGetMock.mockReturnValue({ value: 'sid-3' });
+    refreshMock.mockResolvedValue({
+      ok: true,
+      value: {
+        accessToken: 'AT-NEW',
+        refreshToken: 'RT-NEW',
+        idToken: 'ID-NEW',
+        accessTokenExp: FAR_FUTURE,
+        refreshTokenExp: FAR_FUTURE,
+      },
+    });
+    await expect(refreshAccessToken()).resolves.toBe('AT-NEW');
+    expect(refreshMock).toHaveBeenCalledWith('RT-OLD');
+    expect(updateMock).toHaveBeenCalledWith(
+      'sid-3',
+      expect.objectContaining({ accessToken: 'AT-NEW' }),
+    );
+  });
+
+  it('returns null when there is no session', async () => {
+    getSessionMock.mockResolvedValue(null);
+    await expect(refreshAccessToken()).resolves.toBeNull();
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 });

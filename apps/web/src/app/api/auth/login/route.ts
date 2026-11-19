@@ -24,31 +24,10 @@ import {
   signinBrowserCookieOptions,
 } from '@/lib/cookies';
 import { getSessionStore } from '@/lib/session';
+import { safeReturnPath } from '@/lib/return-to';
 import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 
 export const runtime = 'nodejs';
-
-/**
- * Base used only to parse a relative `returnTo`; the `.invalid` TLD never resolves.
- */
-const PARSE_BASE = 'https://placeholder.invalid';
-
-function isSafeReturnTo(value: string | null): string {
-  if (!value) return '/';
-  // Only same-origin paths are allowed, to prevent open redirects. Rejects
-  // `//host`, `/\\host`, encoded tricks such as `/%09/host`, and full URLs.
-  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
-    return '/';
-  }
-  try {
-    const parsed = new URL(value, PARSE_BASE);
-    if (parsed.origin !== PARSE_BASE) return '/';
-    if (/[\x00-\x1f\x7f]/.test(parsed.pathname)) return '/';
-    return parsed.pathname + parsed.search + parsed.hash;
-  } catch {
-    return '/';
-  }
-}
 
 /** Longest email address accepted as a `login_hint`. */
 const MAX_LOGIN_HINT_LENGTH = 320;
@@ -60,7 +39,7 @@ function safeLoginHint(value: string | null): string | null {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const returnTo = isSafeReturnTo(req.nextUrl.searchParams.get('returnTo'));
+  const returnTo = safeReturnPath(req.nextUrl.searchParams.get('returnTo'), '/');
   const loginHint = safeLoginHint(req.nextUrl.searchParams.get('login_hint'));
 
   const state = oidcGenerators.state();

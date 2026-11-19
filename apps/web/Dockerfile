@@ -28,11 +28,13 @@ COPY apps/web/package.json                    apps/web/package.json
 COPY packages/tsconfig/package.json           packages/tsconfig/package.json
 # web's server components read consent config via @aggregator-dpg/config-loader,
 # which pulls in @aggregator-dpg/shared-primitives; the public registration page
-# imports the shared `signals_cta` rule from @aggregator-dpg/network-config.
+# imports the shared `signals_cta` rule from @aggregator-dpg/network-config; the
+# acting-account route reads the acting role prefix from @aggregator-dpg/rbac.
 # Every workspace package in web's dependency closure needs its package.json
 # here, or the filtered install below fails to resolve the workspace link.
 COPY packages/config-loader/package.json      packages/config-loader/package.json
 COPY packages/network-config/package.json     packages/network-config/package.json
+COPY packages/rbac/package.json               packages/rbac/package.json
 COPY packages/shared-primitives/package.json  packages/shared-primitives/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts --filter @aggregator-dpg/web...

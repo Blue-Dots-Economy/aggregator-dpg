@@ -44,6 +44,11 @@ export const SessionDataSchema = z.object({
    * and an ID token without `sid`, have none.
    */
   idpSid: z.string().optional(),
+  /**
+   * The owner's own coordinator account the session acts as. API calls name
+   * it in the acting-account header. Set and cleared by `/api/auth/acting`.
+   */
+  actingAccountId: z.guid().optional(),
 });
 export type SessionData = z.infer<typeof SessionDataSchema>;
 
