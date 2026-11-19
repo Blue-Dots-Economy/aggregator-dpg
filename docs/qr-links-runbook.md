@@ -46,23 +46,23 @@ kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/qr-links.js check --
 
 `check` reads the database and writes nothing. It prints every problem as `<line> <code> [<field>]`, for example `3 UNKNOWN_VOICE_BOT voice_bot` (line 1 is the header, the first data row is line 2), then how many links would be created or are already loaded, then `CHECK PASSED` (exit 0) or `CHECK FAILED` (exit 1). It never prints row data.
 
-| Code                                          | Meaning and fix                                                                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `MISSING_COLUMN`, `REQUIRED`, `MALFORMED_ROW` | A header column, a required cell, or the row's CSV shape is wrong. Fix the sheet.                                               |
-| `UNKNOWN_COLUMN`                              | A header (named, line 1) is not a template column, for example a typo. Rename or remove it.                                     |
-| `UNKNOWN_COORDINATOR`                         | No coordinator has that email. Load the coordinator first, or fix the email.                                                    |
-| `COORDINATOR_NOT_ACTIVE`                      | The coordinator is loaded but not active. Finish the coordinator load first.                                                    |
-| `NO_SIGNALS_ORG`                              | The coordinator has no Signals org yet. Talk to the team; the coordinator load did not finish.                                  |
-| `DOMAIN_NOT_SERVED`                           | The coordinator does not serve this `profile_type`. Fix the cell or the coordinator's types.                                    |
-| `UNKNOWN_VOICE_BOT`                           | `voice_bot` is not a bot key on this instance.                                                                                  |
-| `VOICE_BOT_NOT_FOR_DOMAIN`                    | The bot exists but does not serve this `profile_type`.                                                                          |
-| `VOICE_BOT_REQUIRED`                          | The domain has several bots and no default. Fill in `voice_bot`.                                                                |
-| `INVALID_LINK_NAME`                           | `link_name` is not 3 to 60 characters of lowercase letters, digits and single hyphens.                                          |
-| `LINK_NAME_TAKEN`                             | See the rerun rules (§5). Change `link_name` in the sheet.                                                                      |
-| `INVALID_EXPIRY`, `EXPIRY_IN_PAST`            | `expires_on` is not a real `YYYY-MM-DD` date, or is already over.                                                               |
-| `DUPLICATE_ROW`                               | The same coordinator, profile type and `link_name` as an earlier row.                                                           |
-| `MODE_NOT_ENABLED`                            | The network declares no two-option mode, or this deployment does not enable it. Fix the instance config (#1122) before loading. |
-| `CHECK_FAILED`                                | A lookup failed or a check threw. Look at the log line for the row.                                                             |
+| Code                                          | Meaning and fix                                                                                                                                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MISSING_COLUMN`, `REQUIRED`, `MALFORMED_ROW` | A header column, a required cell, or the row's CSV shape is wrong. Fix the sheet.                                                                                                        |
+| `UNKNOWN_COLUMN`                              | A header (named, line 1) is not a template column, for example a typo. Rename or remove it.                                                                                              |
+| `UNKNOWN_COORDINATOR`                         | No coordinator has that email. Load the coordinator first, or fix the email.                                                                                                             |
+| `COORDINATOR_NOT_ACTIVE`                      | The coordinator is loaded but not active. Finish the coordinator load first.                                                                                                             |
+| `NO_SIGNALS_ORG`                              | The coordinator has no Signals org yet. Talk to the team; the coordinator load did not finish.                                                                                           |
+| `DOMAIN_NOT_SERVED`                           | The coordinator does not serve this `profile_type`. Fix the cell or the coordinator's types.                                                                                             |
+| `UNKNOWN_VOICE_BOT`                           | `voice_bot` is not a bot key on this instance.                                                                                                                                           |
+| `VOICE_BOT_NOT_FOR_DOMAIN`                    | The bot exists but does not serve this `profile_type`.                                                                                                                                   |
+| `VOICE_BOT_REQUIRED`                          | The domain has several bots and no default. Fill in `voice_bot`.                                                                                                                         |
+| `INVALID_LINK_NAME`                           | `link_name` is not 3 to 60 characters of lowercase letters, digits and single hyphens.                                                                                                   |
+| `LINK_NAME_TAKEN`                             | See the rerun rules (§5). Change `link_name` in the sheet.                                                                                                                               |
+| `INVALID_EXPIRY`, `EXPIRY_IN_PAST`            | `expires_on` is not a real `YYYY-MM-DD` date, or is already over.                                                                                                                        |
+| `DUPLICATE_ROW`                               | An earlier row has the same coordinator and `link_name` (whatever the profile type: a name is one link per coordinator), or, with no `link_name`, the same coordinator and profile type. |
+| `MODE_NOT_ENABLED`                            | The network declares no two-option mode, or this deployment does not enable it. Fix the instance config (#1122) before loading.                                                          |
+| `CHECK_FAILED`                                | A lookup failed or a check threw. Look at the log line for the row.                                                                                                                      |
 
 Repeat until `CHECK PASSED`.
 
@@ -98,21 +98,23 @@ A cell that starts with `=`, `+`, `-` or `@` has a leading `'` added so a spread
 
 Failure codes on a row:
 
-| Code                                                                                                             | Meaning and fix                                                                                               |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `DB_UNAVAILABLE`                                                                                                 | The database failed. Fix it and rerun.                                                                        |
-| `DUPLICATE_SLUG`                                                                                                 | The name was taken by another link between `check` and `apply`. Change `link_name` and rerun.                 |
-| `CALL_TIMEOUT`                                                                                                   | The create call did not finish in time. The link may exist; a rerun finds it (`already_loaded`).              |
-| `UNEXPECTED`                                                                                                     | A step threw; the log line for the row has the error type.                                                    |
-| `SCHEMA_VALIDATION`, `DOMAIN_NOT_SERVED`, `INVALID_REGISTRATION_MODE`, `INVALID_VOICE_BOT`, `VOICE_BOT_REQUIRED` | The create rules refused what `check` accepted. Talk to the team; the config may have changed during the run. |
+| Code                                                                                                             | Meaning and fix                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_UNAVAILABLE`                                                                                                 | The database failed. Fix it and rerun.                                                                                                                                                                                                                                             |
+| `DUPLICATE_SLUG`                                                                                                 | The create could not find a free name for the link after several tries. Rerun.                                                                                                                                                                                                     |
+| `LINK_NAME_TAKEN`                                                                                                | The `link_name` was taken between `check` and `apply`, so the link was created under a suffixed name (the row's log line has it as `created_slug`). Retire that link in the portal, then rerun; `check` will show `LINK_NAME_TAKEN` until you change `link_name` or free the name. |
+| `CALL_TIMEOUT`                                                                                                   | The create call did not finish in time. The link may exist; a rerun finds it (`already_loaded`).                                                                                                                                                                                   |
+| `UNEXPECTED`                                                                                                     | A step threw; the log line for the row has the error type.                                                                                                                                                                                                                         |
+| `SCHEMA_VALIDATION`, `DOMAIN_NOT_SERVED`, `INVALID_REGISTRATION_MODE`, `INVALID_VOICE_BOT`, `VOICE_BOT_REQUIRED` | The create rules refused what `check` accepted. Talk to the team; the config may have changed during the run.                                                                                                                                                                      |
 
 ## 5. Rerun rules
 
 **Rerunning is safe.** Run `check` and `apply` again with the **same sheet** (and a new local report name, for example `links-report-2.csv`). A row whose link is already there is `already_loaded` and creates nothing; the rest are created.
 
-- A row is already loaded when that coordinator has a **live two-option link of the same profile type with the same `link_name`**.
-- With **no** `link_name`, every run creates a new random-named link. Give every row a `link_name` if you may need to rerun.
+- A row **with** a `link_name` is already loaded when that coordinator has a live, unexpired two-option link of the same profile type with that name.
+- A row **without** a `link_name` is already loaded when that coordinator has **any** live, unexpired two-option link of that profile type, including one made in the portal, unless a named row of the same sheet claims that link. When there is none, `apply` creates one with a random name, and a rerun then finds it. Two unnamed rows for one coordinator and type are a `DUPLICATE_ROW`; give rows a `link_name` when you need several links.
 - `LINK_NAME_TAKEN`: the coordinator already uses that name, and the existing link is not the same live two-option link of the same profile type (it is another profile type or mode, expired, or no longer live). It is refused, never replaced. **Fix: change `link_name` in the sheet.**
+- An `already_loaded` row keeps the existing link as it is: the sheet's `voice_bot` and `expires_on` are not applied to it, and the report shows the link's real bot. To change them, retire the link in the portal and rerun.
 - Because `apply` stops at the first failure, fix the cause and rerun the whole sheet; the rows already created are skipped.
 
 ## 6. Make the QR images (on your machine)
@@ -124,6 +126,7 @@ pnpm --filter @aggregator-dpg/api exec tsx scripts/qr-images.ts --in links-repor
 ```
 
 - It writes one PNG per `created` or `already_loaded` row, named `<email part before @>-<profile_type>-<slug>.png` in lowercase, with every other character turned into `-`. The images use the same settings as the portal's QR dialog, so they scan the same way.
+- When two rows give the same file name, the later one gets `-<line>` (its `line` in the report), then `-2`, `-3` and so on until the name is free, so no image is lost.
 - `failed` and `not_run` rows get no image.
 - It refuses an `--out` folder that already has files in it. Use a new folder, or add `--force`.
 - It needs no network access and no instance settings.
