@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { IdpAdminFake } from '../idp-admin/testing.js';
-import { KC_ATTR, OWNER_CREATED_BY } from '../idp-admin/index.js';
+import { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from '../idp-admin/index.js';
 import {
   IdentityMismatchError,
   IdentityTakenError,
@@ -505,6 +505,33 @@ describe('provisionRootIdp', () => {
     );
     expect(subjects.get('u-1')).toBeDefined();
     expect(report.usersReused).toBeGreaterThan(0);
+  });
+
+  it('refuses an existing IdP user that is a coordinator login', async () => {
+    const idp = new IdpAdminFake();
+    const coord = await idp.createUser({
+      email: 'ops@example.org',
+      enabled: false,
+      attributes: { [KC_ATTR.AGGREGATOR_ID]: 'agg-1', [KC_ATTR.DECISION_MADE]: 'approved' },
+    });
+    if (!coord.ok) throw new Error('seed');
+    const warn = vi.spyOn(logger, 'warn');
+    const enable = vi.spyOn(idp, 'enableUser');
+    const { r, subjects } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      { root: org({}), defaultOrg: org({ id: 'org-2', slug: 'default' }) },
+      r,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'owner_is_coordinator_login' }),
+      expect.any(String),
+    );
+    expect(subjects.size).toBe(0);
+    expect(enable).not.toHaveBeenCalledWith(coord.value.id);
+    expect(idp.rolesOf(coord.value.id)).not.toContain(OWNER_REALM_ROLE);
+    expect(idp.groupsOf(coord.value.id)).toEqual([]);
+    expect(report.ownersGranted).toBe(0);
   });
 
   it('counts a failed disable while revoking a released owner this app created', async () => {

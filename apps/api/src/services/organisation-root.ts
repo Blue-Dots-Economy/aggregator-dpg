@@ -14,6 +14,8 @@
  * A login holds at most one account per type, so an owner may also hold a
  * coordinator account on the same login. A Default owner who already owns
  * another org is refused: logged, and the current owner kept.
+ * In the IdP, an existing user that carries an `aggregator_id` (a coordinator
+ * login) is not granted owner access: logged, and nothing linked or enabled.
  *
  * Then, best-effort, it mirrors both orgs and their owners into the IdP (a
  * group per org, a user per owner) and gives owners sign-in access (enabled,
@@ -530,6 +532,18 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
     return null;
   }
   if (existing.value) {
+    const aggregatorId = existing.value.attributes?.[KC_ATTR.AGGREGATOR_ID] ?? [];
+    if (aggregatorId.some((v) => v !== '')) {
+      logger.warn(
+        {
+          operation: 'ensureRootOrganisation.idp',
+          status: 'skipped',
+          reason: 'owner_is_coordinator_login',
+        },
+        'the configured owner address is a coordinator login in the IdP — no owner access granted',
+      );
+      return null;
+    }
     ctx.report.usersReused += 1;
     return existing.value.id;
   }
