@@ -10,6 +10,8 @@ import {
   domainRequiresBirthYear,
   registrationShowsConsent,
   CONSENT_REQUIRED_GATE,
+  isMinorBirthYear,
+  isValidBirthYear,
 } from '@/lib/registration-gates';
 import type { AggregatorConfigDomain } from '@/hooks/useAggregatorConfig';
 
@@ -84,5 +86,23 @@ describe('registrationShowsConsent', () => {
     );
     expect(registrationShowsConsent({ ...base })).toBe(false);
     expect(registrationShowsConsent(undefined)).toBe(false);
+  });
+});
+
+describe('birth year', () => {
+  it('accepts a four-digit year up to 120 years back and not in the future', () => {
+    expect(isValidBirthYear('1906', 2026)).toBe(true);
+    expect(isValidBirthYear(' 2026 ', 2026)).toBe(true);
+    expect(isValidBirthYear('1905', 2026)).toBe(false);
+    expect(isValidBirthYear('2027', 2026)).toBe(false);
+    expect(isValidBirthYear('86', 2026)).toBe(false);
+    expect(isValidBirthYear(undefined, 2026)).toBe(false);
+  });
+
+  it('treats age 18 and under as a minor, and an invalid year as not a minor', () => {
+    expect(isMinorBirthYear('2008', 2026)).toBe(true);
+    expect(isMinorBirthYear('2007', 2026)).toBe(false);
+    expect(isMinorBirthYear('2027', 2026)).toBe(false);
+    expect(isMinorBirthYear('', 2026)).toBe(false);
   });
 });

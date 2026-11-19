@@ -12,6 +12,23 @@ export const LinkIdentitySchema = IdentitySelectorsSchema.partial();
 /** Identity field names for a link's domain. */
 export type LinkIdentity = z.infer<typeof LinkIdentitySchema>;
 
+/** The voice bot a link resolves to, as the public page shows it. The number is not included. */
+export const LinkVoiceBotSchema = z.object({
+  display_name: z.string(),
+  /** Language codes the bot speaks, as configured, for example `hi`. Show them with `languageNames`. */
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+
+/** The voice bot a link resolves to. */
+export type LinkVoiceBot = z.infer<typeof LinkVoiceBotSchema>;
+
+/** The channels this page knows how to offer. */
+const LinkOfferSchema = z.enum(['voice', 'form']);
+
+/** A channel this page knows how to offer. */
+export type LinkOffer = z.infer<typeof LinkOfferSchema>;
+
 /**
  * The body of `GET /public/v1/aggregators/:org/links/:slug`, as the page reads
  * it. Fields the page can do without are optional.
@@ -32,4 +49,20 @@ export const ResolveResponseSchema = z.object({
   submission_shape: z.enum(['account_only', 'account_and_profile']).optional().catch(undefined),
   /** i18n key for a hint shown under the public form. */
   public_hint_i18n_key: z.string().nullish(),
+  /**
+   * Channels the page offers. Missing or malformed means the form only. Values
+   * this page does not know yet (a later `callback`) are dropped, not rejected.
+   */
+  offers: z
+    .array(z.unknown())
+    .catch(['form'])
+    .transform((list): LinkOffer[] => {
+      const known = list.flatMap((o) => {
+        const offer = LinkOfferSchema.safeParse(o);
+        return offer.success ? [offer.data] : [];
+      });
+      return known.length > 0 ? known : ['form'];
+    }),
+  /** The link's voice bot; `null` when it offers no voice option. */
+  voice_bot: LinkVoiceBotSchema.nullable().default(null),
 });

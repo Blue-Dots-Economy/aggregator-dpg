@@ -154,6 +154,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/links/voice-bots",
+      "access": {
+        "capability": "profiles.onboard"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/onboarding/by-source",
       "access": {
         "capability": "profiles.view"
@@ -329,6 +336,13 @@
     {
       "method": "POST",
       "path": "/public/v1/aggregators/:orgSlug/registrations/:slug",
+      "access": {
+        "access": "public"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/public/v1/aggregators/:orgSlug/voice-requests/:slug",
       "access": {
         "access": "public"
       }

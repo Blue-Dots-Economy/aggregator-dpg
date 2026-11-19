@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 // ─── Coordinator YAML schema ──────────────────────────────────────────────────
@@ -274,6 +275,12 @@ export type OnboardingConfig = z.infer<typeof OnboardingConfigSchema>;
 const RegistrationModeKey = z.string().regex(/^[a-z][a-z0-9_]*$/);
 
 /**
+ * Validated key for a voice bot. Same snake_case rule as link creation
+ * enforces, so a configured key can always be picked by a coordinator.
+ */
+const VoiceBotKey = z.string().regex(/^[a-z][a-z0-9_]*$/);
+
+/**
  * One entry in the per-network `registration_modes` config block.
  * Maps an admin-facing channel name (e.g. `voice`, `form`) to a
  * rendering shape and an optional public hint.
@@ -288,6 +295,17 @@ export const RegistrationModeSchema = z.object({
    * When omitted, it is true only for `submission_shape === 'account_and_profile'`.
    */
   signals_cta: z.boolean().optional(),
+  /**
+   * The ways a person can register through a link in this mode, in display
+   * order. When omitted the mode offers the form only.
+   */
+  offers: z
+    .array(z.enum(['voice', 'form']))
+    .min(1)
+    .refine((offers) => new Set(offers).size === offers.length, {
+      message: 'offers must not repeat a value',
+    })
+    .optional(),
 });
 export type RegistrationMode = z.infer<typeof RegistrationModeSchema>;
 
@@ -328,27 +346,98 @@ export const DEFAULT_ORGANISATION: OrganisationConfig = {
 export const DEFAULT_INVITE_ROLE_LABEL = 'Super Admin';
 
 /**
+ * One voice bot a participant can call to register by phone.
+ *
+ * `phone` is validated and stored as normalised E.164. `domains` are network
+ * domain ids; the loader checks they exist once the network is fetched.
+ */
+export const VoiceBotSchema = z.object({
+  /** Stable id that links store; unique within the instance. */
+  key: VoiceBotKey,
+  display_name: z.string().min(1),
+  phone: z.string().transform((raw, ctx) => {
+    const normalised = normalisePhone(raw);
+    if (!normalised.ok) {
+      ctx.addIssue({ code: 'custom', message: normalised.error.message });
+      return z.NEVER;
+    }
+    return normalised.value;
+  }),
+  languages: z.array(z.string().min(1)).min(1),
+  domains: z.array(z.string().min(1)).min(1),
+  description: z.string().optional(),
+});
+export type VoiceBot = z.infer<typeof VoiceBotSchema>;
+
+/**
  * Root aggregator config — the YAML the operator edits per deployment.
  */
 export const AggregatorYamlSchema = z.object({
-  aggregator: z.object({
-    name: z.string().min(1),
-    legal_name: z.string().optional(),
-    contact_email: z.email().optional(),
-    network: NetworkBindingSchema,
-    brand: BrandConfigSchema,
-    domain_labels: z.record(z.string(), DomainLabelsSchema).optional(),
-    onboarding: OnboardingConfigSchema.prefault({}),
-    admin_emails: z.array(z.email()).default([]),
-    registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).prefault({
-      form: {
-        label_i18n_key: 'registration_mode.form.label',
-        submission_shape: 'account_and_profile',
-        public_hint_i18n_key: null,
-      },
+  aggregator: z
+    .object({
+      name: z.string().min(1),
+      legal_name: z.string().optional(),
+      contact_email: z.email().optional(),
+      network: NetworkBindingSchema,
+      brand: BrandConfigSchema,
+      domain_labels: z.record(z.string(), DomainLabelsSchema).optional(),
+      onboarding: OnboardingConfigSchema.prefault({}),
+      admin_emails: z.array(z.email()).default([]),
+      registration_modes: z.record(RegistrationModeKey, RegistrationModeSchema).prefault({
+        form: {
+          label_i18n_key: 'registration_mode.form.label',
+          submission_shape: 'account_and_profile',
+          public_hint_i18n_key: null,
+        },
+      }),
+      organisation: OrganisationConfigSchema.prefault({}),
+      voice_bots: z.array(VoiceBotSchema).default([]),
+      /**
+       * Domain id to the key of the bot that serves it when a link names none.
+       * Required for every domain served by two or more bots.
+       */
+      default_voice_bots: z.record(z.string(), z.string()).optional(),
+    })
+    .superRefine((cfg, ctx) => {
+      const seen = new Set<string>();
+      for (const [i, bot] of cfg.voice_bots.entries()) {
+        if (seen.has(bot.key)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['voice_bots', i, 'key'],
+            message: `voice_bots key '${bot.key}' is listed more than once`,
+          });
+        }
+        seen.add(bot.key);
+      }
+      for (const [domain, key] of Object.entries(cfg.default_voice_bots ?? {})) {
+        const bot = cfg.voice_bots.find((b) => b.key === key);
+        if (!bot || !bot.domains.includes(domain)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['default_voice_bots', domain],
+            message: `default_voice_bots.${domain} must name a listed voice bot that serves '${domain}'`,
+          });
+        }
+      }
+      // Links store the bot they resolve to at creation; with two or more bots
+      // and no default, a link created without a choice would have none.
+      const servingCount = new Map<string, number>();
+      for (const bot of cfg.voice_bots) {
+        for (const domain of bot.domains) {
+          servingCount.set(domain, (servingCount.get(domain) ?? 0) + 1);
+        }
+      }
+      for (const [domain, count] of servingCount) {
+        if (count > 1 && cfg.default_voice_bots?.[domain] === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['default_voice_bots', domain],
+            message: `default_voice_bots.${domain} is required: ${count} voice_bots serve '${domain}'`,
+          });
+        }
+      }
     }),
-    organisation: OrganisationConfigSchema.prefault({}),
-  }),
 });
 export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;
 
