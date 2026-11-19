@@ -53,6 +53,17 @@ export interface ApplyContext {
   orgIds: Map<string, string>;
   /** Keycloak users created for a `new` owner, by the org row's line. */
   ownerSubs: Map<number, string>;
+  /** Owner logins removed with a half-created org, mapped to the login created in their place. */
+  replacedSubs: Map<string, string>;
+}
+
+/**
+ * Fails an outcome no case handled; the compiler checks that none is left.
+ *
+ * @param _outcome - The unhandled outcome.
+ */
+export function unhandledOutcome(_outcome: never): RowResult {
+  return failed(APPLY_ERROR.UNEXPECTED);
 }
 
 /** A failed row result. */

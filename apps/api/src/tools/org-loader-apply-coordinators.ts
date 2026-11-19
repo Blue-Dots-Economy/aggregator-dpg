@@ -18,6 +18,7 @@ import { ROLES_SYNC_REASON } from './org-loader-apply-orgs.js';
 import {
   APPLY_ERROR,
   failed,
+  unhandledOutcome,
   type ApplyContext,
   type RowResult,
 } from './org-loader-apply-shared.js';
@@ -140,6 +141,8 @@ async function approveCoordinatorRow(
       return failed(APPLY_ERROR.NO_PROFILE_TYPES);
     case 'unavailable':
       return failed(UNAVAILABLE_CODE[approved.dependency]);
+    default:
+      return unhandledOutcome(approved);
   }
   const rolesSync = await syncTokenRoles(userId, ROLES_SYNC_REASON);
   const signalsOrgId = await signalsOrgIdOf(userId);

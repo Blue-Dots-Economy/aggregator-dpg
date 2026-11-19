@@ -38,6 +38,17 @@ const TREE_RULES = { maxDepth: 5, maxChildren: null, maxTotalOrgs: 50 };
 class FlakyIdp extends IdpAdminFake {
   failFor: string | null = null;
   failRole = false;
+  failDecision = false;
+
+  override async setUserDecision(
+    userId: string,
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
+  ) {
+    if (this.failDecision) {
+      return { ok: false as const, error: { code: 'IDP_UNAVAILABLE' as const, message: 'down' } };
+    }
+    return super.setUserDecision(userId, decision);
+  }
 
   override async createUser(input: CreateUserInput) {
     if (this.failFor === input.email) {
@@ -451,6 +462,30 @@ describe('applyLoadPlan: stopping and resuming', () => {
     expect(top?.ownerKcSub).not.toBe(old.value.id);
   });
 
+  it('resumes a half-created org whose owner also owns a later row, with one owner login', async () => {
+    await seedHalfCreatedTop();
+    const result = await apply(treeRows(0));
+    expect(outcomes(result.rows)).toEqual(['org:Top:resumed', 'org:Child:created']);
+    const top = await orgByName('Top');
+    const child = await orgByName('Child');
+    expect(top?.ownerKcSub).toBeTruthy();
+    expect(child?.ownerKcSub).toBe(top?.ownerKcSub);
+    const byEmail = await idp.findByEmail(OWNER_EMAIL);
+    expect(byEmail.ok && byEmail.value?.id).toBe(top?.ownerKcSub);
+  });
+
+  it('gives a later row the login that replaced a removed half-created owner login', async () => {
+    const old = await idp.createUser({ email: OWNER_EMAIL, username: OWNER_EMAIL });
+    if (!old.ok) throw new Error('seed failed');
+    await seedHalfCreatedTop(old.value.id);
+    const result = await apply(treeRows(0));
+    expect(outcomes(result.rows)).toEqual(['org:Top:resumed', 'org:Child:created']);
+    const top = await orgByName('Top');
+    const child = await orgByName('Child');
+    expect(top?.ownerKcSub).not.toBe(old.value.id);
+    expect(child?.ownerKcSub).toBe(top?.ownerKcSub);
+  });
+
   it('fails a half-created org whose owner email has a Keycloak user not linked to it', async () => {
     await idp.createUser({ email: OWNER_EMAIL, username: OWNER_EMAIL });
     const old = await seedHalfCreatedTop();
@@ -510,6 +545,41 @@ describe('applyLoadPlan: owner access', () => {
     expect(top?.status).toBe('active');
     const owner = await kcUser(top?.ownerKcSub ?? '');
     expect(owner.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
+
+    // A rerun grants the missing role and then marks the owner approved.
+    idp.failRole = false;
+    const rerun = await apply({ orgs: rows.orgs.slice(0, 1), coordinators: [] });
+    expect(outcomes(rerun.rows)).toEqual(['org:Top:already_loaded']);
+    const repaired = await kcUser(top?.ownerKcSub ?? '');
+    expect(repaired.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
+    expect(idp.rolesOf(repaired.id)).toContain(OWNER_ROLE);
+  });
+
+  it('re-stamps the owner approved on a rerun after the stamp failed', async () => {
+    idp.failDecision = true;
+    const rows = treeRows(0);
+    const first = await apply(rows);
+    expect(first.rows.map((r) => r.outcome)).toEqual(['created', 'created']);
+    const top = await orgByName('Top');
+    const sub = top?.ownerKcSub ?? '';
+    expect((await kcUser(sub)).attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
+
+    idp.failDecision = false;
+    const rerun = await apply(rows);
+    expect(rerun.rows.map((r) => r.outcome)).toEqual(['already_loaded', 'already_loaded']);
+    expect((await kcUser(sub)).attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
+  });
+
+  it('leaves an owner of a self-registered org alone on the already_loaded path', async () => {
+    const rows = treeRows(0);
+    await apply({ orgs: rows.orgs.slice(0, 1), coordinators: [] });
+    const top = await orgByName('Top');
+    if (!top) throw new Error('not loaded');
+    const sub = top.ownerKcSub ?? '';
+    orgStore.seed([{ ...top, createdBy: 'self' }]);
+    await idp.setUserDecision(sub, 'invited');
+    await apply({ orgs: rows.orgs.slice(0, 1), coordinators: [] });
+    expect((await kcUser(sub)).attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
   });
 });
 

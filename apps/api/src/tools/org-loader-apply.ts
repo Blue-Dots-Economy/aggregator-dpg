@@ -70,6 +70,7 @@ export async function applyLoadPlan(
     log,
     orgIds: new Map(),
     ownerSubs: new Map(),
+    replacedSubs: new Map(),
   };
   const steps: Step[] = [
     ...plan.orgs.map((p) => ({

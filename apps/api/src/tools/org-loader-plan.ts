@@ -447,6 +447,15 @@ async function checkNewOrgOwner(
     problems.org(row.line, PLAN_PROBLEM.OWNER_HAS_PENDING_ORG, 'owner_email');
     return { ok: false };
   }
+  // Every owned org is a half-created loader org of this file: apply creates the login once.
+  const onlyHalfCreated = owned.every(
+    (o) =>
+      o.status === 'pending' &&
+      isProvisioned(o.createdBy) &&
+      fileNames.has(nameKey(o.displayName)) &&
+      !o.ownerKcSub,
+  );
+  if (onlyHalfCreated) return { ok: true };
   const withLogin =
     owned.find((o) => o.status === 'active' && o.ownerKcSub) ?? owned.find((o) => o.ownerKcSub);
   const kcSub = withLogin?.ownerKcSub;
