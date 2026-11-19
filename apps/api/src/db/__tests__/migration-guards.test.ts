@@ -36,6 +36,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0038_coordinator_base_permissions',
   // Adds `registration_links.voice_bot_key` (nullable); idempotent.
   '0039_registration_links_voice_bot_key',
+  // Adds `user_identities.user_type` and swaps its unique; idempotent.
+  '0040_user_identities_user_type',
 ];
 
 const journal: JournalEntry[] = [

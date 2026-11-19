@@ -287,14 +287,22 @@ describe('contact: indexes (migration 0025)', () => {
 });
 
 describe('user_identities (migration 0027)', () => {
-  it('is keyed by (user_id, provider) and unique per (provider, subject)', () => {
+  it('is keyed by (user_id, provider) and unique per (provider, subject, user_type)', () => {
     const cfg = getTableConfig(userIdentities);
     expect(cfg.name).toBe('user_identities');
     expect(cfg.primaryKeys[0]?.columns.map(colName)).toEqual(['user_id', 'provider']);
-    expect(cfg.uniqueConstraints[0]?.columns.map(colName)).toEqual(['provider', 'subject']);
+    expect(cfg.uniqueConstraints[0]?.columns.map(colName)).toEqual([
+      'provider',
+      'subject',
+      'user_type',
+    ]);
     const fk = cfg.foreignKeys[0]!;
     expect(fk.reference().foreignTable).toBe(users);
     expect(fk.onDelete).toBe('cascade');
+    const typed = cfg.foreignKeys.find((f) => f.reference().columns.length === 2)!;
+    expect(typed.reference().columns.map(colName)).toEqual(['user_id', 'user_type']);
+    expect(typed.reference().foreignColumns.map(colName)).toEqual(['id', 'user_type']);
+    expect(typed.onDelete).toBe('cascade');
   });
 });
 

@@ -22,7 +22,8 @@ function fakeDb(opts: {
       ? Promise.reject(Object.assign(new Error('x'), { code: '08006' }))
       : Promise.resolve(rows);
     p.catch(() => undefined);
-    for (const m of ['from', 'where']) Object.defineProperty(p, m, { value: () => p });
+    for (const m of ['from', 'where', 'orderBy', 'limit'])
+      Object.defineProperty(p, m, { value: () => p });
     return p;
   };
   return {
@@ -67,6 +68,7 @@ describe('PostgresIdentityStore', () => {
       await s.link('u1', 'keycloak', 's'),
       await s.subjectOf('u1', 'keycloak'),
       await s.userOf('keycloak', 's'),
+      await s.accountsOf('keycloak', 's'),
     ]) {
       expect(r.ok || r.error.code).toBe('DB_UNAVAILABLE');
     }
@@ -77,5 +79,21 @@ describe('PostgresIdentityStore', () => {
     const s = new PostgresIdentityStore();
     expect(await s.subjectOf('u1', 'keycloak')).toEqual({ ok: true, value: 's1' });
     expect(await s.userOf('keycloak', 's1')).toEqual({ ok: true, value: 'u1' });
+  });
+
+  it('reads accountsOf by type', async () => {
+    _setDbClients(
+      null,
+      fakeDb({
+        selectRows: [
+          { userId: 'c1', userType: 'coordinator' },
+          { userId: 'a1', userType: 'admin' },
+        ],
+      }) as never,
+    );
+    expect(await new PostgresIdentityStore().accountsOf('keycloak', 's1')).toEqual({
+      ok: true,
+      value: { admin: 'a1', coordinator: 'c1' },
+    });
   });
 });

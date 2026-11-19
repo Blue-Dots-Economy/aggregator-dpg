@@ -122,7 +122,7 @@ describe('requireApproved + signalstack backfill', () => {
     // 0027: the first approved request records the coordinator's IdP login.
     const identities = getIdentityStore() as IdentityStoreFake;
     expect(identities.all()).toEqual([
-      { userId: aggregatorId, provider: 'keycloak', subject: kcUserId },
+      { userId: aggregatorId, userType: 'coordinator', provider: 'keycloak', subject: kcUserId },
     ]);
 
     const aggregators = writer.listAggregators();
