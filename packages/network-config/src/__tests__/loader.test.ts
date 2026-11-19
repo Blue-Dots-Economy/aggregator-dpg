@@ -864,6 +864,22 @@ describe('FileNetworkConfigLoader — domain resolution failures', () => {
     },
   );
 
+  it('fails to load when two voice bots serve a domain and no default is set', async () => {
+    const bot = (key: string) =>
+      `    - key: ${key}\n      display_name: ${key}\n      phone: "+919876543210"\n      languages: [en]\n      domains: [seeker]\n`;
+    await fs.writeFile(configPath, `${BLUE_DOT_YAML}  voice_bots:\n${bot('a')}${bot('b')}`, 'utf8');
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const error = result.error as { code: string; message: string };
+    expect(error.code).toBe('CONFIG_PARSE_FAILED');
+    expect(error.message).toContain('default_voice_bots.seeker is required');
+  });
+
   it('returns DOMAIN_RESOLUTION_FAILED when identity selectors cannot be sniffed and no override exists', async () => {
     const loader = new FileNetworkConfigLoader({
       configPath,
