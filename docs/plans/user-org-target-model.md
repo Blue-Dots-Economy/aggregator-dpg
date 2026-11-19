@@ -56,7 +56,8 @@ CREATE TABLE user_identities (
   subject    text NOT NULL,                      -- the provider's user id (Keycloak `sub`)
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, provider),               -- one login per provider per account
-  UNIQUE (provider, subject)                     -- one account per external login
+  user_type  user_type NOT NULL,                 -- copied from the account
+  UNIQUE (provider, subject, user_type)          -- at most one account per type per external login
 );
 CREATE TYPE org_type  AS ENUM ('network_facilitator', 'aggregator');
 ALTER TYPE aggregator_status RENAME TO registration_status;   -- one status vocabulary for users and orgs (M6)

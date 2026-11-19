@@ -28,7 +28,8 @@ import {
 interface FakeUser {
   email: string;
   subject: string | null;
-  isCoordinator: boolean;
+  /** Set for a coordinator account. */
+  coordinator?: boolean;
 }
 
 /** One `organisations` row of the fake database. */
@@ -53,8 +54,6 @@ interface FakeState {
   takenSlugs: string[];
   /** Users the reconcile asked to release. */
   released: string[];
-  /** Addresses that belong to a coordinator. */
-  coordinatorEmails?: string[];
   /** Addresses that own an aggregator org other than Default. */
   orgOwnerEmails?: string[];
   sql: string[];
@@ -79,7 +78,7 @@ vi.mock('../../db/account-writes.js', async (importOriginal) => ({
     const id = `admin-${contactId}`;
     const email = [...h.state!.contacts].find(([, c]) => c === contactId)?.[0] ?? '';
     if (!h.state!.users.has(id)) {
-      h.state!.users.set(id, { email, subject: null, isCoordinator: false });
+      h.state!.users.set(id, { email, subject: null });
     }
     return id;
   }),
@@ -104,7 +103,7 @@ function fakeDb(state: FakeState) {
       const email = params[0] as string;
       return [
         {
-          coordinator: (state.coordinatorEmails ?? []).includes(email),
+          coordinator: [...state.users.values()].some((u) => u.email === email && u.coordinator),
           other_owner: (state.orgOwnerEmails ?? []).includes(email),
         },
       ];
@@ -125,7 +124,6 @@ function fakeDb(state: FakeState) {
           org_owner: org.owner,
           email: user.email,
           subject: user.subject,
-          is_coordinator: user.isCoordinator,
         },
       ];
     }
@@ -185,9 +183,7 @@ function migratedState(over: Partial<FakeState> = {}): FakeState {
         owner: 'u-ph',
       },
     ],
-    users: new Map([
-      ['u-ph', { email: PLACEHOLDER_OWNER_EMAIL, subject: null, isCoordinator: false }],
-    ]),
+    users: new Map([['u-ph', { email: PLACEHOLDER_OWNER_EMAIL, subject: null }]]),
     contacts: new Map([['ops@example.org', 'c-ops']]),
     takenSlugs: [],
     released: [],
@@ -246,7 +242,6 @@ describe('provisionRootIdp', () => {
     ownerUserId: 'u-1',
     ownerEmail: 'ops@example.org',
     ownerSubject: null,
-    ownerIsCoordinator: false,
     ...over,
   });
 
@@ -499,20 +494,17 @@ describe('provisionRootIdp', () => {
     expect(idp.rolesOf(kept.value.id)).toContain('org_owner');
   });
 
-  it("never links a coordinator's IdP user to the admin account", async () => {
+  it("links an existing IdP user to the owner's admin account", async () => {
     const idp = new IdpAdminFake();
     await idp.createUser({ email: 'ops@example.org', enabled: true });
     const { r, subjects } = recorder();
     const report = await provisionRootIdp(
       idp,
-      {
-        root: org({ ownerIsCoordinator: true }),
-        defaultOrg: org({ id: 'org-2', slug: 'default', ownerIsCoordinator: true }),
-      },
+      { root: org({}), defaultOrg: org({ id: 'org-2', slug: 'default' }) },
       r,
     );
-    expect(subjects.size).toBe(0);
-    expect(report.usersCreated + report.usersReused).toBe(0);
+    expect(subjects.get('u-1')).toBeDefined();
+    expect(report.usersReused).toBeGreaterThan(0);
   });
 
   it('counts a failed disable while revoking a released owner this app created', async () => {
@@ -621,7 +613,6 @@ describe('reconcileRootOrganisations', () => {
     h.state.users.set('u-old', {
       email: 'old@example.org',
       subject: 's-old',
-      isCoordinator: false,
     });
     for (const o of h.state.orgs) o.owner = 'u-old';
     const state = await reconcileRootOrganisations(config());
@@ -632,14 +623,26 @@ describe('reconcileRootOrganisations', () => {
     expect(h.state.released).toEqual(['u-old', 'u-old']);
   });
 
-  it('refuses a root owner address that is a coordinator’s (P5-14)', async () => {
-    h.state = migratedState({ coordinatorEmails: ['ops@example.org'] });
+  it('applies a root owner whose email also has a coordinator account', async () => {
+    h.state = migratedState();
+    // A coordinator already exists on this address; the admin row is added next to it.
+    const coordinatorId = 'coord-1';
+    h.state.users.set(coordinatorId, {
+      email: 'ops@example.org',
+      subject: 's-coord',
+      coordinator: true,
+    });
+    h.state.contacts.set('ops@example.org', 'c-ops');
     const warn = vi.spyOn(logger, 'warn');
     const state = await reconcileRootOrganisations(config());
-    expect(state?.changed.rootOwner).toBe(false);
-    expect(state?.root.ownerEmail).toBe(PLACEHOLDER_OWNER_EMAIL);
-    expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ org: 'root', reason: 'owner_is_coordinator' }),
+    expect(state?.changed.rootOwner).toBe(true);
+    expect(state?.root.ownerEmail).toBe('ops@example.org');
+    expect(state?.root.ownerUserId).toBe('admin-c-ops');
+    expect(state?.root.ownerUserId).not.toBe(coordinatorId);
+    expect(h.state.users.get(coordinatorId)?.subject).toBe('s-coord');
+    expect(h.state.released).not.toContain(coordinatorId);
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'root' }),
       expect.any(String),
     );
   });

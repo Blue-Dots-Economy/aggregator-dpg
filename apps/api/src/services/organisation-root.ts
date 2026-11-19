@@ -11,8 +11,9 @@
  * - root owner ← the first `ADMIN_EMAILS` entry;
  * - Default owner ← `DEFAULT_ORG_OWNER_EMAIL`, else the root's owner.
  *
- * A configured owner who is a coordinator, or a Default owner who already
- * owns another org, is refused: logged, and the current owner kept.
+ * A login holds at most one account per type, so an owner may also hold a
+ * coordinator account on the same login. A Default owner who already owns
+ * another org is refused: logged, and the current owner kept.
  *
  * Then, best-effort, it mirrors both orgs and their owners into the IdP (a
  * group per org, a user per owner) and gives owners sign-in access (enabled,
@@ -65,11 +66,6 @@ export interface RootOrgState {
   ownerEmail: string;
   /** The owner's recorded IdP subject, if any. */
   ownerSubject: string | null;
-  /**
-   * Whether the owner also has a coordinator account. If so, the IdP user
-   * belongs to that login and is not linked to the admin account.
-   */
-  ownerIsCoordinator: boolean;
 }
 
 /** An owner replaced by the reconcile: removed from the org's group. */
@@ -152,24 +148,20 @@ async function releaseIfUnowned(tx: DbExecutor, userId: string): Promise<boolean
 /**
  * Why a configured owner address may not own the root / Default org, or null.
  *
- * - `owner_is_coordinator`: the address belongs to a coordinator.
  * - `owner_owns_other_org`: (Default only) the address already owns an org.
  */
 async function ownerConflict(
   tx: DbExecutor,
   email: string,
   which: 'root' | 'default',
-): Promise<'owner_is_coordinator' | 'owner_owns_other_org' | null> {
-  const r = await tx.execute<{ coordinator: boolean; other_owner: boolean }>(sql`
-    SELECT EXISTS (SELECT 1 FROM users x JOIN contact c ON c.id = x.contact_id
-                    WHERE c.email = ${email} AND x.user_type = 'coordinator') AS coordinator,
-           EXISTS (SELECT 1 FROM organisations o
+): Promise<'owner_owns_other_org' | null> {
+  const r = await tx.execute<{ other_owner: boolean }>(sql`
+    SELECT EXISTS (SELECT 1 FROM organisations o
                      JOIN users u ON u.id = o.org_owner
                      JOIN contact c ON c.id = u.contact_id
                     WHERE c.email = ${email} AND o.org_type = 'aggregator'
                       AND o.slug <> 'default') AS other_owner`);
   const row = r.rows[0];
-  if (row?.coordinator) return 'owner_is_coordinator';
   if (which === 'default' && row?.other_owner) return 'owner_owns_other_org';
   return null;
 }
@@ -198,11 +190,8 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
     org_owner: string;
     email: string;
     subject: string | null;
-    is_coordinator: boolean;
   }>(sql`
-    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject,
-           EXISTS (SELECT 1 FROM users x
-                    WHERE x.contact_id = u.contact_id AND x.user_type = 'coordinator') AS is_coordinator
+    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject
       FROM organisations o
       JOIN users u ON u.id = o.org_owner
       JOIN contact c ON c.id = u.contact_id
@@ -219,7 +208,6 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
         ownerUserId: r.org_owner,
         ownerEmail: r.email,
         ownerSubject: r.subject,
-        ownerIsCoordinator: Boolean(r.is_coordinator),
       }
     : null;
 }
@@ -520,24 +508,11 @@ async function removeReplacedOwners(
 /**
  * The org owner's IdP subject: the recorded one, else the existing user for
  * the owner's email, else a new disabled user, linked to the owner's admin
- * account. `null` for the placeholder owner, an owner who is a coordinator,
- * or on failure.
+ * account. `null` for the placeholder owner or on failure.
  */
 async function ownerSubject(ctx: MirrorContext, org: RootOrgState): Promise<string | null> {
   if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) return null;
   if (org.ownerSubject) return org.ownerSubject;
-  // If the owner is also a coordinator, do not link that IdP user to the admin account.
-  if (org.ownerIsCoordinator) {
-    logger.warn(
-      {
-        operation: 'ensureRootOrganisation.idp',
-        status: 'skipped',
-        reason: 'owner_is_coordinator',
-      },
-      'the configured owner also holds a coordinator account — no admin IdP user is linked',
-    );
-    return null;
-  }
   const subject = await findOrCreateOwner(ctx, org.ownerEmail);
   if (!subject) return null;
   if (!(await ctx.recorder.linkSubject(org.ownerUserId, subject))) {
