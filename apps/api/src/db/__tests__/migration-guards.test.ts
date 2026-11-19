@@ -34,6 +34,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0037_user_locations',
   // Adds profiles.export and profiles.view_pii to the built-in Coordinator role; idempotent.
   '0038_coordinator_base_permissions',
+  // Adds `registration_links.voice_bot_key` (nullable); idempotent.
+  '0039_registration_links_voice_bot_key',
 ];
 
 const journal: JournalEntry[] = [

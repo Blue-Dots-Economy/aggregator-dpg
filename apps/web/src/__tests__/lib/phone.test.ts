@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   acceptsListedPhone,
   DEFAULT_PHONE_COUNTRIES,
+  formatPhoneForReading,
   isAcceptedPhone,
   isPhoneFieldName,
   isValidPhone,
@@ -143,5 +144,15 @@ describe('phone helpers', () => {
     expect(isValidPhone('09876543210')).toBe(true);
     expect(isValidPhone('+912234567890')).toBe(false);
     expect(isAcceptedPhone('+912234567890')).toBe(true);
+  });
+
+  it('groups an E.164 number for reading', () => {
+    expect(formatPhoneForReading('+911234567890')).toBe('+91 12345 67890');
+    expect(formatPhoneForReading('+447911123456', parsePhoneCountries('IN:+91,GB:+44'))).toBe(
+      '+44 79111 23456',
+    );
+    expect(formatPhoneForReading('+44791112345', parsePhoneCountries('IN:+91,GB:+44'))).toBe(
+      '+44 791112345',
+    );
   });
 });

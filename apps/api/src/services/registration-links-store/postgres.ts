@@ -34,6 +34,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
           context: input.context,
           status: input.status ?? 'draft',
           registrationMode: input.registrationMode ?? 'form',
+          voiceBotKey: input.voiceBotKey ?? null,
           expiresAt: input.expiresAt ?? null,
           createdBy: input.createdBy,
         })
@@ -261,6 +262,7 @@ function toDomain(row: RegistrationLinkRow): RegistrationLink {
     domain: row.domain,
     context: row.context,
     registrationMode: typeof row.registrationMode === 'string' ? row.registrationMode : 'form',
+    voiceBotKey: row.voiceBotKey,
     qrObjectKey: row.qrObjectKey,
     status: row.status,
     expiresAt: row.expiresAt,

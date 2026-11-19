@@ -552,6 +552,28 @@ export const ERR = {
     detail: 'The selected registration mode is not declared in this network configuration.',
     hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes, or one this deployment withholds via AGGREGATOR_ONBOARDING_ENABLED. Surface the declared keys via fields.declared and the usable subset via fields.enabled.',
   },
+  INVALID_VOICE_BOT: {
+    code: 'INVALID_VOICE_BOT',
+    status: 400,
+    title: 'Invalid voice bot',
+    detail: 'The selected voice bot is not configured for this link’s domain.',
+    hint: 'Create body named a voice_bot_key that is not in aggregator.voice_bots or whose domains do not include the link domain. fields.configured lists the keys serving that domain.',
+  },
+  VOICE_BOT_REQUIRED: {
+    code: 'VOICE_BOT_REQUIRED',
+    status: 400,
+    title: 'Choose a voice bot',
+    detail: 'Several voice bots serve this domain and none is the default, so one must be chosen.',
+    hint: 'Create body for a voice-offering mode omitted voice_bot_key, the domain has more than one bot, and default_voice_bots names none. Send voice_bot_key, or set a default for the domain.',
+  },
+  VOICE_BOT_UNAVAILABLE: {
+    code: 'VOICE_BOT_UNAVAILABLE',
+    status: 409,
+    title: 'Voice registration is unavailable',
+    detail:
+      'This link cannot take a voice request right now. Please register with the form instead.',
+    hint: 'The link mode does not offer voice, or no bot resolves for the link (removed or never configured). The public page falls back to the form.',
+  },
   INVALID_CONFIG: {
     code: 'INVALID_CONFIG',
     status: 400,

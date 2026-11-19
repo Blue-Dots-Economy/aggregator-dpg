@@ -29,6 +29,10 @@ import { useActiveDomain } from '@/hooks/useActiveDomain';
 import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 import { SelectField } from '@/components/ui/SelectField';
+import { VoiceBotPicker, needsVoiceBotChoice } from './VoiceBotPicker';
+import { useVoiceBots } from '@/hooks/useOnboarding';
+import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
+import { formatPhoneForReading } from '@/lib/phone';
 
 interface CreateLinkFormState {
   /** Domain id from the network config (e.g. `seeker`), set to the aggregator's registered type. */
@@ -49,6 +53,8 @@ interface CreateLinkFormState {
    * Set at create time and cannot change. Empty until the config loads.
    */
   registration_mode: string;
+  /** Chosen voice bot key, or `null` to let the API store the default bot. Only sent when the mode offers voice. */
+  voice_bot_key: string | null;
   /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
   tags: string;
 }
@@ -62,6 +68,7 @@ const EMPTY_FORM: CreateLinkFormState = {
   event_date: '',
   event_location: '',
   registration_mode: '',
+  voice_bot_key: null,
   tags: '',
 };
 
@@ -297,7 +304,12 @@ export function CreateLinkSection() {
   const orgName = profile.data?.org ?? '';
   const { domains: servedDomains, active: activeDomain } = useActiveDomain();
   const { data: cfg } = useAggregatorConfig();
+  const offersVoice = cfg?.registration_modes?.[form.registration_mode]?.offers?.includes('voice');
   const domainCfg = servedDomains.find((d) => d.id === form.domain);
+  // Shares the picker's cached bot list; blocks submit when a bot must be chosen.
+  const voiceBots = useVoiceBots(form.domain);
+  const [botChoiceBlocked, setBotChoiceBlocked] = useState(false);
+  const mustChooseBot = !!offersVoice && needsVoiceBotChoice(voiceBots.data, form.voice_bot_key);
   // Label for the read-only Domain field, from network config.
   const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? form.domain;
 
@@ -316,16 +328,19 @@ export function CreateLinkSection() {
   // The page's domain tabs choose the link's domain, including after the form resets.
   useEffect(() => {
     if (!activeDomain) return;
-    setForm((f) => (f.domain === activeDomain ? f : { ...f, domain: activeDomain }));
+    // A bot chosen for one domain may not exist in another, so the choice resets with the domain.
+    setForm((f) =>
+      f.domain === activeDomain ? f : { ...f, domain: activeDomain, voice_bot_key: null },
+    );
   }, [activeDomain, form.domain]);
 
-  // Default the mode once config loads: `form` if declared, else the first
-  // mode. Only fills while empty, so a user choice is kept.
+  // Default the mode once config loads: `voice_or_form` if declared, else
+  // `form`, else the first mode. Only fills while empty, so a user choice is kept.
   useEffect(() => {
     const modes = cfg?.registration_modes ?? {};
     const keys = Object.keys(modes);
     if (keys.length === 0) return;
-    const fallback = keys.includes('form') ? 'form' : keys[0]!;
+    const fallback = ['voice_or_form', 'form'].find((k) => keys.includes(k)) ?? keys[0]!;
     setForm((f) => (f.registration_mode ? f : { ...f, registration_mode: fallback }));
   }, [cfg?.registration_modes]);
 
@@ -359,6 +374,10 @@ export function CreateLinkSection() {
   const onCreate = async () => {
     setCreateError(null);
     if (!fe.validate()) return;
+    if (mustChooseBot) {
+      setBotChoiceBlocked(true);
+      return;
+    }
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
@@ -366,6 +385,7 @@ export function CreateLinkSection() {
         domain: form.domain,
         status: 'draft',
         registration_mode: form.registration_mode,
+        ...(offersVoice && form.voice_bot_key ? { voice_bot_key: form.voice_bot_key } : {}),
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -480,13 +500,26 @@ export function CreateLinkSection() {
             <SelectField
               {...w('registration_mode').control}
               value={form.registration_mode}
-              onChange={(v) => setForm((f) => ({ ...f, registration_mode: v }))}
+              onChange={(v) =>
+                setForm((f) => ({ ...f, registration_mode: v, voice_bot_key: null }))
+              }
               options={Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => ({
                 value: key,
                 label: tRoot(mode.label_i18n_key),
               }))}
             />
           </Field>
+          {offersVoice && form.domain && (
+            <VoiceBotPicker
+              domain={form.domain}
+              value={form.voice_bot_key}
+              onChange={(key) => {
+                setBotChoiceBlocked(false);
+                setForm((f) => ({ ...f, voice_bot_key: key }));
+              }}
+              showChoiceRequired={botChoiceBlocked}
+            />
+          )}
           {/* Optional free-form tags (comma-separated). Stored on context.tags. */}
           <Field label={t('create_link.field_tags')}>
             <input
@@ -562,6 +595,7 @@ function LinkCard({
   const t = useTranslations('onboarding');
   const requestErrorText = useRequestErrorText();
   const format = useFormatter();
+  const phoneCountries = usePhoneCountries();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const { cardRef, ringed } = useHighlightOnMount(highlight);
@@ -635,6 +669,8 @@ function LinkCard({
     event_location: ctxString('event_location'),
     // Shown read-only. The edit request must not send a new registration_mode.
     registration_mode: link.registration_mode ?? 'form',
+    // The bot is fixed at create time; the edit form never sends it.
+    voice_bot_key: null,
     tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
@@ -747,6 +783,15 @@ function LinkCard({
 
           {isDraft && !editing && (
             <div className="mt-3 text-[12.5px] text-ink-400">{t('link_card.draft_notice')}</div>
+          )}
+
+          {link.voice_bot && (
+            <div className="mt-2 text-[12.5px] text-ink-500">
+              {t('link_card.voice_bot', {
+                name: link.voice_bot.display_name,
+                phone: formatPhoneForReading(link.voice_bot.phone, phoneCountries),
+              })}
+            </div>
           )}
 
           {/* Metadata row */}

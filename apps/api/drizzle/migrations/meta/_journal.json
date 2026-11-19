@@ -274,6 +274,13 @@
       "when": 1792300000000,
       "tag": "0038_coordinator_base_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792400000000,
+      "tag": "0039_registration_links_voice_bot_key",
+      "breakpoints": true
     }
   ]
 }
