@@ -478,8 +478,20 @@ export async function run(args: string[], io: CommandIo): Promise<number> {
     }
     if (err instanceof Refusal) {
       io.out(`REFUSED: ${err.message}`);
-    } else if (err instanceof HttpError) {
+    } else if (err instanceof HttpError && err.status < 500) {
       io.out(`REFUSED: ${err.code}: ${err.detail}`);
+    } else if (err instanceof HttpError) {
+      // The cause is a store, storage or queue error: ids and driver text, no row data.
+      logger.error({
+        operation: 'tools.bulkUpload',
+        status: 'failure',
+        upload_id: uploadId,
+        error_code: err.code,
+        cause_type: err.cause === undefined ? undefined : errorType(err.cause),
+        cause: err.cause === undefined ? undefined : errorMessage(err.cause),
+      });
+      const upload = uploadId === undefined ? '' : `upload ${uploadId}: `;
+      io.out(`FAILED: ${upload}${err.code}: ${err.detail}`);
     } else {
       logger.error({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
       io.out(`FAILED: ${errorMessage(err)}`);

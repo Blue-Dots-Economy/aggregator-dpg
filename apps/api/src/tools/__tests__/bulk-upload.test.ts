@@ -17,6 +17,7 @@ import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { run, type CommandIo } from '../bulk-upload.js';
 import { config } from '../../config.js';
+import { logger } from '../../logger.js';
 import {
   _setBulkUploadsStore,
   BulkUploadsStoreFake,
@@ -287,7 +288,11 @@ describe('bulk-upload command', () => {
         /no recorded Keycloak login/,
       ],
       ['a coordinator with no Signals org', { coordinator: NO_ORG }, /no Signals org/],
-      ['a type the coordinator does not serve', { type: 'provider' }, /./],
+      [
+        'a type the coordinator does not serve',
+        { type: 'provider' },
+        /^REFUSED: DOMAIN_NOT_SERVED: /,
+      ],
       ['an unknown type', { type: 'farmer' }, /participant schema unavailable/],
     ])('refuses %s', async (_name, over, message) => {
       expect(await run(args(over), io())).toBe(1);
@@ -358,7 +363,9 @@ describe('bulk-upload command', () => {
         err(new UpstreamError('ledger down')),
       );
       expect(await run(args(), io())).toBe(1);
-      expect(lines.at(-1)).toMatch(/^REFUSED: CONSENT_WRITE_FAILED: /);
+      expect(lines.at(-1)).toMatch(
+        new RegExp(`^FAILED: upload ${UPLOAD_1}: CONSENT_WRITE_FAILED: `),
+      );
       expect(storage.read(rawRef)).toBeUndefined();
       expect(enqueueMock).not.toHaveBeenCalled();
     });
@@ -366,9 +373,35 @@ describe('bulk-upload command', () => {
     it('keeps the CSV for the watchdog when queueing fails after the upload was marked', async () => {
       enqueueMock.mockRejectedValue(new Error('redis down'));
       expect(await run(args(), io())).toBe(1);
-      expect(lines.at(-1)).toMatch(/^REFUSED: INTERNAL: /);
+      expect(lines.at(-1)).toMatch(new RegExp(`^FAILED: upload ${UPLOAD_1}: INTERNAL: `));
       expect(store.get(UPLOAD_1)?.status).toBe('uploaded');
       expect(storage.read(rawRef)?.toString()).toBe(csv);
+    });
+
+    it('prints a server-side failure as FAILED and logs its cause', async () => {
+      const logged = vi.spyOn(logger, 'error');
+      enqueueMock.mockRejectedValue(new TypeError('redis down'));
+      expect(await run(args(), io())).toBe(1);
+      expect(lines.at(-1)).toMatch(/^FAILED: upload .+: INTERNAL: /);
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'tools.bulkUpload',
+          status: 'failure',
+          upload_id: UPLOAD_1,
+          error_code: 'INTERNAL',
+          cause_type: 'TypeError',
+          cause: 'redis down',
+        }),
+      );
+    });
+
+    it('prints FAILED without an id when the upload could not be created', async () => {
+      vi.spyOn(store, 'create').mockResolvedValue({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+      });
+      expect(await run(args(), io())).toBe(1);
+      expect(lines).toEqual([expect.stringMatching(/^FAILED: DB_UNAVAILABLE: /)]);
     });
 
     const unknownState = `FAILED: upload ${UPLOAD_1} state unknown after timeout — check with --upload-id ${UPLOAD_1} before retrying`;

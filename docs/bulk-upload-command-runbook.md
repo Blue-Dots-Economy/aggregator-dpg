@@ -80,6 +80,7 @@ Do not run the upload again unless it ended `failed` or `file_failed`; a second 
 | `REFUSED: missing columns: …` / `unknown columns: …`    | The CSV header does not match the template; nothing was created.                                                                              |
 | `REFUSED: the file is not valid UTF-8`                  | Save the CSV as UTF-8 and run it again; nothing was created.                                                                                  |
 | `REFUSED: rate limited; retry in Ns`                    | Wait, or use `--skip-rate-limit` for the initial load.                                                                                        |
+| `FAILED: upload …: DB_UNAVAILABLE: …` (or another code) | A server-side failure (database, consent ledger, queue). The logs carry its cause. Check the upload with `--upload-id` before retrying.       |
 | `FAILED: … timed out after N ms`                        | A call hung before the upload was created; nothing was created.                                                                               |
 | `FAILED: upload … state unknown after timeout — …`      | A call hung after the upload was created. It may still start: run `--upload-id <id>` and only retry if it never started. Nothing was deleted. |
 | `WARNING: upload …: its CSV was left in storage (…)`    | The upload failed and its stored CSV could not be deleted; tell the platform team the upload id.                                              |
