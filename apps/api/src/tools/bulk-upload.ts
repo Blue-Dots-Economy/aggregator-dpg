@@ -6,10 +6,10 @@
  * docs/bulk-upload-command-runbook.md.
  *
  *   node dist/tools/bulk-upload.js --coordinator <email or user id> --type <profile type> \
- *     --file <path.csv | -> --operator <name> [--skip-rate-limit]
+ *     --file - --operator <name> [--skip-rate-limit] < file.csv
  *   node dist/tools/bulk-upload.js --coordinator <email or user id> --upload-id <id> [--errors-csv]
  *
- * `--file -` reads the CSV from stdin. The second form waits for an upload and
+ * The CSV is read from stdin; `--file` takes only `-`. The second form waits for an upload and
  * prints its result, or with `--errors-csv` writes its errors report to stdout.
  * Messages and logs go to stderr. The operator is recorded in the logs only.
  * Exit codes: 0 ok, 1 refused or failed, 2 usage.
@@ -18,7 +18,6 @@
 import './log-to-stderr.js';
 import '../env.js';
 import { existsSync, realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import type { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
@@ -51,7 +50,7 @@ import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
 
 const USAGE = [
-  'usage: bulk-upload --coordinator <email or user id> --type <profile type> --file <path.csv | -> --operator <name> [--skip-rate-limit]',
+  'usage: bulk-upload --coordinator <email or user id> --type <profile type> --file - --operator <name> [--skip-rate-limit] < file.csv',
   '       bulk-upload --coordinator <email or user id> --upload-id <id> [--errors-csv]',
 ].join('\n');
 
@@ -96,16 +95,9 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
   }
 }
 
-/** Reads the CSV from a path, or from stdin for `-`, refusing more than the upload limit. */
-async function readCsv(file: string, stdin: Readable): Promise<Buffer> {
+/** Reads the CSV from stdin, refusing more than the upload limit. */
+async function readCsv(stdin: Readable): Promise<Buffer> {
   const max = config.BULK_UPLOAD_MAX_BYTES;
-  if (file !== '-') {
-    const body = await readFile(file).catch((e: unknown) => {
-      throw new Refusal(`cannot read ${file}: ${errorMessage(e)}`);
-    });
-    if (body.length > max) throw new Refusal(`the file is ${body.length} bytes; max ${max}`);
-    return body;
-  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of stdin) {
@@ -318,13 +310,14 @@ async function upload(values: Flags, coordinatorRef: string, io: CommandIo): Pro
   if (!type || !file || !operator) {
     throw new UsageError('--type, --file and --operator are required');
   }
+  if (file !== '-') throw new UsageError('--file must be - (the CSV is read from stdin)');
   try {
     provisionedBy(operator);
   } catch {
     throw new UsageError('--operator must be non-empty with no whitespace or ":"');
   }
 
-  const body = await readCsv(file, io.stdin);
+  const body = await readCsv(io.stdin);
   if (body.length === 0) throw new Refusal('the file is empty');
   const coordinator = await activeCoordinator(coordinatorRef, io);
   if (!coordinator.signalstackOrgId) {

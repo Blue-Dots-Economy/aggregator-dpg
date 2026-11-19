@@ -2,7 +2,7 @@
 
 Our team uses this command to run a bulk upload of seekers or providers for a coordinator who has not signed in yet. It goes through the same pipeline as a portal upload: the same storage, attestation, processing job, row checks and errors report. The upload then appears on that coordinator's Onboarding page and My Blue Dots like any other.
 
-The command ships in the API image (`dist/tools/bulk-upload.js`) and runs in the API pod. The image has no shell or `tar`, so `kubectl cp` does not work: the CSV goes in on stdin and the errors report comes out on stdout. Messages and logs go to stderr, so they show in the terminal but never in a file you save from stdout.
+The command ships in the API image (`dist/tools/bulk-upload.js`) and runs in the API pod. The image has no shell or `tar`, so `kubectl cp` does not work: the CSV goes in on stdin and the errors report comes out on stdout. `--file` takes only `-`; any other value is a usage error (exit code 2). Messages and logs go to stderr, so they show in the terminal but never in a file you save from stdout.
 
 ## Before you start
 

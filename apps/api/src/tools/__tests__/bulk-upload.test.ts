@@ -1,6 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _setObjectStorage } from '@aggregator-dpg/object-storage';
@@ -147,9 +145,11 @@ class StoreFake extends BulkUploadsStoreBase {
   }
 }
 
+/** A stdin stream carrying `text`. */
+const stdinOf = (text: string | Buffer): Readable =>
+  Readable.from([Buffer.isBuffer(text) ? text : Buffer.from(text)]);
+
 describe('bulk-upload command', () => {
-  let dir: string;
-  let csvPath: string;
   let csv: string;
 
   let store: StoreFake;
@@ -160,7 +160,7 @@ describe('bulk-upload command', () => {
   let csvOut: PassThrough;
   let csvChunks: Buffer[];
 
-  const io = (stdin: Readable = Readable.from([]), over: Partial<CommandIo> = {}): CommandIo => ({
+  const io = (stdin: Readable = stdinOf(csv), over: Partial<CommandIo> = {}): CommandIo => ({
     out: (l) => lines.push(l),
     csvOut,
     stdin,
@@ -171,7 +171,7 @@ describe('bulk-upload command', () => {
     ...over,
   });
   const args = (over: Record<string, string> = {}, extra: string[] = []) => {
-    const v = { coordinator: COORD, type: 'seeker', file: csvPath, operator: 'ops-team', ...over };
+    const v = { coordinator: COORD, type: 'seeker', file: '-', operator: 'ops-team', ...over };
     return [
       '--coordinator',
       v.coordinator,
@@ -193,10 +193,6 @@ describe('bulk-upload command', () => {
     _setNetworkConfig(buildBlueDotConfig());
     _setSchemaLoader(new SchemaLoaderFake());
     csv = 'name,phone,age\nAsha,9000000001,24\n';
-
-    dir = await mkdtemp(path.join(tmpdir(), 'bulk-upload-cmd-'));
-    csvPath = path.join(dir, 'seekers.csv');
-    await writeFile(csvPath, csv);
     lines = [];
     csvChunks = [];
     csvOut = new PassThrough();
@@ -264,7 +260,6 @@ describe('bulk-upload command', () => {
   afterEach(async () => {
     _setBulkUploadRateChecker(null);
     _setSchemaLoader(null);
-    await rm(dir, { recursive: true, force: true });
   });
 
   describe('a new upload', () => {
@@ -288,11 +283,8 @@ describe('bulk-upload command', () => {
       ]);
     });
 
-    it('reads the CSV from stdin and finds the coordinator by email', async () => {
-      const code = await run(
-        args({ coordinator: 'coord@example.org', file: '-' }),
-        io(Readable.from([Buffer.from(csv)])),
-      );
+    it('finds the coordinator by email', async () => {
+      const code = await run(args({ coordinator: 'coord@example.org' }), io());
       expect(code).toBe(0);
       expect(storage.read(rawRef)?.toString()).toBe(csv);
     });
@@ -348,29 +340,21 @@ describe('bulk-upload command', () => {
       const [header = '', row = ''] = csv.split('\n');
       const [, ...rest] = header.split(',');
       const [, ...restCells] = row.split(',');
-      await writeFile(csvPath, `${rest.join(',')}\n${restCells.join(',')}\n`);
-      expect(await run(args(), io())).toBe(1);
+      expect(await run(args(), io(stdinOf(`${rest.join(',')}\n${restCells.join(',')}\n`)))).toBe(1);
       expect(lines[0]).toMatch(/^REFUSED: missing columns: /);
 
-      await writeFile(csvPath, `${header},shoe_size\n${row},9\n`);
       lines = [];
-      expect(await run(args(), io())).toBe(1);
+      expect(await run(args(), io(stdinOf(`${header},shoe_size\n${row},9\n`)))).toBe(1);
       expect(lines).toEqual(['REFUSED: unknown columns: shoe_size']);
       expect(store.rows.size).toBe(0);
     });
 
-    it('refuses an empty, unreadable or oversized file', async () => {
-      await writeFile(csvPath, '');
-      expect(await run(args(), io())).toBe(1);
-      expect(await run(args({ file: path.join(dir, 'missing.csv') }), io())).toBe(1);
+    it('refuses an empty or oversized file', async () => {
+      expect(await run(args(), io(Readable.from([])))).toBe(1);
       const big = Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1, 'a');
-      await writeFile(csvPath, big);
-      expect(await run(args(), io())).toBe(1);
-      expect(await run(args({ file: '-' }), io(Readable.from([big])))).toBe(1);
+      expect(await run(args(), io(stdinOf(big)))).toBe(1);
       expect(lines).toEqual([
         'REFUSED: the file is empty',
-        expect.stringMatching(/^REFUSED: cannot read /),
-        `REFUSED: the file is ${big.length} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}`,
         `REFUSED: the file is larger than ${config.BULK_UPLOAD_MAX_BYTES} bytes`,
       ]);
       expect(store.rows.size).toBe(0);
@@ -470,6 +454,12 @@ describe('bulk-upload command', () => {
       expect(await run(argv, io())).toBe(2);
       expect(lines[0]).toContain(message);
       expect(lines[1]).toMatch(/^usage: /);
+    });
+
+    it.each(['seekers.csv', '/etc/passwd', './-'])('answers 2 for --file %j', async (file) => {
+      expect(await run(args({ file }), io())).toBe(2);
+      expect(lines[0]).toBe('--file must be - (the CSV is read from stdin)');
+      expect(store.rows.size).toBe(0);
     });
 
     it.each(['ops:team', 'ops team'])('answers 2 for operator %j', async (operator) => {
