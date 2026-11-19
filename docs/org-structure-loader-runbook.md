@@ -11,7 +11,7 @@ Rehearse the whole runbook on UAT before UP.
 ## 1. Rules before you start
 
 - **Nobody is told to log in until the terms screen (#1120) is live on the instance.** A provisioned account has accepted nothing; without the terms screen it would sign in without ever seeing the terms.
-- The CSV files hold names, emails and phones. They stay on your machine: the tool reads them from stdin and writes the report to stdout, so **no file is ever written in the pod**. Never paste rows into a ticket or chat.
+- The CSV files hold names, emails and phones. They stay on your machine: the tool reads them from stdin and writes the report to stdout (its default), so **no file is ever written in the pod**. Never paste rows into a ticket or chat.
 - The reports hold names and emails too. Treat them like the input files, and delete all of them after handing the results over (§7).
 - `kubectl exec` stdout and stderr go only to your terminal. They do not reach the pod's logs. The tool's own log lines (ids, counts and error codes) go to stderr.
 - The tool needs the API's full environment (database, Keycloak, Signals, Redis), so it runs only in an **API pod**. Name the container explicitly with `-c api` (adjust if the deployment names it differently). Every command below is run exactly this way; the UAT rehearsal must use the same commands.
@@ -27,21 +27,22 @@ kubectl -n <ns> exec <api-pod> -c api -- node dist/tools/org-loader.js template 
 kubectl -n <ns> exec <api-pod> -c api -- node dist/tools/org-loader.js template --kind coordinators > coordinators-header.csv
 ```
 
-`template` prints one header line: the fixed columns, then every field of the instance's form except the fixed keys and `consent`. Share the two headers with product as a Google Sheet (one tab per file); export each tab as CSV when it comes back.
+`template` prints one header line: the fixed columns, then every field of the instance's form except the fixed keys, `consent` and (coordinators) `url`, which belongs to the org. Share the two headers with product as a Google Sheet (one tab per file); export each tab as CSV when it comes back.
 
 Headers today (check against `template`; it is the source of truth):
 
-| Instance                   | `orgs.csv`                                                                                                                                                                                                                                                                                                                          | `coordinators.csv`                                    |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `blue_dot` / `up-gzb` (UP) | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,aggregator_type,organisation_type,organisation_sub_type_educational,organisation_sub_type_non_educational,management_type,address_streetAddress,address_addressLocality,address_addressDistrict,address_addressRegion,address_postalCode,address_addressCountry` | `org,name,phone,email,profile_types,sub_org_name,url` |
-| `blue_dot` / `ka-dhwd`     | same as UP                                                                                                                                                                                                                                                                                                                          | same as UP                                            |
-| `purple_dot` / `alimco`    | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,aggregator_type,organisation_type,address_*` (six address columns as above)                                                                                                                                                                                      | `org,name,phone,email,profile_types,sub_org_name,url` |
-| shared default (no brand)  | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,domains,address_*`                                                                                                                                                                                                                                               | `org,name,phone,email,profile_types,url`              |
+| Instance                   | `orgs.csv`                                                                                                                                                                                                                                                                                                                          | `coordinators.csv`                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `blue_dot` / `up-gzb` (UP) | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,aggregator_type,organisation_type,organisation_sub_type_educational,organisation_sub_type_non_educational,management_type,address_streetAddress,address_addressLocality,address_addressDistrict,address_addressRegion,address_postalCode,address_addressCountry` | `org,name,phone,email,profile_types,sub_org_name` |
+| `blue_dot` / `ka-dhwd`     | same as UP                                                                                                                                                                                                                                                                                                                          | same as UP                                        |
+| `purple_dot` / `alimco`    | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,aggregator_type,organisation_type,address_*` (six address columns as above)                                                                                                                                                                                      | `org,name,phone,email,profile_types,sub_org_name` |
+| shared default (no brand)  | `name,parent,owner_name,owner_phone,owner_email,website,gst_number,domains,address_*`                                                                                                                                                                                                                                               | `org,name,phone,email,profile_types`              |
 
 How to fill them in:
 
 - **`orgs.csv`**, one row per org, any order. `name` is the org's display name, unique (case-insensitive). `parent` is the name of the parent org, from this file or already on the instance; blank means directly under the network facilitator. `owner_name`, `owner_phone`, `owner_email` are required. One owner may own several orgs: repeat the same name, email and phone on each row. Fields the form requires (UP: `aggregator_type`, `organisation_type`, `management_type`) are required here too, with the form's values. A list field (for example `aggregator_type`, `domains`) takes several values separated by `;`.
-- **`coordinators.csv`**, one row per coordinator. `org` is the org's name, from `orgs.csv` or already on the instance (not the network facilitator). `name` is the person. `profile_types` is required: one or more of the network's domain ids (for example `seeker;provider`), separated by `;`.
+- **`coordinators.csv`**, one row per coordinator. `org` is the org's name, from `orgs.csv` or already on the instance (not the network facilitator). `name` is the person. `profile_types` is required: one or more of the network's domain ids (for example `seeker;provider`), separated by `;`. There is no `url` column: the website belongs to the org (`website` in `orgs.csv`), and a coordinator row that sets `url` fails with `ORG_DETAILS_READ_ONLY`.
+- Keep the headers exactly as `template` prints them. An `orgs.csv` column that is not in the template fails with `UNKNOWN_COLUMN` (line 1), because its values would otherwise be dropped without a word.
 - Phones may be written as 10 digits or with `+91`. One email and one phone belong to one person across owners and coordinators; a person cannot be both an owner and a coordinator.
 - Either file may be left out, for example coordinators for orgs that already exist.
 
@@ -70,6 +71,8 @@ kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js check 
 | Code                                            | Meaning and fix                                                                                                                                |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MISSING_COLUMN`, `REQUIRED`, `MALFORMED_ROW`   | A header column, a required cell, or the row's CSV shape is wrong. Fix the sheet.                                                              |
+| `UNKNOWN_COLUMN`                                | An `orgs.csv` header (named, line 1) is not a template column, for example a typo. Rename it to the template's column or remove it.            |
+| `ORG_DETAILS_READ_ONLY`                         | A coordinator row sets `url`, which belongs to the org. Remove the column; put the website on the org row (`website`).                         |
 | `SCHEMA_VALIDATION`, `INVALID_PHONE`            | The named field fails the instance's form (wrong value, bad format). Fix the cell.                                                             |
 | `DUPLICATE_ORG_NAME`, `DUPLICATE_COORDINATOR`   | The same org name, or the same coordinator email or phone, appears twice.                                                                      |
 | `OWNER_CONTACT_MISMATCH`                        | One owner email appears with different names or phones.                                                                                        |
@@ -93,19 +96,19 @@ Repeat until `CHECK PASSED`.
 
 ```sh
 kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js apply \
-  --orgs - --operator <your name> --report - < orgs.csv > orgs-report.csv
+  --orgs - --operator <your name> < orgs.csv > orgs-report.csv
 
 # only after the orgs apply exits 0, and the coordinators check passes:
 kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js apply \
-  --coordinators - --operator <your name> --report - < coordinators.csv > coordinators-report.csv
+  --coordinators - --operator <your name> < coordinators.csv > coordinators-report.csv
 ```
 
-With `--report -` the report CSV is the only thing on stdout, so `> orgs-report.csv` captures it on your machine; the progress lines, problems and counts appear on your terminal through stderr.
+The report goes to stdout by default (the same as `--report -`), and it is the only thing on stdout, so `> orgs-report.csv` captures it on your machine; the progress lines, problems and counts appear on your terminal through stderr.
 
 - `apply` runs every check of `check` first and **refuses to start** on any problem (exit 1, nothing written).
 - It then creates the orgs (parents first), approves each one, then creates and approves the coordinators. It **stops at the first failed row**.
-- Always use `--report -` in the pod. Given a path instead, the tool writes the report there (default: `org-loader-report-<time>.csv` in the temp directory), which is for local runs only.
-- It loads the RBAC runtime first, so each account's token roles are synced and the outcome recorded. A failed or deferred sync never fails the row; the API's background sweep repairs it.
+- In the pod, leave `--report` out (or give `--report -`). `--report <path>` writes the report to a new file at that path instead, which is for local runs only: a file written in the pod is lost with the pod.
+- It loads the RBAC runtime first, so each account's token roles are synced and the outcome recorded. `rolesSync` may read `deferred`: the approve services start their own background sync for the same account, and when that sync holds the account's lock the loader's sync marks the account for the sweep instead of writing. A failed or deferred sync never fails the row; the API's background sweep repairs it.
 - Exit codes: 0 every row loaded, 1 refused or a row failed, 2 usage.
 
 Check the exit code (`echo $?`) and the last stderr line before the next run.
@@ -131,12 +134,14 @@ On a failure the command prints `APPLY FAILED at <file>:<line> <code>`. Common c
 
 - `IDP_UNAVAILABLE`, `SIGNALSTACK_UNAVAILABLE`, `DB_UNAVAILABLE`: Keycloak, Signals or the database failed. Fix it and rerun.
 - A Keycloak user or group already in the way (for example `USER_EXISTS`): the loader never adopts a Keycloak user or group found only by email or name. Look at it in the Keycloak admin console and remove it if it is a leftover, then rerun.
+  - The realm is shared with Signals. Before deleting a "leftover" user, confirm it has **no `aggregator_id` attribute** and **no Signals login** (it is not a Signals account). If either is there, it is a real account: talk to the team instead.
+  - A run killed mid-row (Ctrl-C, a pod restart) can leave an orphan Keycloak group `org-<slug>` that no org row links to. The rerun creates the org again and its group create then fails. Find the group by that name in the admin console, confirm no org on the instance uses it (its `org_id` attribute matches no org), delete it, then rerun.
 - `ORG_INACTIVE`, `NO_PROFILE_TYPES`, `NOT_PROVISIONED`: the row on the instance is not one the loader can finish. Talk to the team before touching it.
 - `UNEXPECTED`: a step threw; the log line for the row has the error type.
 
 **Rerunning is safe.** Run `check` and `apply` again with the **same file** (and a new local report name, for example `orgs-report-2.csv`). Rows already loaded are `already_loaded` and skipped; a row left pending by the stopped run is approved (`resumed`); a row left half-created (no Keycloak user or group) is removed and created again (`resumed`). Only the Keycloak user or group linked to that row by id is removed.
 
-`rolesSync` other than `synced` / `off` needs no action: the sweep repairs it within `RBAC_TOKEN_ROLES_SWEEP_MS`.
+`rolesSync` other than `synced` / `off` needs no action: `deferred` means the approve service's own background sync held that account's lock, and the sweep repairs anything left within `RBAC_TOKEN_ROLES_SWEEP_MS`.
 
 ## 7. Delete the files
 
