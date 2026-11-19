@@ -45,7 +45,6 @@ const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.
 vi.mock('@aggregator-dpg/config-loader/fs', () => ({ loadConsentConfig: loadConsentConfigMock }));
 
 const COORD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const PENDING = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const NO_LOGIN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const NO_ORG = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const UPLOAD_1 = '11111111-1111-4111-8111-111111111111';
@@ -194,7 +193,6 @@ describe('bulk-upload command', () => {
         signalstackOrgId: 'sig-1',
         contactEmail: 'coord@example.org',
       }),
-      buildCoordinator({ id: PENDING, orgSlug: 'p', serves: ['seeker'], status: 'pending' }),
       buildCoordinator({
         id: NO_LOGIN,
         orgSlug: 'n',
@@ -275,6 +273,32 @@ describe('bulk-upload command', () => {
       expect(lines.filter((l) => l === '  row_processing…')).toHaveLength(1);
     });
 
+    it('stops waiting at the deadline after several polls', async () => {
+      enqueueMock.mockResolvedValue(undefined);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const sleeps: number[] = [];
+        const sleep = async (ms: number): Promise<void> => {
+          sleeps.push(ms);
+          vi.setSystemTime(Date.now() + ms);
+        };
+        const reads = vi.spyOn(store, 'findById');
+        const code = await run(
+          args(),
+          io(undefined, { pollIntervalMs: 5_000, pollTimeoutMs: 20_000, sleep }),
+        );
+        expect(code).toBe(1);
+        expect(sleeps).toEqual([5_000, 5_000, 5_000, 5_000]);
+        // One read inside the start, then one per poll: at 0, 5, 10, 15 and 20 s.
+        expect(reads).toHaveBeenCalledTimes(6);
+        expect(lines.at(-1)).toBe(
+          `upload ${UPLOAD_1} is still processing; check later with --upload-id ${UPLOAD_1}`,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('reports a run still processing when the wait runs out', async () => {
       enqueueMock.mockResolvedValue(undefined);
       expect(await run(args(), io(undefined, { pollTimeoutMs: 0 }))).toBe(1);
@@ -297,7 +321,6 @@ describe('bulk-upload command', () => {
   describe('refusals before anything is written', () => {
     it.each([
       ['an unknown coordinator', { coordinator: 'x@example.org' }, /no coordinator/],
-      ['an inactive coordinator', { coordinator: PENDING }, /is pending, not active/],
       [
         'a coordinator with no recorded login',
         { coordinator: NO_LOGIN },
@@ -315,6 +338,20 @@ describe('bulk-upload command', () => {
       expect(lines.join('\n')).toMatch(message);
       expect(store.get(UPLOAD_1)).toBeUndefined();
     });
+
+    it.each(['pending', 'inactive', 'retired'] as const)(
+      'refuses a %s coordinator',
+      async (status) => {
+        const users = new UserStoreFake();
+        users.seed([
+          buildCoordinator({ id: COORD, serves: ['seeker'], status, signalstackOrgId: 'sig-1' }),
+        ]);
+        _setUserStore(users);
+        expect(await run(args(), io())).toBe(1);
+        expect(lines).toEqual([`REFUSED: coordinator ${COORD} is ${status}, not active`]);
+        expect(store.get(UPLOAD_1)).toBeUndefined();
+      },
+    );
 
     it('refuses a header the worker would reject', async () => {
       const [header = '', row = ''] = csv.split('\n');
