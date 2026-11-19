@@ -5,13 +5,16 @@
 -- Rows: `check_id | category | n` (`gate` must be 0; `info` is reported).
 \set ON_ERROR_STOP on
 
--- V1  coordinators with no linked registration consent row
+-- V1  coordinators with no linked acceptance (registration, backfill or
+--     first login), excluding accounts an operator provisioned that have not
+--     accepted yet (`created_by = 'provisioned:<operator>'`)
 SELECT 'V1 coordinator_without_consent' AS check_id, 'gate' AS category, count(*) AS n
   FROM users u
  WHERE u.user_type = 'coordinator'
+   AND u.created_by NOT LIKE 'provisioned:%'
    AND NOT EXISTS (SELECT 1 FROM consent_record c
                     WHERE c.user_id = u.id
-                      AND c.source IN ('registration', 'registration-backfill')
+                      AND c.source IN ('registration', 'registration-backfill', 'first-login')
                       AND c.valid_till IS NOT NULL);
 
 -- V2  ledger links disagreeing with the audit key (the CHECK guarantees 0)
