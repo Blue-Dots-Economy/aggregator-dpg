@@ -1,8 +1,9 @@
 /**
  * Shared GET handler for the BFF's onboarding metrics routes.
  *
- * Both routes take the same `from` / `to` range, check it with the API's
- * rules, and forward it with the caller's own token via `callApi`.
+ * Both routes take the same `from` / `to` range and optional `domain`
+ * (profile type), check them with the API's rules, and forward them with the
+ * caller's own token via `callApi`.
  *
  * @module apps/web/src/lib/onboarding-proxy
  */
@@ -13,18 +14,19 @@ import { callApi } from '@/lib/upstream-client';
 import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
 import { parseQuery } from '@/lib/bff-input';
 
-/** Same rules as the API's onboarding `RangeQuerySchema`: ISO datetimes with an offset or `Z`. */
+/** Same rules as the API's onboarding `RangeQuerySchema`: ISO datetimes with an offset or `Z`, and a profile type. */
 const RangeQuerySchema = z.object({
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),
+  domain: z.string().min(1).optional(),
 });
 
 /**
- * Forwards an onboarding metrics read after checking its range query.
+ * Forwards an onboarding metrics read after checking its query.
  *
  * @param req - The incoming request.
  * @param path - Upstream path, e.g. `/v1/onboarding/summary`.
- * @returns The upstream response, a 400 for a bad range, or the proxy's 401 / 503.
+ * @returns The upstream response, a 400 for a bad query, or the proxy's 401 / 503.
  */
 export async function proxyOnboardingRead(req: NextRequest, path: string): Promise<NextResponse> {
   const query = parseQuery(req.nextUrl.searchParams, RangeQuerySchema);

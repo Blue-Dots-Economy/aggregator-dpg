@@ -19531,7 +19531,7 @@
         "tags": [
           "onboarding"
         ],
-        "description": "Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.",
+        "description": "Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates and narrowed to one profile type by ?domain=.",
         "parameters": [
           {
             "schema": {
@@ -19552,6 +19552,16 @@
             "in": "query",
             "name": "to",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "description": "Profile type (network domain id) to count; omitted counts every profile type."
           }
         ],
         "security": [
@@ -19775,7 +19785,7 @@
         "tags": [
           "onboarding"
         ],
-        "description": "Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.",
+        "description": "Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to= and narrowed to one profile type by ?domain=.",
         "parameters": [
           {
             "schema": {
@@ -19796,6 +19806,16 @@
             "in": "query",
             "name": "to",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "description": "Profile type (network domain id) to count; omitted counts every profile type."
           }
         ],
         "security": [

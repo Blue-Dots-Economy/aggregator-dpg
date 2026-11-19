@@ -62,6 +62,7 @@ describe('GET /api/onboarding/by-source query check', () => {
 
   it.each([
     ['', ''],
+    ['?domain=provider', '?domain=provider'],
     [
       '?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z',
       '?from=2026-01-01T00%3A00%3A00Z&to=2026-02-01T00%3A00%3A00Z',

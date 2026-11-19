@@ -63,24 +63,40 @@ export function useDeactivateLink() {
   });
 }
 
-export function useOnboardingSummary() {
+/** Options of the onboarding metrics reads. */
+export interface OnboardingMetricsOptions {
+  /** Profile type to count; omitted counts every profile type. */
+  domain?: string | undefined;
+  /** `false` holds the read, e.g. until the active profile type is known. */
+  enabled?: boolean;
+}
+
+/**
+ * Fetches the onboarding totals, for one profile type when `domain` is set.
+ *
+ * @returns The React Query result for the totals.
+ */
+export function useOnboardingSummary({ domain, enabled = true }: OnboardingMetricsOptions = {}) {
   return useQuery<OnboardingSummary>({
-    queryKey: ['onboarding', 'summary'],
-    queryFn: () => onboardingService.summary(),
+    queryKey: ['onboarding', 'summary', domain ?? null],
+    queryFn: () => onboardingService.summary(domain ? { domain } : {}),
     staleTime: 30_000,
+    enabled,
   });
 }
 
 /**
- * Fetches onboarding counters grouped by entry source (`bulk` / `link`).
+ * Fetches onboarding counters grouped by entry source (`bulk` / `link`),
+ * for one profile type when `domain` is set.
  *
  * @returns The React Query result for the by-source counters.
  */
-export function useOnboardingBySource() {
+export function useOnboardingBySource({ domain, enabled = true }: OnboardingMetricsOptions = {}) {
   return useQuery<OnboardingBySource>({
-    queryKey: ['onboarding', 'by-source'],
-    queryFn: () => onboardingService.bySource(),
+    queryKey: ['onboarding', 'by-source', domain ?? null],
+    queryFn: () => onboardingService.bySource(domain ? { domain } : {}),
     staleTime: 30_000,
+    enabled,
   });
 }
 

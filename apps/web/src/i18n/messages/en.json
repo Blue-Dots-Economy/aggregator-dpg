@@ -225,7 +225,8 @@
     },
     "onboardingGroup": {
       "title": "Onboarding",
-      "helper": "All profile types, rolled up across your network",
+      "helper": "{type}, rolled up across your network",
+      "helper_no_type": "Rolled up across your network",
       "view": "View onboarding",
       "total": "Total submissions",
       "total_sub": "All entry modes",
