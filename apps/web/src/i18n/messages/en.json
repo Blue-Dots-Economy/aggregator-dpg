@@ -622,7 +622,7 @@
     },
     "voice_or_form": {
       "label": "Voice or Form",
-      "hint": "Participants choose to request a call from the voice assistant or fill the form online."
+      "hint": "Participants choose to call the voice assistant or fill the form online."
     }
   },
   "auth": {
