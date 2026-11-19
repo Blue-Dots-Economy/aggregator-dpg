@@ -85,6 +85,8 @@ vi.mock('next-intl', () => ({
       open_menu: 'Open menu',
       close_menu: 'Close menu',
       menu_label: 'Main navigation',
+      back_to_console: 'Back to console',
+      acting_sublabel: `Coordinator · ${vars?.org ?? ''}`,
     };
     return map[key] ?? key;
   },
@@ -424,6 +426,51 @@ describe('<Sidebar /> mobile navigation drawer', () => {
     useCan.mockReturnValue((c: string) => c !== 'profiles.onboard');
     render(<Sidebar />);
     expect(screen.queryAllByText('Onboarding')).toHaveLength(0);
+  });
+});
+
+describe("<Sidebar /> acting as the owner's own coordinator account", () => {
+  function mockActing() {
+    useAuth.mockReturnValue({
+      user: { id: 'c1', org: 'o@x.org', name: 'Asha', email: 'o@x.org' },
+      signOut: vi.fn(),
+      supportEnabled: false,
+      acting: true,
+      actingOrgName: 'Acme Jobs',
+    });
+  }
+
+  it('shows Back to console above Overview, leaving acting mode through the GET route', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    const back = within(aside).getByRole('link', { name: /Back to console/ });
+    expect(back).toHaveAttribute('href', '/api/auth/acting/leave?returnTo=%2Fconsole');
+    const overview = within(aside).getByText('Overview');
+    expect(back.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('links Account Details to the console profile', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    expect(within(aside).getByRole('link', { name: /Profile/ })).toHaveAttribute(
+      'href',
+      '/console/profile',
+    );
+  });
+
+  it('shows the coordinator account name and its organisation in the footer', () => {
+    mockActing();
+    render(<Sidebar />);
+    expect(screen.getAllByText('Asha').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Coordinator · Acme Jobs').length).toBeGreaterThan(0);
+  });
+
+  it('shows no Back to console for a plain coordinator', () => {
+    render(<Sidebar />);
+    expect(screen.queryByRole('link', { name: /Back to console/ })).toBeNull();
+    expect(screen.getAllByRole('link', { name: /Profile/ })[0]).toHaveAttribute('href', '/profile');
   });
 });
 

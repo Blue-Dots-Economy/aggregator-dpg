@@ -20,6 +20,32 @@ import {
 } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
+import { actingLeaveHref, CONSOLE_HOME } from '@/lib/acting';
+
+/** One nav entry's anchor: a `Link`, or a plain `<a>` for a {@link NavItem.fullPage} item. */
+function NavLink({
+  item,
+  children,
+  ...rest
+}: Readonly<{
+  item: NavItem;
+  children: ReactNode;
+  className: string;
+  onClick?: () => void;
+}>) {
+  if (item.fullPage) {
+    return (
+      <a href={item.to} {...rest}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={item.to} {...rest}>
+      {children}
+    </Link>
+  );
+}
 
 /** The icon of a group heading, drawn like a link's icon. */
 function SectionIcon({ name }: Readonly<{ name: IconName }>) {
@@ -41,6 +67,17 @@ export interface NavItem {
   section?: string;
   /** Icon of the group heading, on the group's first link. */
   sectionIcon?: IconName;
+  /**
+   * Render a plain anchor (a full page load, no prefetch), for a target that
+   * changes the session on the way, such as a page outside acting mode.
+   */
+  fullPage?: boolean;
+}
+
+/** A link shown above the Overview label, such as "Back to console". */
+export interface SidebarTopLink {
+  href: string;
+  label: string;
 }
 
 /** The account card at the foot of the sidebar. */
@@ -135,6 +172,8 @@ interface SidebarPanelProps {
   /** Show the "Overview" label above the links. */
   overviewLabel: boolean;
   account: SidebarAccount;
+  /** Shown above the Overview label. */
+  topLink?: SidebarTopLink | undefined;
   pathname: string | null;
   /** Rendered beside the brand, such as the drawer's close button on mobile. */
   headerAction?: ReactNode;
@@ -152,6 +191,7 @@ function SidebarPanel({
   nav,
   overviewLabel,
   account,
+  topLink,
   pathname,
   headerAction,
   onNavigate,
@@ -201,6 +241,18 @@ function SidebarPanel({
       </div>
 
       <div className="px-3">
+        {topLink ? (
+          // A plain anchor: the target is a Route Handler that changes the
+          // session, so it must never be prefetched.
+          <a
+            href={topLink.href}
+            {...(onNavigate ? { onClick: onNavigate } : {})}
+            className="mb-1 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium text-(--bd-fg-muted) transition-all hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
+          >
+            <I.arrowL size={18} stroke={1.7} />
+            <span>{topLink.label}</span>
+          </a>
+        ) : null}
         {overviewLabel ? (
           <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
             {t('overview')}
@@ -230,8 +282,8 @@ function SidebarPanel({
                   </button>
                 ) : null}
                 {sectionOpen ? (
-                  <Link
-                    href={n.to}
+                  <NavLink
+                    item={n}
                     {...(onNavigate ? { onClick: onNavigate } : {})}
                     className={cn(
                       'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
@@ -256,7 +308,7 @@ function SidebarPanel({
                         {n.badge}
                       </span>
                     )}
-                  </Link>
+                  </NavLink>
                 ) : null}
               </Fragment>
             );
@@ -398,6 +450,8 @@ export interface AppSidebarProps {
   /** Under the brand name when the brand has no logo, e.g. "Aggregator Portal". */
   portalLabel: string;
   account: SidebarAccount;
+  /** A link above the Overview label, such as "Back to console". */
+  topLink?: SidebarTopLink;
 }
 
 /**
@@ -412,7 +466,13 @@ export interface AppSidebarProps {
  *
  * @param props - The links, the label under the brand and the account card.
  */
-export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: AppSidebarProps) {
+export function AppSidebar({
+  nav,
+  overviewLabel = true,
+  portalLabel,
+  account,
+  topLink,
+}: AppSidebarProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
@@ -505,6 +565,7 @@ export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: 
           nav={nav}
           overviewLabel={overviewLabel}
           account={account}
+          topLink={topLink}
           pathname={pathname}
           onOpenSupport={openSupport}
         />
@@ -531,6 +592,7 @@ export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: 
               nav={nav}
               overviewLabel={overviewLabel}
               account={account}
+              topLink={topLink}
               pathname={pathname}
               onNavigate={closeMenu}
               onOpenSupport={openSupport}
@@ -561,13 +623,23 @@ function sumTotals(counts: readonly (number | undefined)[]): number | undefined 
   return known.length === 0 ? undefined : known.reduce((a, b) => a + b, 0);
 }
 
+/** Account Details while acting: the owner's console profile, since the profile edit is not open to acting mode. */
+const ACTING_PROFILE_HREF = '/console/profile';
+
+/** "Back to console": ends acting mode and returns to the console home. */
+const BACK_TO_CONSOLE_HREF = actingLeaveHref(CONSOLE_HOME);
+
 /**
  * The coordinator portal's sidebar: Onboarding (with `profiles.onboard`),
  * Profile and the participant dashboard with its count badge.
+ *
+ * While an org owner acts as their own coordinator account it adds "Back to
+ * console" above Overview, links Account Details to the console profile and
+ * names the account's organisation in the footer.
  */
 export function Sidebar() {
   const t = useTranslations('nav');
-  const { user } = useAuth();
+  const { user, acting, actingOrgName } = useAuth();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // The participant-count badge. `active` is undefined until the profile and
   // network config have loaded, so useDashboard skips the fetch until then.
@@ -596,13 +668,22 @@ export function Sidebar() {
       ...(n.to === '/dashboard' && participantsBadge !== undefined
         ? { badge: participantsBadge }
         : {}),
+      ...(acting && n.to === '/profile' ? { to: ACTING_PROFILE_HREF, fullPage: true } : {}),
     }));
 
   return (
     <AppSidebar
       nav={nav}
       portalLabel={t('portal_label')}
-      account={{ title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }}
+      account={
+        acting
+          ? {
+              title: user?.name ?? '',
+              subtitle: t('acting_sublabel', { org: actingOrgName ?? '' }),
+            }
+          : { title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }
+      }
+      {...(acting ? { topLink: { href: BACK_TO_CONSOLE_HREF, label: t('back_to_console') } } : {})}
     />
   );
 }

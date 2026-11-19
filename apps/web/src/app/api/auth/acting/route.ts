@@ -6,6 +6,7 @@
  *
  * POST   /api/auth/acting `{ accountId }` → 200 `{ redirect: '/onboarding' }` | 400 | 401 | 403 | 409 `ACTING_NOT_READY`
  * DELETE /api/auth/acting?returnTo=<path> → 303 to `returnTo` (same-origin path) or `/console`
+ * GET    /api/auth/acting/leave?returnTo=&reason= → the same, for server redirects and links
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
@@ -16,8 +17,8 @@ import { SESSION_COOKIE } from '@/lib/cookies';
 import { getSessionStore } from '@/lib/session';
 import { callApi, refreshAccessToken } from '@/lib/upstream-client';
 import { unauthorizedResponse, serviceUnavailableResponse } from '@/lib/bff-errors';
-import { expectedOrigin, rejectCrossSite } from '@/lib/same-origin';
-import { safeReturnPath } from '@/lib/return-to';
+import { rejectCrossSite } from '@/lib/same-origin';
+import { endActing } from '@/lib/acting-session.server';
 import { decodeJwtClaims } from '@/lib/jwt';
 import { logger } from '@/lib/logger';
 
@@ -25,9 +26,6 @@ export const runtime = 'nodejs';
 
 /** Where the owner works once acting. */
 const ACTING_HOME = '/onboarding';
-
-/** Where `DELETE` returns to without a usable `returnTo`. */
-const CONSOLE_HOME = '/console';
 
 const BodySchema = z.object({ accountId: z.guid() });
 
@@ -103,10 +101,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
  * Stops acting and returns to the console, or to a same-origin `returnTo` path.
  */
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
-  const sid = req.cookies.get(SESSION_COOKIE)?.value;
-  if (sid) {
-    await getSessionStore().update(sid, { actingAccountId: undefined, consoleActor: undefined });
-  }
-  const path = safeReturnPath(req.nextUrl.searchParams.get('returnTo'), CONSOLE_HOME);
-  return NextResponse.redirect(new URL(path, expectedOrigin(req)), { status: 303 });
+  return endActing(req);
 }

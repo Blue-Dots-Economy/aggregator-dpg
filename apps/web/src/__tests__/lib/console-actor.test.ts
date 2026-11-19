@@ -59,6 +59,21 @@ describe('getConsoleActor (C14)', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it('maps 403 ACTING_ACCOUNT_INVALID to acting_invalid', async () => {
+    vi.mocked(getSession).mockResolvedValue({ ...base, actingAccountId: 'acc-1' });
+    vi.mocked(callApi).mockResolvedValue(json({ error: { code: 'ACTING_ACCOUNT_INVALID' } }, 403));
+    expect(await getConsoleActor()).toEqual({ ok: false, reason: 'acting_invalid' });
+  });
+
+  it('maps the edge 403 FORBIDDEN to acting_invalid while acting, and not otherwise', async () => {
+    vi.mocked(callApi).mockResolvedValue(json({ error: { code: 'FORBIDDEN' } }, 403));
+    vi.mocked(getSession).mockResolvedValue({ ...base, actingAccountId: 'acc-1' });
+    expect(await getConsoleActor()).toEqual({ ok: false, reason: 'acting_invalid' });
+    vi.mocked(callApi).mockResolvedValue(json({ error: { code: 'FORBIDDEN' } }, 403));
+    vi.mocked(getSession).mockResolvedValue(base);
+    expect(await getConsoleActor()).toEqual({ ok: false, reason: 'not_provisioned' });
+  });
+
   it('maps a 403 with an unparseable body to not_provisioned', async () => {
     vi.mocked(getSession).mockResolvedValue(base);
     vi.mocked(callApi).mockResolvedValue(

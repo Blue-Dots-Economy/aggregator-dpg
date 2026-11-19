@@ -5,6 +5,10 @@
  * session it redirects to the BFF login with a `returnTo` back to the page.
  * It passes the session user, `supportEnabled`, and capabilities to the
  * client `AuthProvider`.
+ *
+ * An org owner whose session holds an acting account uses these pages as that
+ * coordinator account. When `/me` refuses the account, the layout ends acting
+ * mode and sends the owner to the console with a notice.
  */
 
 import { redirect } from 'next/navigation';
@@ -16,8 +20,10 @@ import { getSession } from '../../lib/server-session';
 import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '../../lib/jwt';
 import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import type { User } from '../../types';
-import { getConsoleActor } from '../../lib/console-actor';
+import { getConsoleActor, type ConsoleActorResult } from '../../lib/console-actor';
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ACTING_ENDED_HREF } from '@/lib/acting';
+import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -33,9 +39,11 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
-  // Only coordinators (tokens with `aggregator_id`) use this portal. Org
-  // owners go to the console; everyone else is logged out with a reason.
-  if (!tokenAggregatorId(session.accessToken)) {
+  // Only coordinators (tokens with `aggregator_id`) and org owners acting as
+  // their own coordinator account use this portal. Other org owners go to the
+  // console; everyone else is logged out with a reason.
+  const acting = session.actingAccountId !== undefined;
+  if (!acting && !tokenAggregatorId(session.accessToken)) {
     const population = classifyNonCoordinator(
       session.accessToken,
       await resolveSignalsRealmRoles(),
@@ -44,21 +52,37 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
 
-  const user: User = {
-    id: session.sub,
-    name: session.name ?? session.email ?? session.phone ?? session.sub,
-    org: session.email ?? '',
-    ...(session.email ? { email: session.email } : {}),
-    ...(session.phone ? { phone: session.phone } : {}),
-  };
   const supportEnabled = await fetchSupportEnabled();
   // Capabilities hide UI the coordinator cannot use. On failure nothing is
   // hidden; the API still checks every request.
   const actor = await getConsoleActor();
+  if (acting && !actingActorUsable(actor)) redirect(ACTING_ENDED_HREF);
   const capabilities = actor.ok ? (actor.me.capabilities ?? null) : null;
+  const user: User =
+    acting && actor.ok
+      ? {
+          id: actor.me.user.id,
+          name: actor.me.user.contact.name ?? actor.me.user.contact.email,
+          org: actor.me.user.contact.email,
+          email: actor.me.user.contact.email,
+          ...(actor.me.user.contact.phone ? { phone: actor.me.user.contact.phone } : {}),
+        }
+      : {
+          id: session.sub,
+          name: session.name ?? session.email ?? session.phone ?? session.sub,
+          org: session.email ?? '',
+          ...(session.email ? { email: session.email } : {}),
+          ...(session.phone ? { phone: session.phone } : {}),
+        };
+  const actingInfo = acting && actor.ok ? { orgName: coordinatorOrgName(actor.me) } : null;
 
   return (
-    <AuthProvider initialUser={user} supportEnabled={supportEnabled} capabilities={capabilities}>
+    <AuthProvider
+      initialUser={user}
+      supportEnabled={supportEnabled}
+      capabilities={capabilities}
+      acting={actingInfo}
+    >
       {/* Column layout below `lg`, row layout from `lg` up. */}
       <div className="flex flex-col lg:flex-row min-h-dvh">
         <Sidebar />
@@ -68,4 +92,20 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
       </div>
     </AuthProvider>
   );
+}
+
+/**
+ * Whether `/me` still answers as the acting coordinator account.
+ *
+ * A refused account, or an answer as anyone else, ends acting mode. Other
+ * failures keep it: the API still checks every request.
+ */
+function actingActorUsable(actor: ConsoleActorResult): boolean {
+  if (actor.ok) return actor.me.kind === 'coordinator';
+  return actor.reason !== 'acting_invalid';
+}
+
+/** The coordinator account's organisation name, for the shell and the onboarding banner. */
+function coordinatorOrgName(me: MeResponse): string {
+  return (me.orgs.find((o) => o.org_type === 'aggregator') ?? me.orgs[0])?.name ?? '';
 }

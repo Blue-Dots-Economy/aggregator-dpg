@@ -279,7 +279,9 @@
     "contact_support": "Contact support",
     "open_menu": "Open menu",
     "close_menu": "Close menu",
-    "menu_label": "Main navigation"
+    "menu_label": "Main navigation",
+    "back_to_console": "Back to console",
+    "acting_sublabel": "Coordinator · {org}"
   },
   "onboarding": {
     "title": "Onboarding",
@@ -464,7 +466,9 @@
       "title": "Registration Links",
       "subtitle": "Generate, share, and manage public registration links.",
       "back": "Back to Onboarding"
-    }
+    },
+    "acting_banner": "You're onboarding as yourself in {org}. Counts here are only your own.",
+    "acting_banner_dismiss": "Dismiss"
   },
   "profile": {
     "view": {
@@ -1250,7 +1254,8 @@
       "coming_soon": "Coming soon",
       "aggregated_body": "Your dashboard is coming soon.",
       "participants_body": "This works only if you have onboarded seekers and providers yourself."
-    }
+    },
+    "acting_ended": "Your onboarding access is no longer available."
   },
   "page_error": {
     "title": "This page couldn't load",

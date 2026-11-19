@@ -279,7 +279,9 @@
     "contact_support": "सहायता से संपर्क करें",
     "open_menu": "मेनू खोलें",
     "close_menu": "मेनू बंद करें",
-    "menu_label": "मुख्य नेविगेशन"
+    "menu_label": "मुख्य नेविगेशन",
+    "back_to_console": "कंसोल पर वापस जाएँ",
+    "acting_sublabel": "समन्वयक · {org}"
   },
   "onboarding": {
     "title": "ऑनबोर्डिंग",
@@ -464,7 +466,9 @@
       "title": "पंजीकरण लिंक",
       "subtitle": "सार्वजनिक पंजीकरण लिंक बनाएं, साझा करें और प्रबंधित करें।",
       "back": "ऑनबोर्डिंग पर वापस जाएं"
-    }
+    },
+    "acting_banner": "आप {org} में स्वयं के रूप में ऑनबोर्डिंग कर रहे हैं। यहाँ की गिनती केवल आपकी अपनी है।",
+    "acting_banner_dismiss": "बंद करें"
   },
   "profile": {
     "view": {
@@ -1250,7 +1254,8 @@
       "coming_soon": "जल्द आ रहा है",
       "aggregated_body": "आपका डैशबोर्ड जल्द आ रहा है।",
       "participants_body": "यह तभी काम करता है जब आपने खुद सीकर और प्रोवाइडर जोड़े हों।"
-    }
+    },
+    "acting_ended": "Your onboarding access is no longer available."
   },
   "page_error": {
     "title": "यह पेज लोड नहीं हो सका",

@@ -1,5 +1,5 @@
 /**
- * BFF route test: POST / DELETE /api/auth/acting.
+ * BFF route test: POST / DELETE /api/auth/acting and GET /api/auth/acting/leave.
  *
  * Uses the OIDC and session-store fakes. `/me` is answered by a stubbed
  * `fetch`; the assertions are about what the session holds afterwards.
@@ -20,6 +20,7 @@ vi.mock('next/headers', () => ({
 }));
 
 import { POST, DELETE } from '@/app/api/auth/acting/route';
+import { GET as LEAVE } from '@/app/api/auth/acting/leave/route';
 
 const SID = 'sess-acting';
 const ACCOUNT_ID = '7d0f2c1e-4b8a-4c3d-9e2f-1a2b3c4d5e6f';
@@ -234,6 +235,45 @@ describe('DELETE /api/auth/acting', () => {
 
   it('redirects to /console without a session', async () => {
     const res = await DELETE(del(undefined, ''));
+    expect(res.headers.get('location')).toBe(`${PORTAL}/console`);
+  });
+});
+
+describe('GET /api/auth/acting/leave', () => {
+  function leave(query: string, cookie = `sid=${SID}`): NextRequest {
+    return new NextRequest(`${PORTAL}/api/auth/acting/leave${query}`, { headers: { cookie } });
+  }
+
+  it('clears the acting account and the actor cache, keeping an allowed reason', async () => {
+    seed({ actingAccountId: ACCOUNT_ID });
+    const res = await LEAVE(leave('?returnTo=%2Fconsole&reason=acting_ended'));
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`${PORTAL}/console?reason=acting_ended`);
+    const after = await stored();
+    expect(after.actingAccountId).toBeUndefined();
+    expect(after.consoleActor).toBeUndefined();
+  });
+
+  it('returns to the given console path', async () => {
+    seed({ actingAccountId: ACCOUNT_ID });
+    const res = await LEAVE(leave('?returnTo=%2Fconsole%2Fprofile'));
+    expect(res.headers.get('location')).toBe(`${PORTAL}/console/profile`);
+  });
+
+  it('drops a reason that is not on the list', async () => {
+    seed({ actingAccountId: ACCOUNT_ID });
+    const res = await LEAVE(leave('?returnTo=%2Fconsole&reason=%3Cscript%3E'));
+    expect(res.headers.get('location')).toBe(`${PORTAL}/console`);
+  });
+
+  it('ignores an off-origin returnTo', async () => {
+    seed({ actingAccountId: ACCOUNT_ID });
+    const res = await LEAVE(leave('?returnTo=%2F%2Fevil.example&reason=acting_ended'));
+    expect(res.headers.get('location')).toBe(`${PORTAL}/console?reason=acting_ended`);
+  });
+
+  it('redirects to /console without a session', async () => {
+    const res = await LEAVE(leave('', ''));
     expect(res.headers.get('location')).toBe(`${PORTAL}/console`);
   });
 });

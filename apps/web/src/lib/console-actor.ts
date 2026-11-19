@@ -15,19 +15,31 @@ import { SESSION_COOKIE } from './cookies';
 import { getSessionStore } from './session';
 import { getSession } from './server-session';
 import { callApi } from './upstream-client';
+import { ACTING_ACCOUNT_INVALID } from '@/lib/acting';
+
+/** The edge's `403` code for a request whose roles do not grant the route. */
+const EDGE_FORBIDDEN = 'FORBIDDEN';
 
 /** How long a cached actor is trusted. */
 export const ACTOR_CACHE_MS = 60_000;
 
 /** Why the console cannot be shown. */
 export type ConsoleActorFailure =
-  'no_session' | 'not_provisioned' | 'no_org' | 'not_approved' | 'unavailable';
+  'no_session' | 'not_provisioned' | 'no_org' | 'not_approved' | 'acting_invalid' | 'unavailable';
 
 export type ConsoleActorResult =
   { ok: true; me: MeResponse } | { ok: false; reason: ConsoleActorFailure };
 
-/** Maps the API's 403 code to a failure reason. */
-function reasonOf(code: unknown): ConsoleActorFailure {
+/**
+ * Maps the API's 403 code to a failure reason.
+ *
+ * While acting, the edge's `FORBIDDEN` on `/me` means the token holds no roles
+ * for the acting account, so it counts as an invalid acting account too.
+ */
+function reasonOf(code: unknown, acting: boolean): ConsoleActorFailure {
+  if (code === ACTING_ACCOUNT_INVALID || (acting && code === EDGE_FORBIDDEN)) {
+    return 'acting_invalid';
+  }
   if (code === 'USER_NOT_PROVISIONED') return 'not_provisioned';
   if (code === 'NOT_ORG_ADMIN') return 'no_org';
   if (code === 'NOT_APPROVED') return 'not_approved';
@@ -59,7 +71,10 @@ export async function getConsoleActor(): Promise<ConsoleActorResult> {
   }
   if (res.status === 401) return { ok: false, reason: 'no_session' };
   if (res.status === 403) {
-    return { ok: false, reason: reasonOf((await readApiError(res))?.code) };
+    return {
+      ok: false,
+      reason: reasonOf((await readApiError(res))?.code, session.actingAccountId !== undefined),
+    };
   }
   if (!res.ok) return { ok: false, reason: 'unavailable' };
   const parsed = MeResponseSchema.safeParse(await res.json().catch(() => null));

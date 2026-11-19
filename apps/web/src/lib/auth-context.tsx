@@ -24,6 +24,10 @@ interface AuthContextValue {
   capabilities: readonly string[] | null;
   /** Whether a feature needing `capability` should be shown. */
   can: (capability: string) => boolean;
+  /** True when an org owner is using the portal as their own coordinator account. */
+  acting: boolean;
+  /** The acting account's organisation name; null when not acting. */
+  actingOrgName: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -41,18 +45,24 @@ export interface AuthProviderProps {
    * means access control is off.
    */
   capabilities?: readonly string[] | null;
+  /**
+   * Set when an org owner acts as their own coordinator account, with that
+   * account's organisation name. Null or absent otherwise.
+   */
+  acting?: { orgName: string } | null;
 }
 
 /**
  * Provides the active user to client components. Does not fetch.
  *
- * @param props - `children` plus optional `initialUser`, `supportEnabled` and `capabilities`.
+ * @param props - `children` plus optional `initialUser`, `supportEnabled`, `capabilities` and `acting`.
  */
 export function AuthProvider({
   children,
   initialUser = null,
   supportEnabled = false,
   capabilities = null,
+  acting = null,
 }: AuthProviderProps) {
   const signOut = useCallback(async () => {
     window.location.href = '/api/auth/logout';
@@ -67,8 +77,10 @@ export function AuthProvider({
       supportEnabled,
       capabilities,
       can: (capability: string) => canWith(capabilities, capability),
+      acting: acting !== null,
+      actingOrgName: acting?.orgName ?? null,
     }),
-    [initialUser, signOut, supportEnabled, capabilities],
+    [initialUser, signOut, supportEnabled, capabilities, acting],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

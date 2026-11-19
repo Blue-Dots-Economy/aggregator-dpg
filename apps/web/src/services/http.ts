@@ -3,13 +3,16 @@
  *
  * `jsonFetch` sets JSON headers, sends the session cookie, and logs the
  * user out on a 401 `NO_ACTIVE_SESSION` response (see `lib/bff-errors.ts`).
+ * A 403 `ACTING_ACCOUNT_INVALID` ends acting mode and goes to the console notice.
  * A failed call throws an {@link HttpError} carrying the API's error envelope.
  */
 
 import { z } from 'zod';
 import { parseResponseBody, ResponseShapeError } from '../lib/response-shape-error';
+import { ACTING_ACCOUNT_INVALID, ACTING_ENDED_HREF } from '@/lib/acting';
 
 let redirecting = false;
+let endingActing = false;
 
 /** The 401 body that `bff-errors.ts` sends when the session has expired. */
 const SessionExpiredBodySchema = z.object({ code: z.literal('NO_ACTIVE_SESSION') });
@@ -128,9 +131,22 @@ function forceLogout(): void {
 }
 
 /**
+ * Leaves acting mode for the console notice. Runs once per page.
+ *
+ * The leave route clears the acting account before the console loads, so the
+ * console never sees the refused account again.
+ */
+function endActingMode(): void {
+  if (endingActing || typeof window === 'undefined') return;
+  endingActing = true;
+  window.location.href = ACTING_ENDED_HREF;
+}
+
+/**
  * Fetches a BFF endpoint and parses the JSON response with `schema`.
  *
- * Redirects to logout when the server reports `NO_ACTIVE_SESSION`. Fields the
+ * Redirects to logout when the server reports `NO_ACTIVE_SESSION`, and out of
+ * acting mode on `ACTING_ACCOUNT_INVALID`. Fields the
  * schema does not declare are dropped, unless the schema keeps them (`.loose()`).
  *
  * @param input - The request URL or object.
@@ -176,6 +192,7 @@ export async function jsonFetch<S extends z.ZodType>(
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => null);
     const error = new HttpError(res.status, parseEnvelope(body));
+    if (error.status === 403 && error.code === ACTING_ACCOUNT_INVALID) endActingMode();
     // Status, code and request id only: the body can hold the user's input.
     console.error('[http] request failed', {
       url: urlOf(input),
