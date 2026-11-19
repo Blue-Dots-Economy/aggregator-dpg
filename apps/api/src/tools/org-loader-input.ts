@@ -75,7 +75,8 @@ export type InputProblemCode = (typeof INPUT_PROBLEM)[keyof typeof INPUT_PROBLEM
 
 const EXTRA_KEY = '__parsed_extra';
 
-interface ParsedFile {
+/** A parsed CSV file: its header columns, non-empty records and malformed lines. */
+export interface ParsedFile {
   columns: Set<string>;
   /** Each non-empty record's cells keyed by normalised header, trimmed, empty cells absent. */
   records: Array<{ line: number; cells: Record<string, string> }>;
@@ -115,7 +116,7 @@ function normaliseHeader(raw: string): string {
  * keeps its physical line. Line numbers assume one record per physical line;
  * a quoted cell containing a newline shifts later lines (known limitation).
  */
-function parseFile(text: string): ParsedFile {
+export function parseFile(text: string): ParsedFile {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const result = Papa.parse<Record<string, string>>(body, {
     header: true,

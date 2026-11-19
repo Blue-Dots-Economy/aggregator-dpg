@@ -23,6 +23,7 @@ import { servedDomains } from '../services/user-store/serves.js';
 import {
   buildPublicUrl,
   createRegistrationLink,
+  LinkSlugSchema,
   randomSuffix,
   SLUG_RETRIES,
 } from '../services/registration-links/create.js';
@@ -97,12 +98,7 @@ const CreateLinkBodySchema = z.object({
    * Optional slug: lowercase, hyphen-separated, 3-60 chars. On collision a short
    * random suffix is added; `public_url` carries the final slug.
    */
-  slug: z
-    .string()
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase + hyphens (a-z, 0-9)')
-    .min(3)
-    .max(60)
-    .optional(),
+  slug: LinkSlugSchema.optional(),
   context: z.record(z.string(), z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   /**
@@ -134,12 +130,7 @@ const CreateLinkBodySchema = z.object({
  */
 const UpdateLinkBodySchema = z
   .object({
-    slug: z
-      .string()
-      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase + hyphens (a-z, 0-9)')
-      .min(3)
-      .max(60)
-      .optional(),
+    slug: LinkSlugSchema.optional(),
     context: z.record(z.string(), z.unknown()).optional(),
     expires_at: z.iso
       .datetime({ offset: true })

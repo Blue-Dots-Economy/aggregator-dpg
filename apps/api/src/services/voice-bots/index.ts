@@ -87,3 +87,17 @@ export function modeOffers(mode: string, cfg: ResolvedNetworkConfig): Registrati
 export function modeOffersVoice(mode: string, cfg: ResolvedNetworkConfig): boolean {
   return modeOffers(mode, cfg).includes('voice');
 }
+
+/**
+ * Finds the two-option mode: the first declared mode that offers both voice and the form.
+ *
+ * @param cfg - The resolved network config.
+ * @returns The mode key, or `null` when the network declares none.
+ */
+export function twoOptionModeKey(cfg: ResolvedNetworkConfig): string | null {
+  const key = Object.keys(cfg.aggregator.registration_modes).find((mode) => {
+    const offers = modeOffers(mode, cfg);
+    return offers.includes('voice') && offers.includes('form');
+  });
+  return key ?? null;
+}

@@ -1,0 +1,300 @@
+/**
+ * Load plan of the QR links loader, in `@aggregator-dpg/api`.
+ *
+ * Checks each links-sheet row against the coordinator, the network config and
+ * the coordinator's existing links. `check` reports every problem it returns;
+ * `apply` creates the planned links only when there is none. Reads only.
+ */
+
+import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { logger } from '../logger.js';
+import { getNetworkConfig } from '../services/network-config.js';
+import {
+  buildPublicUrl,
+  checkVoiceBotChoice,
+  LinkSlugSchema,
+  resolveMode,
+} from '../services/registration-links/create.js';
+import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
+import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import type { Coordinator } from '../services/user-store/interface.js';
+import { servedDomains } from '../services/user-store/serves.js';
+import { twoOptionModeKey } from '../services/voice-bots/index.js';
+import { LINK_INPUT_PROBLEM, type InputProblem, type LinkRow } from './qr-links-input.js';
+
+/** Problem codes the plan adds to the parser's {@link LINK_INPUT_PROBLEM} codes. */
+export const QR_PLAN_PROBLEM = {
+  UNKNOWN_COORDINATOR: 'UNKNOWN_COORDINATOR',
+  COORDINATOR_NOT_ACTIVE: 'COORDINATOR_NOT_ACTIVE',
+  NO_SIGNALS_ORG: 'NO_SIGNALS_ORG',
+  DOMAIN_NOT_SERVED: 'DOMAIN_NOT_SERVED',
+  UNKNOWN_VOICE_BOT: 'UNKNOWN_VOICE_BOT',
+  VOICE_BOT_NOT_FOR_DOMAIN: 'VOICE_BOT_NOT_FOR_DOMAIN',
+  VOICE_BOT_REQUIRED: 'VOICE_BOT_REQUIRED',
+  INVALID_LINK_NAME: 'INVALID_LINK_NAME',
+  INVALID_EXPIRY: 'INVALID_EXPIRY',
+  EXPIRY_IN_PAST: 'EXPIRY_IN_PAST',
+  /** The same coordinator, profile type and `link_name` as an earlier row. */
+  DUPLICATE_ROW: 'DUPLICATE_ROW',
+  /** The network declares no two-option mode, or this deployment does not enable it. */
+  MODE_NOT_ENABLED: 'MODE_NOT_ENABLED',
+  /** A lookup failed or a check threw, so the row could not be checked. */
+  CHECK_FAILED: 'CHECK_FAILED',
+} as const;
+
+/** One of the {@link QR_PLAN_PROBLEM} codes. */
+export type QrPlanProblemCode = (typeof QR_PLAN_PROBLEM)[keyof typeof QR_PLAN_PROBLEM];
+
+/** A link to create, or one already loaded (`existing`). */
+export interface PlannedLink {
+  row: LinkRow;
+  /** The coordinator's `users.id`; the link belongs to it and it is `created_by`. */
+  userId: string;
+  /** The coordinator's org slug, used in the public URL. */
+  orgSlug: string;
+  domain: string;
+  /** The bot to store: the row's choice, else the domain's default or only bot; `null` when none serves it. */
+  voiceBotKey: string | null;
+  /** The row's `link_name`; `undefined` gets a random slug. */
+  slug: string | undefined;
+  /** End of the `expires_on` day in UTC, or `null` for no expiry. */
+  expiresAt: Date | null;
+  /** A live two-option link that already covers this row; apply creates nothing for it. */
+  existing: { slug: string; url: string } | null;
+}
+
+/** Links read per `list` call when looking for existing links. */
+const LIST_PAGE_SIZE = 100;
+
+/** `expires_on` format. */
+const EXPIRY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Row lookups shared across rows, so each coordinator is read once. */
+interface PlanCache {
+  coordinators: Map<string, Coordinator | null>;
+  liveLinks: Map<string, RegistrationLink[]>;
+}
+
+/** Unwraps a store result, throwing so the row is reported as CHECK_FAILED. */
+function must<T>(
+  result: { ok: true; value: T } | { ok: false; error: { code: string } },
+  operation: string,
+): T {
+  if (!result.ok) {
+    throw new UpstreamError(`qr-links plan lookup failed: ${operation}`, {
+      code: 'PLAN_LOOKUP_FAILED',
+      details: { operation, reason: result.error.code },
+    });
+  }
+  return result.value;
+}
+
+/**
+ * Reads `expires_on` as the end of that day in UTC.
+ *
+ * @returns The instant, or `null` when the value is not a real `YYYY-MM-DD` date.
+ */
+function parseExpiry(value: string): Date | null {
+  const m = EXPIRY_PATTERN.exec(value);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const at = new Date(Date.UTC(y, mo - 1, d, 23, 59, 59, 999));
+  if (at.getUTCFullYear() !== y || at.getUTCMonth() !== mo - 1 || at.getUTCDate() !== d) {
+    return null;
+  }
+  return at;
+}
+
+async function findCoordinator(email: string, cache: PlanCache): Promise<Coordinator | null> {
+  const cached = cache.coordinators.get(email);
+  if (cached !== undefined) return cached;
+  const found = must(
+    await getUserStore().findByContactEmail(email),
+    'userStore.findByContactEmail',
+  );
+  cache.coordinators.set(email, found);
+  return found;
+}
+
+/** The coordinator's live links, every page. */
+async function liveLinksOf(userId: string, cache: PlanCache): Promise<RegistrationLink[]> {
+  const cached = cache.liveLinks.get(userId);
+  if (cached) return cached;
+  const store = getRegistrationLinksStore();
+  const rows: RegistrationLink[] = [];
+  for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
+    const page = must(
+      await store.list(userId, { status: 'live', limit: LIST_PAGE_SIZE, offset }),
+      'registrationLinksStore.list',
+    );
+    rows.push(...page.rows);
+    if (page.rows.length === 0 || rows.length >= page.total) break;
+  }
+  cache.liveLinks.set(userId, rows);
+  return rows;
+}
+
+/** Maps a voice-bot refusal of the shared create rules to a plan problem. */
+function voiceBotProblem(
+  code: string,
+  requested: string,
+  cfg: ResolvedNetworkConfig,
+): QrPlanProblemCode {
+  if (code === 'VOICE_BOT_REQUIRED') return QR_PLAN_PROBLEM.VOICE_BOT_REQUIRED;
+  if (code === 'INVALID_VOICE_BOT') {
+    return cfg.aggregator.voice_bots.some((b) => b.key === requested)
+      ? QR_PLAN_PROBLEM.VOICE_BOT_NOT_FOR_DOMAIN
+      : QR_PLAN_PROBLEM.UNKNOWN_VOICE_BOT;
+  }
+  return QR_PLAN_PROBLEM.CHECK_FAILED;
+}
+
+/**
+ * Checks one row.
+ *
+ * @returns The planned link (when `modeKey` is set and the row has no problem) and the row's problems.
+ * @throws {UpstreamError} When a lookup fails.
+ */
+async function planRow(
+  row: LinkRow,
+  email: string,
+  modeKey: string | null,
+  ctx: { cfg: ResolvedNetworkConfig; now: Date; cache: PlanCache },
+): Promise<{ link: PlannedLink | null; problems: InputProblem[] }> {
+  const problems: InputProblem[] = [];
+  const add = (code: QrPlanProblemCode, field?: string): void => {
+    problems.push(field === undefined ? { line: row.line, code } : { line: row.line, code, field });
+  };
+
+  if (row.linkName !== '' && !LinkSlugSchema.safeParse(row.linkName).success) {
+    add(QR_PLAN_PROBLEM.INVALID_LINK_NAME, 'link_name');
+  }
+  let expiresAt: Date | null = null;
+  if (row.expiresOn !== '') {
+    expiresAt = parseExpiry(row.expiresOn);
+    if (expiresAt === null) add(QR_PLAN_PROBLEM.INVALID_EXPIRY, 'expires_on');
+    else if (expiresAt.getTime() <= ctx.now.getTime()) {
+      add(QR_PLAN_PROBLEM.EXPIRY_IN_PAST, 'expires_on');
+    }
+  }
+
+  const coordinator = await findCoordinator(email, ctx.cache);
+  if (!coordinator) {
+    add(QR_PLAN_PROBLEM.UNKNOWN_COORDINATOR, 'coordinator_email');
+    return { link: null, problems };
+  }
+  if (coordinator.status !== 'active')
+    add(QR_PLAN_PROBLEM.COORDINATOR_NOT_ACTIVE, 'coordinator_email');
+  if (coordinator.signalstackOrgId === null || coordinator.orgSlug === '') {
+    add(QR_PLAN_PROBLEM.NO_SIGNALS_ORG, 'coordinator_email');
+  }
+  const domain = row.profileType;
+  if (!servedDomains(coordinator.serves, ctx.cfg.domainIds).includes(domain)) {
+    add(QR_PLAN_PROBLEM.DOMAIN_NOT_SERVED, 'profile_type');
+    return { link: null, problems };
+  }
+  if (modeKey === null) return { link: null, problems };
+
+  const voiceBot = checkVoiceBotChoice(row.voiceBot || undefined, modeKey, domain, ctx.cfg);
+  if (!voiceBot.ok) add(voiceBotProblem(voiceBot.error.code, row.voiceBot, ctx.cfg), 'voice_bot');
+  if (!voiceBot.ok || problems.length > 0) return { link: null, problems };
+
+  const live = await liveLinksOf(coordinator.id, ctx.cache);
+  const match = live.find(
+    (l) =>
+      l.registrationMode === modeKey &&
+      l.domain === domain &&
+      (l.expiresAt === null || l.expiresAt.getTime() > ctx.now.getTime()) &&
+      (row.linkName === '' || l.slug === row.linkName),
+  );
+  return {
+    link: {
+      row,
+      userId: coordinator.id,
+      orgSlug: coordinator.orgSlug,
+      domain,
+      voiceBotKey: voiceBot.value,
+      slug: row.linkName === '' ? undefined : row.linkName,
+      expiresAt,
+      existing: match
+        ? { slug: match.slug, url: buildPublicUrl(coordinator.orgSlug, match.slug) }
+        : null,
+    },
+    problems,
+  };
+}
+
+/**
+ * Builds the load plan for the links sheet.
+ *
+ * Rows with an input problem are not checked. A missing required column stops
+ * all row checks. A failed lookup is reported on its row as CHECK_FAILED.
+ *
+ * @param input - The parsed rows, the parser's problems and the time expiries are compared with.
+ * @returns The planned links and every problem, the input problems first.
+ */
+export async function buildLinksPlan(input: {
+  rows: LinkRow[];
+  inputProblems: InputProblem[];
+  now?: Date;
+}): Promise<{ links: PlannedLink[]; problems: InputProblem[] }> {
+  const start = Date.now();
+  const now = input.now ?? new Date();
+  const problems: InputProblem[] = [...input.inputProblems];
+  const links: PlannedLink[] = [];
+  const cfg = await getNetworkConfig();
+
+  const candidate = twoOptionModeKey(cfg);
+  const mode = candidate === null ? null : resolveMode(candidate, cfg);
+  const modeKey = mode?.ok ? mode.value : null;
+  if (modeKey === null) {
+    problems.push({ line: 1, code: QR_PLAN_PROBLEM.MODE_NOT_ENABLED, field: 'registration_mode' });
+  }
+
+  const missingColumn = input.inputProblems.some(
+    (p) => p.code === LINK_INPUT_PROBLEM.MISSING_COLUMN,
+  );
+  const blocked = new Set(input.inputProblems.map((p) => p.line));
+  const seen = new Set<string>();
+  const cache: PlanCache = { coordinators: new Map(), liveLinks: new Map() };
+
+  for (const row of missingColumn ? [] : input.rows) {
+    if (blocked.has(row.line)) continue;
+    const email = row.coordinatorEmail.trim().toLowerCase();
+    const key = JSON.stringify([email, row.profileType, row.linkName]);
+    if (seen.has(key)) {
+      problems.push({ line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW });
+      continue;
+    }
+    seen.add(key);
+    try {
+      const planned = await planRow(row, email, modeKey, { cfg, now, cache });
+      problems.push(...planned.problems);
+      if (planned.link) links.push(planned.link);
+    } catch (err) {
+      logger.error(
+        {
+          operation: 'qrLinks.buildLinksPlan.check',
+          status: 'failure',
+          line: row.line,
+          error_type: err instanceof Error ? err.constructor.name : typeof err,
+        },
+        'qr-links row check failed',
+      );
+      problems.push({ line: row.line, code: QR_PLAN_PROBLEM.CHECK_FAILED });
+    }
+  }
+
+  logger.info({
+    operation: 'qrLinks.buildLinksPlan',
+    status: problems.length === 0 ? 'success' : 'failure',
+    rows: input.rows.length,
+    links: links.length,
+    existing: links.filter((l) => l.existing !== null).length,
+    problems: problems.length,
+    latency_ms: Date.now() - start,
+  });
+  return { links, problems };
+}

@@ -8,6 +8,7 @@
 
 import { randomBytes } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
+import { z } from 'zod';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 import { config, enabledRegistrationModes } from '../../config.js';
@@ -18,6 +19,13 @@ import { botsForDomain, modeOffersVoice, resolveDefaultVoiceBot } from '../voice
 
 /** Attempts at a free slug before giving up with DUPLICATE_SLUG. */
 export const SLUG_RETRIES = 5;
+
+/** A caller-chosen link slug: lowercase, hyphen-separated, 3-60 chars. */
+export const LinkSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase + hyphens (a-z, 0-9)')
+  .min(3)
+  .max(60);
 
 /** What a new registration link needs. */
 export interface CreateLinkInput {
@@ -67,7 +75,7 @@ export type CreateLinkResult =
   | { ok: false; error: CreateLinkError };
 
 /** Result of a step that may refuse. */
-type Step<T> = { ok: true; value: T } | { ok: false; error: CreateLinkError };
+export type Step<T> = { ok: true; value: T } | { ok: false; error: CreateLinkError };
 
 const fail = (error: CreateLinkError): { ok: false; error: CreateLinkError } => ({
   ok: false,
@@ -106,7 +114,10 @@ function generateSlug(): string {
  *
  * @returns The mode key, or INVALID_REGISTRATION_MODE.
  */
-function resolveMode(requested: string | undefined, cfg: ResolvedNetworkConfig): Step<string> {
+export function resolveMode(
+  requested: string | undefined,
+  cfg: ResolvedNetworkConfig,
+): Step<string> {
   const declaredModes = Object.keys(cfg.aggregator.registration_modes ?? {});
   const enabledModes = enabledRegistrationModes(declaredModes);
   const modeKey = requested ?? (enabledModes.includes('form') ? 'form' : enabledModes[0]) ?? 'form';
@@ -131,7 +142,7 @@ function resolveMode(requested: string | undefined, cfg: ResolvedNetworkConfig):
  *   unknown or serves another domain; VOICE_BOT_REQUIRED when several bots serve
  *   the domain and none is the default.
  */
-function checkVoiceBotChoice(
+export function checkVoiceBotChoice(
   requested: string | null | undefined,
   modeKey: string,
   domain: string,
