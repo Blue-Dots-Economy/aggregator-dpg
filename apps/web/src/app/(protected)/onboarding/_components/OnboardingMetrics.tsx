@@ -130,6 +130,9 @@ export function OnboardingMetrics() {
   const summary = useOnboardingSummary({ domain: active, enabled: ready });
   const bySource = useOnboardingBySource({ domain: active, enabled: ready });
   const typeLabel = domains.find((d) => d.id === active)?.plural_label;
+  let view: 'error' | 'loading' | 'ready' = 'ready';
+  if (summary.isError) view = 'error';
+  else if (!ready || summary.isLoading) view = 'loading';
 
   const slices = bySource.data?.by_source ?? [];
   const totalJoins = slices.reduce((acc, s) => acc + s.passed, 0);
@@ -149,7 +152,7 @@ export function OnboardingMetrics() {
           : t('onboardingGroup.helper_no_type')}
       </div>
 
-      {summary.isError ? (
+      {view === 'error' && (
         <div className="bd-card p-5 flex items-center gap-4 flex-wrap border-rose-200 bg-rose-50/50">
           <div className="w-10 h-10 rounded-[11px] bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
             <I.alert size={19} />
@@ -171,7 +174,8 @@ export function OnboardingMetrics() {
             {t('onboardingGroup.retry')}
           </Button>
         </div>
-      ) : !ready || summary.isLoading ? (
+      )}
+      {view === 'loading' && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="bd-card p-4 animate-pulse">
@@ -181,7 +185,8 @@ export function OnboardingMetrics() {
             </div>
           ))}
         </div>
-      ) : (
+      )}
+      {view === 'ready' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <OnboardingStatCard
