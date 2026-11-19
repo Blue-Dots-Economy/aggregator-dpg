@@ -94,7 +94,7 @@ async function selfAdd(
   const found = await getOrganisationStore().findById(input.org_id);
   if (!found.ok) return refuse('UNAVAILABLE', 'organisation store');
   const org = found.value;
-  if (!org || org.ownerUserId !== actor.userId) {
+  if (org?.ownerUserId !== actor.userId) {
     return refuse('NOT_ORG_OWNER', 'caller does not own the organisation');
   }
   const eligible = orgEligibility(actor, org);

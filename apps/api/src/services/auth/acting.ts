@@ -56,13 +56,13 @@ export async function resolveActingAccount(
   const found = await getUserStore().findById(accountId);
   if (!found.ok) return unavailable('user store');
   const coordinator = found.value;
-  if (!coordinator || coordinator.status !== 'active' || coordinator.parentOrgId === null) {
+  if (coordinator?.status !== 'active' || coordinator.parentOrgId === null) {
     return err({ code: 'INACTIVE', message: 'coordinator account is not active' });
   }
 
   const org = await getOrganisationStore().findById(coordinator.parentOrgId);
   if (!org.ok) return unavailable('organisation store');
-  if (!org.value || org.value.status !== 'active') {
+  if (org.value?.status !== 'active') {
     return err({ code: 'INACTIVE', message: 'organisation is not active' });
   }
   return ok(coordinator);
