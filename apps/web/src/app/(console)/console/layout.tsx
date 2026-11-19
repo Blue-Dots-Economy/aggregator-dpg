@@ -19,6 +19,7 @@ import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ensureTermsAccepted } from '@/lib/terms-guard.server';
 import { canViewCoordinators, coordinatorsHref, ownProfileOrgId } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -28,6 +29,8 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   if (session.refreshTokenExp && session.refreshTokenExp <= Date.now()) {
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
+  // Outstanding terms send the user to the terms page first.
+  await ensureTermsAccepted(path);
 
   const actor = await getConsoleActor();
   if (!actor.ok) leaveConsole(actor.reason, path);

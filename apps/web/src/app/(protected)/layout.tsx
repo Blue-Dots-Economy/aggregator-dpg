@@ -3,6 +3,7 @@
  *
  * Server Component that runs on every `/(protected)/*` request. Without a
  * session it redirects to the BFF login with a `returnTo` back to the page.
+ * Coordinators with outstanding terms go to the terms page.
  * It passes the session user, `supportEnabled`, and capabilities to the
  * client `AuthProvider`.
  */
@@ -18,6 +19,7 @@ import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import type { User } from '../../types';
 import { getConsoleActor } from '../../lib/console-actor';
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ensureTermsAccepted } from '@/lib/terms-guard.server';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -43,6 +45,9 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     if (population === 'org_owner') redirect('/console');
     redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
+
+  // Outstanding terms send the coordinator to the terms page first.
+  await ensureTermsAccepted(path);
 
   const user: User = {
     id: session.sub,

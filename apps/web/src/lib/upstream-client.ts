@@ -10,6 +10,7 @@ import { getOidcAdapter } from './oidc';
 import { getSessionStore, type SessionData } from './session';
 import { SESSION_COOKIE } from './cookies';
 import { getSession } from './server-session';
+import { isTermsAllowedApiPath } from './terms-status.server';
 
 const REFRESH_BEFORE_EXPIRY_MS = 60_000;
 
@@ -59,10 +60,26 @@ export interface UpstreamCallOptions {
  *
  * @param path - Path relative to `API_BASE_URL` (e.g. `/links`).
  * @param opts - Method, headers, body.
- * @returns The raw `Response`. Caller decides JSON vs text.
+ * @returns The raw `Response`. Caller decides JSON vs text. A 403
+ *   `TERMS_REQUIRED` response, without an upstream call, when the session's
+ *   terms are outstanding and the path is not in the terms allow-list.
  * @throws If no session is active.
  */
 export async function callApi(path: string, opts: UpstreamCallOptions = {}): Promise<Response> {
+  // While the terms are outstanding only the terms, actor and support calls
+  // go upstream; the API also refuses gated calls on its own.
+  const session = await getSession();
+  if (session?.termsStatus === 'outstanding' && !isTermsAllowedApiPath(path)) {
+    return Response.json(
+      {
+        error: 'Forbidden',
+        code: 'TERMS_REQUIRED',
+        message: 'Accept the current terms and privacy policy to continue.',
+      },
+      { status: 403 },
+    );
+  }
+
   const accessToken = await getFreshAccessToken();
   if (!accessToken) throw new Error('no active session');
 

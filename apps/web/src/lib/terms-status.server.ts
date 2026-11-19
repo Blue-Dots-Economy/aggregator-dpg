@@ -21,6 +21,29 @@ export const ACCEPT_TERMS_PATH = '/accept-terms';
  */
 export const TERMS_STATUS_TIMEOUT_MS = 5_000;
 
+/**
+ * API paths the BFF still proxies while terms are outstanding: the terms
+ * check and acceptance, the actor read, and support. Matched exactly, without
+ * the query string.
+ */
+export const TERMS_ALLOWED_API_PATHS: readonly string[] = [
+  '/v1/user/consent/status',
+  '/v1/user/consent',
+  '/v1/user/read/me',
+  '/v1/support/config',
+  '/v1/support',
+];
+
+/**
+ * Whether an API path may be called while terms are outstanding.
+ *
+ * @param path - API path, optionally with a query string.
+ * @returns True when the path, without its query, is in {@link TERMS_ALLOWED_API_PATHS}.
+ */
+export function isTermsAllowedApiPath(path: string): boolean {
+  return TERMS_ALLOWED_API_PATHS.includes(path.split('?')[0] ?? path);
+}
+
 /** `ok`: current terms accepted. `outstanding`: must accept. `unknown`: the check failed. */
 export type TermsStatus = 'ok' | 'outstanding' | 'unknown';
 
