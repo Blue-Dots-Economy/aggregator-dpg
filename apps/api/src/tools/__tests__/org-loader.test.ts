@@ -18,7 +18,7 @@ import { _setNetworkConfig } from '../../services/network-config.js';
 import { _setSignalStackWriter } from '../../services/signalstack.js';
 import { _resetOrgSchemaValidator } from '../../services/org-schema-validator.js';
 import type { ReportRow } from '../org-loader-apply.js';
-import { REPORT_COLUMNS, _main, reportCsv } from '../org-loader.js';
+import { REPORT_COLUMNS, _main, reportCsv } from '../org-loader-command.js';
 
 vi.hoisted(() => {
   process.env.ADMIN_EMAILS = 'nf-admin@test.local';
@@ -35,19 +35,27 @@ let idp: IdpAdminFake;
 let ledger: ConsentLedgerFake;
 let mailer: FakeMailer;
 
-/** Runs the command in-process; returns its exit code and stdout. */
-async function cli(argv: string[]): Promise<{ code: number; out: string }> {
-  const lines: string[] = [];
-  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    lines.push(String(chunk));
-    return true;
+/**
+ * Runs the command in-process with fake streams.
+ *
+ * @returns The exit code, stdout, stderr and both together (`out`).
+ */
+async function cli(
+  argv: string[],
+  stdin = '',
+): Promise<{ code: number; out: string; stdout: string; stderr: string }> {
+  let stdout = '';
+  let stderr = '';
+  const code = await _main(argv, {
+    readStdin: async () => stdin,
+    writeStdout: (t) => {
+      stdout += t;
+    },
+    writeStderr: (t) => {
+      stderr += t;
+    },
   });
-  try {
-    const code = await _main(argv);
-    return { code, out: lines.join('') };
-  } finally {
-    spy.mockRestore();
-  }
+  return { code, out: stdout + stderr, stdout, stderr };
 }
 
 async function file(name: string, lines: string[]): Promise<string> {
@@ -162,8 +170,31 @@ describe('org-loader usage', () => {
     expect(await orgCount()).toBe(0);
   });
 
-  it('exits 2 when template has no --out', async () => {
+  it('exits 2 when template has no valid --kind', async () => {
     expect((await cli(['template'])).code).toBe(2);
+    expect((await cli(['template', '--kind', 'people'])).code).toBe(2);
+  });
+
+  it('exits 2 on an unknown flag, a stray argument or a flag another command takes', async () => {
+    const files = await treeFiles();
+    for (const argv of [
+      ['check', '--orgs', files.orgs, '--dry-run', 'yes'],
+      ['check', '--orgs', files.orgs, 'extra'],
+      ['check', '--orgs', files.orgs, '--operator', 'ops'],
+      ['check', '--orgs'],
+      ['check', '--orgs', files.orgs, '--orgs', files.orgs],
+    ]) {
+      const r = await cli(argv);
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.stderr).toContain('usage:');
+    }
+    expect(await orgCount()).toBe(0);
+  });
+
+  it('exits 2 when both inputs are stdin', async () => {
+    const r = await cli(['check', '--orgs', '-', '--coordinators', '-']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('only one input');
   });
 });
 
@@ -297,15 +328,17 @@ describe('reportCsv', () => {
 });
 
 describe('org-loader template', () => {
-  it('writes both headers from the instance schemas, without consent', async () => {
+  it('prints each header from the instance schemas, without consent', async () => {
     vi.stubEnv('AGGREGATOR_NETWORK', 'blue_dot');
     vi.stubEnv('AGGREGATOR_BRAND', 'up-gzb');
     _resetOrgSchemaValidator();
-    const out = path.join(dir, 'tpl');
-    const r = await cli(['template', '--out', out]);
-    expect(r.code).toBe(0);
-    const orgs = (await readFile(path.join(out, 'orgs.csv'), 'utf8')).trim().split(',');
-    const coords = (await readFile(path.join(out, 'coordinators.csv'), 'utf8')).trim().split(',');
+    const o = await cli(['template', '--kind', 'orgs']);
+    const c = await cli(['template', '--kind', 'coordinators']);
+    expect(o.code).toBe(0);
+    expect(c.code).toBe(0);
+    expect(o.stdout.split('\n')).toHaveLength(2);
+    const orgs = o.stdout.trim().split(',');
+    const coords = c.stdout.trim().split(',');
     expect(orgs.slice(0, 5)).toEqual(ORGS_HEADER.split(','));
     expect(orgs).toContain('owner_email');
     expect(orgs).toContain('aggregator_type');
@@ -319,5 +352,63 @@ describe('org-loader template', () => {
     for (const fixed of ['consent', 'contact', 'type', 'locations']) {
       expect(coords).not.toContain(fixed);
     }
+  });
+});
+
+describe('org-loader stdin and stdout', () => {
+  const ORGS = [
+    ORGS_HEADER,
+    'Top,,Ravi Kumar,9876500001,ravi@alpha.org',
+    'Child,Top,Ravi Kumar,9876500001,ravi@alpha.org',
+  ];
+
+  it('checks an input read from stdin, labelling problems as stdin', async () => {
+    const ok = await cli(['check', '--orgs', '-'], `${ORGS.join('\n')}\n`);
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain('rows: orgs=2 coordinators=0');
+    const bad = await cli(
+      ['check', '--orgs', '-'],
+      `${ORGS_HEADER}\nTop,,Ravi Kumar,12,ravi@alpha.org\n`,
+    );
+    expect(bad.code).toBe(1);
+    expect(bad.stdout).toContain('orgs(stdin):2 INVALID_PHONE owner_phone');
+  });
+
+  it('writes only the report CSV to stdout with --report -, everything else to stderr', async () => {
+    const r = await cli(
+      ['apply', '--orgs', '-', '--operator', 'ops', '--report', '-'],
+      `${ORGS.join('\n')}\n`,
+    );
+    expect(r.code).toBe(0);
+    const lines = r.stdout.trim().split('\n');
+    expect(lines[0]).toBe(REPORT_COLUMNS.join(','));
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^org,2,Top,ravi@alpha\.org,created,/);
+    expect(lines[2]).toMatch(/^org,3,Child,ravi@alpha\.org,created,/);
+    expect(r.stderr).toContain('APPLY COMPLETE');
+    expect(r.stderr).toContain('report: stdout');
+    expect(r.stderr).not.toContain('ravi@alpha.org');
+  });
+
+  it('writes nothing to stdout when --report - refuses on a problem', async () => {
+    const r = await cli(
+      ['apply', '--orgs', '-', '--operator', 'ops', '--report', '-'],
+      `${ORGS_HEADER}\nTop,,Ravi Kumar,12,ravi@alpha.org\n`,
+    );
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('REFUSED');
+    expect(await orgCount()).toBe(0);
+  });
+
+  it('writes the default report into the temp directory', async () => {
+    const files = await treeFiles();
+    const r = await cli(['apply', '--orgs', files.orgs, '--operator', 'ops']);
+    expect(r.code).toBe(0);
+    const reported = /report: (\S+)/.exec(r.stdout)?.[1] ?? '';
+    expect(path.dirname(reported)).toBe(os.tmpdir());
+    expect(path.basename(reported)).toMatch(/^org-loader-report-[0-9TZ-]+\.csv$/);
+    expect((await readFile(reported, 'utf8')).split('\n')[0]).toBe(REPORT_COLUMNS.join(','));
+    await rm(reported);
   });
 });

@@ -39,7 +39,7 @@ import {
 import { permissiveTreeRules } from '../../services/organisation-store/testing.js';
 import { PostgresUserStore, _setUserStore } from '../../services/user-store/index.js';
 import { _setConsentLedger } from '../../services/consent-ledger/index.js';
-import { _main } from '../org-loader.js';
+import { _main } from '../org-loader-command.js';
 
 vi.hoisted(() => {
   process.env.ADMIN_EMAILS = 'nf-admin@test.local';

@@ -1,7 +1,7 @@
 # Runbook: loading the org structure of a new instance
 
 **Applies to:** a new instance on the `hotfix/up-speedrun` side branch (UP first), before any real person logs in.
-**Tool:** `node dist/tools/org-loader.js` in the instance's **own API image**, run inside a running API pod (source `apps/api/src/tools/org-loader.ts`).
+**Tool:** `node dist/tools/org-loader.js` in the instance's **own API image**, run inside a running API pod through `kubectl exec -i` (source `apps/api/src/tools/org-loader.ts`).
 **Design:** `docs/superpowers/specs/2026-11-19-org-structure-loader-design.md` (issue #1118).
 
 The loader creates the orgs, their owners and their coordinators that product sends, through the same create and approve code as the invite path, with everyone already approved. It sends **no email** and records **no terms acceptance**: people accept the terms at their first login (#1120). Every row it creates carries `created_by = provisioned:<operator>`.
@@ -11,8 +11,10 @@ Rehearse the whole runbook on UAT before UP.
 ## 1. Rules before you start
 
 - **Nobody is told to log in until the terms screen (#1120) is live on the instance.** A provisioned account has accepted nothing; without the terms screen it would sign in without ever seeing the terms.
-- The CSV files hold names, emails and phones. Keep them only on your machine and in the pod for the run, and delete them afterwards (§7). Never paste rows into a ticket or chat.
-- The report file holds names and emails too. Treat it like the input files.
+- The CSV files hold names, emails and phones. They stay on your machine: the tool reads them from stdin and writes the report to stdout, so **no file is ever written in the pod**. Never paste rows into a ticket or chat.
+- The reports hold names and emails too. Treat them like the input files, and delete all of them after handing the results over (§7).
+- `kubectl exec` stdout and stderr go only to your terminal. They do not reach the pod's logs. The tool's own log lines (ids, counts and error codes) go to stderr.
+- The tool needs the API's full environment (database, Keycloak, Signals, Redis), so it runs only in an **API pod**. Name the container explicitly with `-c api` (adjust if the deployment names it differently). Every command below is run exactly this way; the UAT rehearsal must use the same commands.
 - `--operator` is your own short name (no spaces, no `:`), for example `--operator aniket`. It is written as `provisioned:<operator>` on every row the run creates, so loaded accounts can be found later.
 
 ## 2. The sheet template
@@ -20,11 +22,12 @@ Rehearse the whole runbook on UAT before UP.
 Each instance has its own org form (`org-registration.v1.json`) and coordinator form (`registration.v1.json`), so the columns differ. Get the headers from the instance itself:
 
 ```sh
-kubectl -n <ns> exec <api-pod> -- node dist/tools/org-loader.js template --out /tmp/org-loader-template
-kubectl -n <ns> cp <api-pod>:/tmp/org-loader-template ./template
+kubectl -n <ns> get pods -l app.kubernetes.io/name=<api>        # pick one running API pod
+kubectl -n <ns> exec <api-pod> -c api -- node dist/tools/org-loader.js template --kind orgs > orgs-header.csv
+kubectl -n <ns> exec <api-pod> -c api -- node dist/tools/org-loader.js template --kind coordinators > coordinators-header.csv
 ```
 
-`template` writes `orgs.csv` and `coordinators.csv`: the fixed columns, then every field of the instance's form except the fixed keys and `consent`. Share the two headers with product as a Google Sheet (one tab per file); export each tab as CSV when it comes back.
+`template` prints one header line: the fixed columns, then every field of the instance's form except the fixed keys and `consent`. Share the two headers with product as a Google Sheet (one tab per file); export each tab as CSV when it comes back.
 
 Headers today (check against `template`; it is the source of truth):
 
@@ -42,24 +45,27 @@ How to fill them in:
 - Phones may be written as 10 digits or with `+91`. One email and one phone belong to one person across owners and coordinators; a person cannot be both an owner and a coordinator.
 - Either file may be left out, for example coordinators for orgs that already exist.
 
-## 3. Copy the files into the pod
+## 3. Order of the runs
 
-```sh
-kubectl -n <ns> get pods -l app.kubernetes.io/name=<api>        # pick one running API pod
-kubectl -n <ns> cp ./orgs.csv <api-pod>:/tmp/orgs.csv
-kubectl -n <ns> cp ./coordinators.csv <api-pod>:/tmp/coordinators.csv
-```
+Orgs and coordinators are loaded in two separate runs, because only one input can come through stdin per run, and coordinators need their orgs to exist:
 
-The pod already has the API's ConfigMap and Secret (database, Keycloak, Signals, Redis), which the tool uses. `kubectl cp` needs `tar` in the image; if it is missing, stream the file instead: `kubectl -n <ns> exec -i <api-pod> -- sh -c 'cat > /tmp/orgs.csv' < ./orgs.csv`. Use `/tmp`: the app directory may be read-only.
+1. `check` the orgs, fix, repeat until it passes (§4).
+2. `apply` the orgs (§5).
+3. Then `check` the coordinators. A coordinator's `org` must be an org on the instance by now, so this check fails with `UNKNOWN_ORG` if it runs before step 2.
+4. `apply` the coordinators.
+
+A load with only coordinators (for orgs that already exist) skips steps 1 and 2.
 
 ## 4. `check`
 
 ```sh
-kubectl -n <ns> exec <api-pod> -- node dist/tools/org-loader.js check \
-  --orgs /tmp/orgs.csv --coordinators /tmp/coordinators.csv
+kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js check --orgs - < orgs.csv
+kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js check --coordinators - < coordinators.csv   # after the orgs are applied
 ```
 
-`check` reads the database and Keycloak and writes nothing. It prints every problem as `<file>:<line> <code> [<field>]` (line 1 is the header, the first data row is line 2), then how many orgs and coordinators would be created, resumed or skipped, then `CHECK PASSED` (exit 0) or `CHECK FAILED` (exit 1). It never prints row data.
+`-i` is required: without it the pod never sees your file on stdin.
+
+`check` reads the database and Keycloak and writes nothing. It prints every problem as `<input>:<line> <code> [<field>]`, for example `orgs(stdin):3 INVALID_PHONE owner_phone` (line 1 is the header, the first data row is line 2), then how many orgs and coordinators would be created, resumed or skipped, then `CHECK PASSED` (exit 0) or `CHECK FAILED` (exit 1). It never prints row data.
 
 | Code                                            | Meaning and fix                                                                                                                                |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -81,27 +87,28 @@ kubectl -n <ns> exec <api-pod> -- node dist/tools/org-loader.js check \
 
 `PLAN FAILED: PLAN_LOOKUP_FAILED (<operation>)` means a database or Keycloak lookup failed; nothing was written. Fix the connection and run `check` again.
 
-Repeat until `CHECK PASSED`. Copy the fixed files into the pod again each time.
+Repeat until `CHECK PASSED`.
 
 ## 5. `apply`
 
 ```sh
-kubectl -n <ns> exec <api-pod> -- node dist/tools/org-loader.js apply \
-  --orgs /tmp/orgs.csv --coordinators /tmp/coordinators.csv \
-  --operator <your name> --report /tmp/org-loader-report.csv
+kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js apply \
+  --orgs - --operator <your name> --report - < orgs.csv > orgs-report.csv
+
+# only after the orgs apply exits 0, and the coordinators check passes:
+kubectl -n <ns> exec -i <api-pod> -c api -- node dist/tools/org-loader.js apply \
+  --coordinators - --operator <your name> --report - < coordinators.csv > coordinators-report.csv
 ```
+
+With `--report -` the report CSV is the only thing on stdout, so `> orgs-report.csv` captures it on your machine; the progress lines, problems and counts appear on your terminal through stderr.
 
 - `apply` runs every check of `check` first and **refuses to start** on any problem (exit 1, nothing written).
 - It then creates the orgs (parents first), approves each one, then creates and approves the coordinators. It **stops at the first failed row**.
-- `--report` defaults to `org-loader-report-<ISO time>.csv` in the working directory; give a `/tmp` path. It refuses to overwrite an existing report.
+- Always use `--report -` in the pod. Given a path instead, the tool writes the report there (default: `org-loader-report-<time>.csv` in the temp directory), which is for local runs only.
 - It loads the RBAC runtime first, so each account's token roles are synced and the outcome recorded. A failed or deferred sync never fails the row; the API's background sweep repairs it.
 - Exit codes: 0 every row loaded, 1 refused or a row failed, 2 usage.
 
-Copy the report back:
-
-```sh
-kubectl -n <ns> cp <api-pod>:/tmp/org-loader-report.csv ./org-loader-report.csv
-```
+Check the exit code (`echo $?`) and the last stderr line before the next run.
 
 ## 6. Reading the report, fixing failures, rerunning
 
@@ -127,17 +134,17 @@ On a failure the command prints `APPLY FAILED at <file>:<line> <code>`. Common c
 - `ORG_INACTIVE`, `NO_PROFILE_TYPES`, `NOT_PROVISIONED`: the row on the instance is not one the loader can finish. Talk to the team before touching it.
 - `UNEXPECTED`: a step threw; the log line for the row has the error type.
 
-**Rerunning is safe.** Run `check` and `apply` again with the **same files** (and a new `--report` path). Rows already loaded are `already_loaded` and skipped; a row left pending by the stopped run is approved (`resumed`); a row left half-created (no Keycloak user or group) is removed and created again (`resumed`). Only the Keycloak user or group linked to that row by id is removed.
+**Rerunning is safe.** Run `check` and `apply` again with the **same file** (and a new local report name, for example `orgs-report-2.csv`). Rows already loaded are `already_loaded` and skipped; a row left pending by the stopped run is approved (`resumed`); a row left half-created (no Keycloak user or group) is removed and created again (`resumed`). Only the Keycloak user or group linked to that row by id is removed.
 
 `rolesSync` other than `synced` / `off` needs no action: the sweep repairs it within `RBAC_TOKEN_ROLES_SWEEP_MS`.
 
 ## 7. Delete the files
 
-```sh
-kubectl -n <ns> exec <api-pod> -- rm -rf /tmp/orgs.csv /tmp/coordinators.csv /tmp/org-loader-report*.csv /tmp/org-loader-template
-```
+Nothing was written in the pod. On your machine, once the results are handed over (the reports to whoever keeps the instance's personal data, the counts to the ticket), delete the input CSVs and every report:
 
-Delete your local copies of the input CSVs once the load is confirmed. Keep the report only where the team keeps personal data, and delete it when the instance is handed over. A pod restart also clears `/tmp`.
+```sh
+rm orgs.csv coordinators.csv orgs-report*.csv coordinators-report*.csv
+```
 
 ## 8. After the load
 

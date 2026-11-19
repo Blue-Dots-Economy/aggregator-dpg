@@ -28,6 +28,11 @@ export const REDACT_PATHS = [
   '*.*.phone',
 ];
 
+/** File descriptor of stdout. */
+const STDOUT_FD = 1;
+/** File descriptor of stderr. */
+const STDERR_FD = 2;
+
 /**
  * Shared pino options, also used by the Fastify request logger so both apply the same redaction.
  */
@@ -44,13 +49,18 @@ export const loggerOptions: pino.LoggerOptions = {
             translateTime: 'SYS:HH:MM:ss.l',
             singleLine: false,
             ignore: 'pid,hostname,service,env',
+            destination: config.LOG_DESTINATION === 'stderr' ? STDERR_FD : STDOUT_FD,
           },
         },
       }
     : {}),
 };
 
-export const logger = pino(loggerOptions);
+/** The shared logger; writes to stderr when `LOG_DESTINATION=stderr` (pretty output handles that itself). */
+export const logger =
+  config.LOG_DESTINATION === 'stderr' && config.NODE_ENV !== 'development'
+    ? pino(loggerOptions, pino.destination({ fd: STDERR_FD, sync: true }))
+    : pino(loggerOptions);
 
 /**
  * Masks the `token` query parameter of a request URL, so invite links never reach the log.
