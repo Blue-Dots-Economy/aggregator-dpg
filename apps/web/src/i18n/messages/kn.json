@@ -281,7 +281,8 @@
     "close_menu": "ಮೆನು ಮುಚ್ಚಿ",
     "menu_label": "ಮುಖ್ಯ ನ್ಯಾವಿಗೇಶನ್",
     "back_to_console": "ಕನ್ಸೋಲ್‌ಗೆ ಹಿಂತಿರುಗಿ",
-    "acting_sublabel": "ಸಂಯೋಜಕ · {org}"
+    "acting_sublabel": "ಸಂಯೋಜಕ · {org}",
+    "acting_sublabel_no_org": "ಸಂಯೋಜಕ"
   },
   "onboarding": {
     "title": "ಆನ್‌ಬೋರ್ಡಿಂಗ್",
@@ -468,7 +469,8 @@
       "back": "ಆನ್‌ಬೋರ್ಡಿಂಗ್‌ಗೆ ಹಿಂತಿರುಗಿ"
     },
     "acting_banner": "ನೀವು {org} ನಲ್ಲಿ ನಿಮ್ಮಂತೆಯೇ ಆನ್‌ಬೋರ್ಡ್ ಮಾಡುತ್ತಿದ್ದೀರಿ. ಇಲ್ಲಿನ ಎಣಿಕೆಗಳು ನಿಮ್ಮದೇ ಮಾತ್ರ.",
-    "acting_banner_dismiss": "ಮುಚ್ಚಿ"
+    "acting_banner_dismiss": "ಮುಚ್ಚಿ",
+    "acting_banner_no_org": "ನೀವು ನಿಮ್ಮಂತೆಯೇ ಆನ್‌ಬೋರ್ಡ್ ಮಾಡುತ್ತಿದ್ದೀರಿ. ಇಲ್ಲಿನ ಎಣಿಕೆಗಳು ನಿಮ್ಮದೇ ಮಾತ್ರ."
   },
   "profile": {
     "view": {

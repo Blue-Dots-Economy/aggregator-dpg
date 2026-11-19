@@ -623,8 +623,8 @@ function sumTotals(counts: readonly (number | undefined)[]): number | undefined 
   return known.length === 0 ? undefined : known.reduce((a, b) => a + b, 0);
 }
 
-/** Account Details while acting: the owner's console profile, since the profile edit is not open to acting mode. */
-const ACTING_PROFILE_HREF = '/console/profile';
+/** Account Details while acting: leaves acting mode for the owner's console profile, since the profile edit is not open to acting mode. */
+const ACTING_PROFILE_HREF = actingLeaveHref('/console/profile');
 
 /** "Back to console": ends acting mode and returns to the console home. */
 const BACK_TO_CONSOLE_HREF = actingLeaveHref(CONSOLE_HOME);
@@ -679,7 +679,9 @@ export function Sidebar() {
         acting
           ? {
               title: user?.name ?? '',
-              subtitle: t('acting_sublabel', { org: actingOrgName ?? '' }),
+              subtitle: actingOrgName
+                ? t('acting_sublabel', { org: actingOrgName })
+                : t('acting_sublabel_no_org'),
             }
           : { title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }
       }

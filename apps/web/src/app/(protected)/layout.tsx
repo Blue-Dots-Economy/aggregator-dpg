@@ -74,7 +74,8 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
           ...(session.email ? { email: session.email } : {}),
           ...(session.phone ? { phone: session.phone } : {}),
         };
-  const actingInfo = acting && actor.ok ? { orgName: coordinatorOrgName(actor.me) } : null;
+  // Acting mode stays visible on a transient `/me` failure; only the org name is missing then.
+  const actingInfo = acting ? { orgName: actor.ok ? coordinatorOrgName(actor.me) : null } : null;
 
   return (
     <AuthProvider
@@ -105,7 +106,7 @@ function actingActorUsable(actor: ConsoleActorResult): boolean {
   return actor.reason !== 'acting_invalid';
 }
 
-/** The coordinator account's organisation name, for the shell and the onboarding banner. */
-function coordinatorOrgName(me: MeResponse): string {
-  return (me.orgs.find((o) => o.org_type === 'aggregator') ?? me.orgs[0])?.name ?? '';
+/** The coordinator account's organisation name, for the shell and the onboarding banner; null when unknown. */
+function coordinatorOrgName(me: MeResponse): string | null {
+  return (me.orgs.find((o) => o.org_type === 'aggregator') ?? me.orgs[0])?.name || null;
 }

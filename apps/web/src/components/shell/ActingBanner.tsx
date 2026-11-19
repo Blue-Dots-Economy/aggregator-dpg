@@ -18,12 +18,11 @@ export function ActingBanner() {
   const [dismissed, setDismissed] = useState(false);
   if (!acting || dismissed) return null;
   return (
-    <div
-      role="status"
-      className="flex items-start gap-3 rounded-[12px] border border-(--bd-primary-100) bg-(--bd-tint-primary) px-4 py-3 text-[13px] font-medium text-(--bd-fg)"
-    >
+    <div className="flex items-start gap-3 rounded-[12px] border border-(--bd-primary-100) bg-(--bd-tint-primary) px-4 py-3 text-[13px] font-medium text-(--bd-fg)">
       <I.user size={16} className="mt-0.5 shrink-0 text-primary-600" />
-      <p className="flex-1">{t('acting_banner', { org: actingOrgName ?? '' })}</p>
+      <p className="flex-1">
+        {actingOrgName ? t('acting_banner', { org: actingOrgName }) : t('acting_banner_no_org')}
+      </p>
       <button
         type="button"
         onClick={() => setDismissed(true)}

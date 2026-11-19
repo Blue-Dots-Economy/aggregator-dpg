@@ -3,7 +3,8 @@
  *
  * Reads `GET /v1/user/read/me` with the caller's own token and caches it in
  * the session for {@link ACTOR_CACHE_MS}, so lost access takes effect within
- * a minute.
+ * a minute. The cache records the acting account it was read under and is
+ * used only for the same one.
  *
  * @module apps/web/src/lib/console-actor
  */
@@ -14,7 +15,7 @@ import { readApiError } from './api-error';
 import { SESSION_COOKIE } from './cookies';
 import { getSessionStore } from './session';
 import { getSession } from './server-session';
-import { callApi } from './upstream-client';
+import { callApi, sentActingAccountId } from './upstream-client';
 import { ACTING_ACCOUNT_INVALID } from '@/lib/acting';
 
 /** The edge's `403` code for a request whose roles do not grant the route. */
@@ -57,8 +58,16 @@ function reasonOf(code: unknown, acting: boolean): ConsoleActorFailure {
 export async function getConsoleActor(): Promise<ConsoleActorResult> {
   const session = await getSession();
   if (!session) return { ok: false, reason: 'no_session' };
+  // A cache read under another acting account (or none) belongs to another actor.
+  const actingAccountId = await sentActingAccountId(session);
   const cached = session.consoleActor;
-  if (cached && Date.now() - cached.at < ACTOR_CACHE_MS) return { ok: true, me: cached.me };
+  if (
+    cached &&
+    cached.actingAccountId === actingAccountId &&
+    Date.now() - cached.at < ACTOR_CACHE_MS
+  ) {
+    return { ok: true, me: cached.me };
+  }
 
   let res: Response;
   try {
@@ -73,7 +82,7 @@ export async function getConsoleActor(): Promise<ConsoleActorResult> {
   if (res.status === 403) {
     return {
       ok: false,
-      reason: reasonOf((await readApiError(res))?.code, session.actingAccountId !== undefined),
+      reason: reasonOf((await readApiError(res))?.code, actingAccountId !== undefined),
     };
   }
   if (!res.ok) return { ok: false, reason: 'unavailable' };
@@ -82,6 +91,10 @@ export async function getConsoleActor(): Promise<ConsoleActorResult> {
   const me = parsed.data;
 
   const sid = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (sid) await getSessionStore().update(sid, { consoleActor: { me, at: Date.now() } });
+  if (sid) {
+    await getSessionStore().update(sid, {
+      consoleActor: { me, at: Date.now(), ...(actingAccountId ? { actingAccountId } : {}) },
+    });
+  }
   return { ok: true, me };
 }

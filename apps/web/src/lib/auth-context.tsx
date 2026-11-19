@@ -26,7 +26,7 @@ interface AuthContextValue {
   can: (capability: string) => boolean;
   /** True when an org owner is using the portal as their own coordinator account. */
   acting: boolean;
-  /** The acting account's organisation name; null when not acting. */
+  /** The acting account's organisation name; null when not acting or not known. */
   actingOrgName: string | null;
 }
 
@@ -47,9 +47,9 @@ export interface AuthProviderProps {
   capabilities?: readonly string[] | null;
   /**
    * Set when an org owner acts as their own coordinator account, with that
-   * account's organisation name. Null or absent otherwise.
+   * account's organisation name (null when not known). Null or absent otherwise.
    */
-  acting?: { orgName: string } | null;
+  acting?: { orgName: string | null } | null;
 }
 
 /**

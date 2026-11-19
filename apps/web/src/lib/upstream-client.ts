@@ -5,12 +5,13 @@
  * it as a Bearer header. Tokens never reach the browser.
  */
 
-import { cookies } from 'next/headers';
+import { cookies, headers as requestHeaders } from 'next/headers';
 import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
 import { getOidcAdapter } from './oidc';
 import { getSessionStore, type SessionData } from './session';
 import { SESSION_COOKIE } from './cookies';
 import { getSession } from './server-session';
+import { isConsolePath } from './acting';
 
 const REFRESH_BEFORE_EXPIRY_MS = 60_000;
 
@@ -69,6 +70,22 @@ async function refreshSessionTokens(session: SessionData): Promise<string | null
   return refreshed.value.accessToken;
 }
 
+/**
+ * The acting account a call made now names in the acting-account header.
+ *
+ * None outside acting mode, and none while rendering a console page or
+ * serving a console BFF route (read from the `x-pathname` request header the
+ * middleware sets), so the console never runs as the coordinator account.
+ *
+ * @param session - The active session.
+ * @returns The acting account id, or `undefined` when the call acts as the signed-in account.
+ */
+export async function sentActingAccountId(session: SessionData): Promise<string | undefined> {
+  if (!session.actingAccountId) return undefined;
+  const path = (await requestHeaders()).get('x-pathname');
+  return path !== null && isConsolePath(path) ? undefined : session.actingAccountId;
+}
+
 export interface UpstreamCallOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   headers?: Record<string, string>;
@@ -85,7 +102,8 @@ export interface UpstreamCallOptions {
  * Calls the resource API with the active session's access token.
  *
  * When the session acts as the owner's own coordinator account, the call
- * names it in the acting-account header, unless `opts.asSignedInAccount` is set.
+ * names it in the acting-account header, unless `opts.asSignedInAccount` is
+ * set or the request is a console page or console BFF route.
  *
  * @param path - Path relative to `API_BASE_URL` (e.g. `/links`).
  * @param opts - Method, headers, body.
@@ -96,7 +114,7 @@ export async function callApi(path: string, opts: UpstreamCallOptions = {}): Pro
   const session = await getSession();
   const accessToken = session ? await freshAccessTokenOf(session) : null;
   if (!session || !accessToken) throw new Error('no active session');
-  const actingAccountId = opts.asSignedInAccount ? undefined : session.actingAccountId;
+  const actingAccountId = opts.asSignedInAccount ? undefined : await sentActingAccountId(session);
 
   const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
   const headers = new Headers(opts.headers);

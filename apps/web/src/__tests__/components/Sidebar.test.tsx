@@ -87,6 +87,7 @@ vi.mock('next-intl', () => ({
       menu_label: 'Main navigation',
       back_to_console: 'Back to console',
       acting_sublabel: `Coordinator · ${vars?.org ?? ''}`,
+      acting_sublabel_no_org: 'Coordinator',
     };
     return map[key] ?? key;
   },
@@ -450,13 +451,27 @@ describe("<Sidebar /> acting as the owner's own coordinator account", () => {
     expect(back.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('shows the role alone in the footer when the organisation is not known', () => {
+    useAuth.mockReturnValue({
+      user: { id: 'c1', org: 'o@x.org', name: 'Asha', email: 'o@x.org' },
+      signOut: vi.fn(),
+      supportEnabled: false,
+      acting: true,
+      actingOrgName: null,
+    });
+    render(<Sidebar />);
+    expect(screen.getAllByText('Coordinator').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Coordinator ·/)).toBeNull();
+    expect(screen.getAllByRole('link', { name: /Back to console/ }).length).toBeGreaterThan(0);
+  });
+
   it('links Account Details to the console profile', () => {
     mockActing();
     render(<Sidebar />);
     const aside = screen.getByRole('complementary');
     expect(within(aside).getByRole('link', { name: /Profile/ })).toHaveAttribute(
       'href',
-      '/console/profile',
+      '/api/auth/acting/leave?returnTo=%2Fconsole%2Fprofile',
     );
   });
 

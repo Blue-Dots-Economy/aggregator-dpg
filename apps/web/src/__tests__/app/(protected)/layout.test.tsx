@@ -307,6 +307,22 @@ describe('<ProtectedLayout />', () => {
       expect(screen.getByTestId('capabilities')).toHaveTextContent('profiles.onboard');
     });
 
+    it('keeps the acting shell, without an org name, when /me is unavailable', async () => {
+      vi.mocked(getSession).mockResolvedValue(
+        baseSession({ name: 'Owner', actingAccountId: ACCOUNT_ID }),
+      );
+      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+      vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: false, reason: 'unavailable' });
+
+      await renderLayout();
+
+      expect(redirect).not.toHaveBeenCalled();
+      expect(screen.getByTestId('acting')).toHaveTextContent('true');
+      expect(screen.getByTestId('acting-org')).toHaveTextContent('none');
+      expect(screen.getByTestId('user-name')).toHaveTextContent('Owner');
+    });
+
     it('ends acting mode and lands on the console notice when the account is no longer valid', async () => {
       vi.mocked(getSession).mockResolvedValue(baseSession({ actingAccountId: ACCOUNT_ID }));
       vi.mocked(tokenAggregatorId).mockReturnValue(null);

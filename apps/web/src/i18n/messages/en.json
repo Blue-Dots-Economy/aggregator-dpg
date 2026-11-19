@@ -281,7 +281,8 @@
     "close_menu": "Close menu",
     "menu_label": "Main navigation",
     "back_to_console": "Back to console",
-    "acting_sublabel": "Coordinator · {org}"
+    "acting_sublabel": "Coordinator · {org}",
+    "acting_sublabel_no_org": "Coordinator"
   },
   "onboarding": {
     "title": "Onboarding",
@@ -468,7 +469,8 @@
       "back": "Back to Onboarding"
     },
     "acting_banner": "You're onboarding as yourself in {org}. Counts here are only your own.",
-    "acting_banner_dismiss": "Dismiss"
+    "acting_banner_dismiss": "Dismiss",
+    "acting_banner_no_org": "You're onboarding as yourself. Counts here are only your own."
   },
   "profile": {
     "view": {

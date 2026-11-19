@@ -17,6 +17,8 @@ export const CachedActorSchema = z.object({
   me: MeResponseSchema,
   /** Epoch ms when it was read. */
   at: z.number(),
+  /** The acting account named on the read; absent when read as the signed-in account. */
+  actingAccountId: z.guid().optional(),
 });
 export type CachedActor = z.infer<typeof CachedActorSchema>;
 

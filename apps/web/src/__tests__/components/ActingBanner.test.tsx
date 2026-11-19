@@ -9,7 +9,7 @@ import messages from '@/i18n/messages/en.json';
 import { AuthProvider } from '@/lib/auth-context';
 import { ActingBanner } from '@/components/shell/ActingBanner';
 
-function renderBanner(acting: { orgName: string } | null) {
+function renderBanner(acting: { orgName: string | null } | null) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
       <AuthProvider initialUser={null} acting={acting}>
@@ -27,6 +27,18 @@ describe('<ActingBanner />', () => {
         "You're onboarding as yourself in Acme Jobs. Counts here are only your own.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it('leaves the organisation out when it is not known', () => {
+    renderBanner({ orgName: null });
+    expect(
+      screen.getByText("You're onboarding as yourself. Counts here are only your own."),
+    ).toBeInTheDocument();
+  });
+
+  it('is a plain region, not a live status', () => {
+    renderBanner({ orgName: 'Acme Jobs' });
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('hides once dismissed', () => {

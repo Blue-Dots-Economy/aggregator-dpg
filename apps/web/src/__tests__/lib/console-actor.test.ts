@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SessionData } from '@/lib/session';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
-vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));
+vi.mock('@/lib/upstream-client', () => ({
+  callApi: vi.fn(),
+  sentActingAccountId: vi.fn(async (s: { actingAccountId?: string }) => s.actingAccountId),
+}));
 const update = vi.fn(async () => ({ ok: true }));
 vi.mock('@/lib/session', () => ({ getSessionStore: () => ({ update }) }));
 vi.mock('next/headers', () => ({
@@ -33,6 +36,28 @@ describe('getConsoleActor (C14)', () => {
     } as never);
     expect(await getConsoleActor()).toEqual({ ok: true, me });
     expect(callApi).not.toHaveBeenCalled();
+  });
+
+  it('ignores a cached coordinator actor read under an acting account the session no longer has', async () => {
+    const coordinator = { ...me, kind: 'coordinator', is_network_admin: false };
+    vi.mocked(getSession).mockResolvedValue({
+      ...base,
+      consoleActor: { me: coordinator, at: Date.now(), actingAccountId: 'acc-1' },
+    } as never);
+    vi.mocked(callApi).mockResolvedValue(json(me));
+    expect(await getConsoleActor()).toEqual({ ok: true, me });
+    expect(update).toHaveBeenCalledWith('sid-1', {
+      consoleActor: { me, at: expect.any(Number) },
+    });
+  });
+
+  it('records the acting account an actor was read under', async () => {
+    vi.mocked(getSession).mockResolvedValue({ ...base, actingAccountId: 'acc-1' });
+    vi.mocked(callApi).mockResolvedValue(json(me));
+    await getConsoleActor();
+    expect(update).toHaveBeenCalledWith('sid-1', {
+      consoleActor: { me, at: expect.any(Number), actingAccountId: 'acc-1' },
+    });
   });
 
   it('re-reads a stale actor and caches it', async () => {

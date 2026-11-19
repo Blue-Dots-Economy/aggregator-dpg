@@ -12,6 +12,22 @@ export const ACTING_LEAVE_PATH = '/api/auth/acting/leave';
 /** Where leaving acting mode lands without another target. */
 export const CONSOLE_HOME = '/console';
 
+/** Path prefixes of the console pages and the console BFF routes. */
+const CONSOLE_PATH_PREFIXES = ['/console', '/api/console'];
+
+/**
+ * Whether `path` is a console page or a console BFF route.
+ *
+ * Calls made while rendering or serving one never act as the coordinator
+ * account, so the console never reads or caches the coordinator actor.
+ *
+ * @param path - A path, optionally with a query or hash.
+ */
+export function isConsolePath(path: string): boolean {
+  const pathname = path.split(/[?#]/, 1)[0] ?? '';
+  return CONSOLE_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 /** The API's `403` code for an acting account that can no longer be used. */
 export const ACTING_ACCOUNT_INVALID = 'ACTING_ACCOUNT_INVALID';
 

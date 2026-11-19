@@ -281,7 +281,8 @@
     "close_menu": "मेनू बंद करें",
     "menu_label": "मुख्य नेविगेशन",
     "back_to_console": "कंसोल पर वापस जाएँ",
-    "acting_sublabel": "समन्वयक · {org}"
+    "acting_sublabel": "समन्वयक · {org}",
+    "acting_sublabel_no_org": "समन्वयक"
   },
   "onboarding": {
     "title": "ऑनबोर्डिंग",
@@ -468,7 +469,8 @@
       "back": "ऑनबोर्डिंग पर वापस जाएं"
     },
     "acting_banner": "आप {org} में स्वयं के रूप में ऑनबोर्डिंग कर रहे हैं। यहाँ की गिनती केवल आपकी अपनी है।",
-    "acting_banner_dismiss": "बंद करें"
+    "acting_banner_dismiss": "बंद करें",
+    "acting_banner_no_org": "आप स्वयं के रूप में ऑनबोर्डिंग कर रहे हैं। यहाँ की गिनती केवल आपकी अपनी है।"
   },
   "profile": {
     "view": {
