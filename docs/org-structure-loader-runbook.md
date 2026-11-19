@@ -158,13 +158,17 @@ rm orgs.csv coordinators.csv orgs-report*.csv coordinators-report*.csv
 - To see who has accepted at first login, run this read-only query (ids and timestamps only, no names or emails):
 
   ```sql
-  SELECT u.id AS user_id, o.id AS org_id, c.accepted_at
-    FROM consent_record c
-    JOIN users u ON u.id = c.user_id
-    LEFT JOIN organisations o ON o.id = u.org_id
+  SELECT 'user' AS subject, u.id AS subject_id, c.accepted_at
+    FROM consent_record c JOIN users u ON u.id = c.user_id
    WHERE c.source = 'first-login' AND u.created_by LIKE 'provisioned:%'
-   ORDER BY c.accepted_at
+  UNION ALL
+  SELECT 'organisation', o.id, c.accepted_at
+    FROM consent_record c JOIN organisations o ON o.id = c.org_id
+   WHERE c.source = 'first-login' AND o.created_by LIKE 'provisioned:%'
+   ORDER BY accepted_at
   ```
+
+  Coordinators accept for themselves (`user` rows); an owner accepts once per owned org (`organisation` rows).
 
 - QR links (#1119) and bulk uploads (#1124) per coordinator come next.
 
