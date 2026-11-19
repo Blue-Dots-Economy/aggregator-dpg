@@ -135,3 +135,34 @@ export function coordinatorsHref(me: ManageScopeSource & { is_network_admin: boo
   const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
   return owned.length === 1 ? CONSOLE_HOME_HREF : COORDINATORS_LIST_HREF;
 }
+
+/** The parts of `read/me` {@link selfAddOrgs} reads. */
+interface SelfAddSource extends ManageScopeSource {
+  kind: 'admin' | 'coordinator';
+  is_network_admin: boolean;
+  own_coordinator_account_id?: string | null | undefined;
+  orgs: ReadonlyArray<ManageScopeSource['orgs'][number] & { name: string; role: string }>;
+}
+
+/**
+ * The organisations an owner may add their own coordinator account to: those
+ * they own and manage, aggregator organisations other than Default. Empty for
+ * the network admin, an owner of the root, a coordinator, and an owner who
+ * already has a coordinator account. Mirrors the API's self-add checks.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The organisations to offer, in `read/me` order.
+ */
+export function selfAddOrgs(me: SelfAddSource): Array<{ id: string; name: string }> {
+  if (me.kind !== 'admin' || me.is_network_admin || me.own_coordinator_account_id) return [];
+  if (me.orgs.some((o) => o.org_type === 'network_facilitator' && o.role === 'owner')) return [];
+  return me.orgs
+    .filter(
+      (o) =>
+        o.role === 'owner' &&
+        o.org_type === 'aggregator' &&
+        !o.is_default &&
+        canManageOrg(me, o.id),
+    )
+    .map((o) => ({ id: o.id, name: o.name }));
+}

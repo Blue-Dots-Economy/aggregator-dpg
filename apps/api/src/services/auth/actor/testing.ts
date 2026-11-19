@@ -12,16 +12,16 @@ import {
   type ResolveActorInput,
 } from './interface.js';
 
-/** In-memory resolver keyed by `aggregator_id` claim or subject. */
+/** In-memory resolver keyed by `aggregator_id` claim, acting account or subject. */
 export class ActorResolverFake extends ActorResolverBase {
   private readonly byKey = new Map<string, Actor>();
   /** When set, every resolve fails with `UNAVAILABLE`. */
   failWith: string | null = null;
 
   /**
-   * Seeds an actor for a subject (or an `aggregator_id` claim).
+   * Seeds an actor for a subject, an `aggregator_id` claim or an acting account.
    *
-   * @param key - The subject or the `aggregator_id` claim.
+   * @param key - The subject, the `aggregator_id` claim or the `x-acting-account` id.
    * @param actor - The actor it resolves to.
    */
   seed(key: string, actor: Actor): void {
@@ -31,7 +31,8 @@ export class ActorResolverFake extends ActorResolverBase {
   /** {@inheritDoc ActorResolverBase.resolve} */
   async resolve(/* NOSONAR typescript:S7503 */ input: ResolveActorInput): Promise<ActorResult> {
     if (this.failWith) return { ok: false, error: { code: 'UNAVAILABLE', message: this.failWith } };
-    const actor = this.byKey.get(input.aggregatorId ?? input.subject) ?? null;
+    const actor =
+      this.byKey.get(input.aggregatorId ?? input.actingAccountId ?? input.subject) ?? null;
     return { ok: true, value: actor };
   }
 }

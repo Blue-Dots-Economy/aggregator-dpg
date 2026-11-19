@@ -16,8 +16,9 @@
 #
 # The question is the API's route-level one: does the caller hold the route's
 # permission in any of its organisations. The token's `roles` claim lists role
-# keys only, for active memberships only. Per-organisation checks (reach,
-# masking, assignment rules) stay in the API.
+# keys only, for active memberships only, plus `acting:<id>:<roleKey>` entries
+# that count only with a matching `x-acting-account` header (see `roles`).
+# Per-organisation checks (reach, masking, assignment rules) stay in the API.
 
 package rbac.edge
 
@@ -55,9 +56,33 @@ claims := jwt_payload if {
 } else := {}
 
 # The claim is a list; tolerate a single value emitted as a string.
-roles := {claims.roles} if {
+raw_roles := {claims.roles} if {
 	is_string(claims.roles)
 } else := {r | some r in object.get(claims, "roles", [])}
+
+# An owner acting as its own coordinator account sends that account's id in
+# `x-acting-account`. Its roles are in the claim as `acting:<id>:<roleKey>`
+# (ACTING_ROLE_PREFIX in packages/rbac/src/acting.ts). The API compares ids
+# case-insensitively, so the edge does too.
+acting_prefix := "acting:"
+
+acting_id := lower(object.get(object.get(http, "headers", {}), "x-acting-account", ""))
+
+acting_entry_prefix := concat("", [acting_prefix, acting_id, ":"])
+
+# The roles the request is decided with. Without the header: the plain role
+# keys, never an acting entry. With it: only that account's acting entries,
+# as role keys; the owner's own roles do not count.
+roles := {r |
+	some r in raw_roles
+	not contains(r, ":")
+} if {
+	acting_id == ""
+} else := {k |
+	some e in raw_roles
+	startswith(e, acting_entry_prefix)
+	k := substring(e, count(acting_entry_prefix), -1)
+}
 
 is_service_account if startswith(object.get(claims, "preferred_username", ""), "service-account-")
 

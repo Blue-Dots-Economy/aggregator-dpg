@@ -10,6 +10,13 @@ import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import {
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 
 const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -194,6 +201,40 @@ describe('GET /v1/dashboard', () => {
   it('401 without token', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/dashboard' });
     expect(res.statusCode).toBe(401);
+  });
+
+  it("an owner acting as its own coordinator reads that coordinator's dashboard", async () => {
+    const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+    const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    userStore.seed([
+      buildCoordinator({
+        id: AGG_A,
+        orgSlug: 'agg-a',
+        name: 'Agg A',
+        status: 'active',
+        signalstackOrgId: ORG_A,
+        serves: ['seeker', 'provider'],
+        parentOrgId: ORG,
+      }),
+    ]);
+    const orgs = new OrganisationStoreFake();
+    orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+    _setOrganisationStore(orgs);
+    await getIdentityStore().link(ADMIN, 'keycloak', 'kc-owner', 'admin');
+    await getIdentityStore().link(AGG_A, 'keycloak', 'kc-owner', 'coordinator');
+    _setAccessTokenVerifier(async () => ({ sub: 'kc-owner', email: 'owner@x.com' }));
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/dashboard?domain=seeker',
+        headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: AGG_A },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ actingOrgId: ORG_A }));
+    } finally {
+      _setOrganisationStore(null);
+    }
   });
 
   it('403 NOT_APPROVED when decision_made is pending', async () => {

@@ -24,7 +24,7 @@ import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
 import { CountTile, type TileTone } from './CountTile';
-import { ConsoleStatusPill, type ConsoleStatus } from './ConsoleUi';
+import { ConsoleStatusPill, YouTag, type ConsoleStatus } from './ConsoleUi';
 
 /** One row, already shaped by the page. */
 export interface MemberRow {
@@ -40,6 +40,8 @@ export interface MemberRow {
   cells: ReactNode[];
   /** Shown in the action column instead of the view link, such as a resend button. */
   action?: ReactNode;
+  /** The viewer's own coordinator account, tagged "You". */
+  self?: boolean;
 }
 
 /** The tiles and the list filters: everyone, those who joined, those still invited. */
@@ -194,16 +196,21 @@ export function MemberList({
                           {initialsOf(r.name)}
                         </span>
                         <div className="min-w-0">
-                          {r.href ? (
-                            <Link
-                              href={r.href}
-                              className="block truncate font-bold text-ink-900 hover:text-(--bd-primary-600) hover:underline"
-                            >
-                              {r.name}
-                            </Link>
-                          ) : (
-                            <span className="block truncate font-bold text-ink-900">{r.name}</span>
-                          )}
+                          <div className="flex min-w-0 items-center gap-2">
+                            {r.href ? (
+                              <Link
+                                href={r.href}
+                                className="block truncate font-bold text-ink-900 hover:text-(--bd-primary-600) hover:underline"
+                              >
+                                {r.name}
+                              </Link>
+                            ) : (
+                              <span className="block truncate font-bold text-ink-900">
+                                {r.name}
+                              </span>
+                            )}
+                            {r.self ? <YouTag label={t('org_home.you')} /> : null}
+                          </div>
                           {r.detail ? (
                             <div className="truncate text-[12.5px] text-ink-500">{r.detail}</div>
                           ) : null}

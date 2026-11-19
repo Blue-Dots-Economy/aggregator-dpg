@@ -220,6 +220,29 @@ describe('jsonFetch', () => {
     expect(window.location.href).toBe('');
   });
 
+  it('leaves acting mode for the console notice on a 403 ACTING_ACCOUNT_INVALID', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'ACTING_ACCOUNT_INVALID' } }), {
+        status: 403,
+      }),
+    ) as unknown as typeof fetch;
+    const err = await failure(jsonFetch('/api/onboarding/summary', AnySchema));
+    expect(err).toMatchObject({ status: 403, code: 'ACTING_ACCOUNT_INVALID' });
+    expect(window.location.href).toBe(
+      '/api/auth/acting/leave?returnTo=%2Fconsole&reason=acting_ended',
+    );
+  });
+
+  it('keeps any other 403 a normal error', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: 'FORBIDDEN' } }), { status: 403 }),
+      ) as unknown as typeof fetch;
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
+    expect(window.location.href).toBe('');
+  });
+
   it('drops fields the schema does not declare', async () => {
     globalThis.fetch = vi
       .fn()

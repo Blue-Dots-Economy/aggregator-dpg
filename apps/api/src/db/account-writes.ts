@@ -74,7 +74,9 @@ export class IdentityNotLinkableError extends Error {
 /**
  * Links a provider login to an account, once.
  *
- * Inserts only when the account exists and, if `userType` is given, has that type.
+ * Inserts only when the account exists and, if `userType` is given, has that
+ * type. The row records the account's own type, so one login may link one
+ * account of each type.
  *
  * @param db - Executor (the pool or the caller's transaction).
  * @param userId - The account (`users.id`).
@@ -82,7 +84,7 @@ export class IdentityNotLinkableError extends Error {
  * @param subject - The provider's user id.
  * @param userType - When set, the account must be of this type.
  * @returns `'linked'` when recorded now, `'already'` when this exact link exists.
- * @throws {IdentityTakenError} When the subject belongs to another account.
+ * @throws {IdentityTakenError} When the subject belongs to another account of the same type.
  * @throws {IdentityMismatchError} When the account has another subject for the provider.
  * @throws {IdentityNotLinkableError} When the account is missing or of another type.
  */
@@ -95,8 +97,8 @@ export async function linkIdentity(
 ): Promise<LinkIdentityOutcome> {
   const typeFilter = userType ? sql` AND u.user_type = ${userType}` : sql``;
   const inserted = await db.execute<{ user_id: string }>(sql`
-    INSERT INTO user_identities (user_id, provider, subject)
-    SELECT u.id, ${provider}, ${subject} FROM users u
+    INSERT INTO user_identities (user_id, user_type, provider, subject)
+    SELECT u.id, u.user_type, ${provider}, ${subject} FROM users u
      WHERE u.id = ${userId}${typeFilter}
     ON CONFLICT DO NOTHING
     RETURNING user_id`);
@@ -134,4 +136,60 @@ export async function subjectOf(
     .from(userIdentities)
     .where(and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)));
   return row?.subject ?? null;
+}
+
+/**
+ * Returns the account linked to a provider login, or null.
+ *
+ * Without `userType` the admin account wins when the login links both an
+ * admin and a coordinator.
+ *
+ * @param db - Executor.
+ * @param provider - Provider key.
+ * @param subject - The provider's user id.
+ * @param userType - When set, only an account of this type matches.
+ * @returns The account id, or null when none is linked.
+ */
+export async function userOfSubject(
+  db: DbExecutor,
+  provider: string,
+  subject: string,
+  userType?: 'admin' | 'coordinator',
+): Promise<string | null> {
+  const [row] = await db
+    .select({ userId: userIdentities.userId })
+    .from(userIdentities)
+    .where(
+      and(
+        eq(userIdentities.provider, provider),
+        eq(userIdentities.subject, subject),
+        userType ? eq(userIdentities.userType, userType) : undefined,
+      ),
+    )
+    .orderBy(sql`${userIdentities.userType} = 'admin' DESC`)
+    .limit(1);
+  return row?.userId ?? null;
+}
+
+/**
+ * Returns both accounts linked to a provider login.
+ *
+ * @param db - Executor.
+ * @param provider - Provider key.
+ * @param subject - The provider's user id.
+ * @returns The admin and coordinator account ids; null for a type with no link.
+ */
+export async function accountsOfSubject(
+  db: DbExecutor,
+  provider: string,
+  subject: string,
+): Promise<{ admin: string | null; coordinator: string | null }> {
+  const rows = await db
+    .select({ userId: userIdentities.userId, userType: userIdentities.userType })
+    .from(userIdentities)
+    .where(and(eq(userIdentities.provider, provider), eq(userIdentities.subject, subject)));
+  return {
+    admin: rows.find((r) => r.userType === 'admin')?.userId ?? null,
+    coordinator: rows.find((r) => r.userType === 'coordinator')?.userId ?? null,
+  };
 }

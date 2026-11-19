@@ -18,6 +18,14 @@ import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { is, SQL } from 'drizzle-orm';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
+import {
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 
 interface SummaryRow {
   total: number;
@@ -91,6 +99,9 @@ describe('onboarding routes', () => {
           aggregator_type: ['seeker'],
         };
       }
+      if (token === 'owner') {
+        return { sub: 'kc-owner', email: 'owner@example.org' };
+      }
       if (token === 'no-agg-id') {
         return { sub: 'kc-2', decision_made: 'approved' };
       }
@@ -103,6 +114,8 @@ describe('onboarding routes', () => {
 
   afterAll(async () => {
     await app?.close();
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);
   });
@@ -345,6 +358,57 @@ describe('onboarding routes', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    });
+  });
+
+  describe("acting as the owner's own coordinator account", () => {
+    const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+    const OWN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const ORG = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+    beforeEach(async () => {
+      const users = new UserStoreFake();
+      users.seed([
+        buildCoordinator({ id: OWN, status: 'active', parentOrgId: ORG, signalstackOrgId: 'o1' }),
+        // A second coordinator in the same org, whose counts must not be read.
+        buildCoordinator({ id: AGG_A, status: 'active', parentOrgId: ORG, signalstackOrgId: 'o2' }),
+      ]);
+      _setUserStore(users);
+      const orgs = new OrganisationStoreFake();
+      orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+      _setOrganisationStore(orgs);
+      const identities = getIdentityStore();
+      await identities.link(ADMIN, 'keycloak', 'kc-owner', 'admin');
+      await identities.link(OWN, 'keycloak', 'kc-owner', 'coordinator');
+      await identities.link(AGG_A, 'keycloak', 'kc-1', 'coordinator');
+    });
+
+    it('GET /v1/onboarding/summary counts only the acting coordinator', async () => {
+      summaryRows = [{ total: 5, passed: 4, failed: 1, skipped: 0 }];
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary',
+        headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: OWN },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ aggregator_id: OWN, total: 5 });
+      if (!is(lastWhereCondition, SQL)) throw new Error('no query ran');
+      const where = new PgDialect().sqlToQuery(lastWhereCondition);
+      expect(where.params).toContain(OWN);
+      expect(where.params).not.toContain(AGG_A);
+    });
+
+    it('403 ACTING_ACCOUNT_INVALID for the other coordinator of the org', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary',
+        headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: AGG_A },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({
+        error: { code: 'ACTING_ACCOUNT_INVALID', detail: 'acting account not usable' },
+      });
+      expect(lastWhereCondition).toBeUndefined();
     });
   });
 });

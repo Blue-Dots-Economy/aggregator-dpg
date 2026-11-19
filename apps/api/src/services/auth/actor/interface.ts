@@ -53,10 +53,19 @@ export interface ResolveActorInput {
   aggregatorId?: string;
   /** The token's `sub` (the IdP login). */
   subject: string;
+  /**
+   * The `x-acting-account` header: the owner's own coordinator account on
+   * the same login. Absent: the caller acts as itself.
+   */
+  actingAccountId?: string;
 }
 
 /** Errors a resolve can report. */
-export type ActorResolveError = { code: 'UNAVAILABLE'; message: string };
+export type ActorResolveError = {
+  /** `ACTING_ACCOUNT_INVALID`: the login may not act as `actingAccountId`. */
+  code: 'UNAVAILABLE' | 'ACTING_ACCOUNT_INVALID';
+  message: string;
+};
 
 /** Result of a resolve; `null` when no account matches the token. */
 export type ActorResult =
@@ -69,9 +78,12 @@ export abstract class ActorResolverBase {
    *
    * A token with `aggregator_id` resolves to that coordinator; one without
    * resolves through the recorded IdP login (`user_identities`), never by email.
+   * With `actingAccountId` and no `aggregator_id`, it resolves to that
+   * coordinator when the login may act as it.
    *
    * @param input - Verified claims.
-   * @returns The actor, `null` when the token maps to no account, or
+   * @returns The actor, `null` when the token maps to no account,
+   *   `ACTING_ACCOUNT_INVALID` when the acting account is refused, or
    *   `UNAVAILABLE` when a store failed.
    */
   abstract resolve(input: ResolveActorInput): Promise<ActorResult>;

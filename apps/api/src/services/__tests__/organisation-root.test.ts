@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { IdpAdminFake } from '../idp-admin/testing.js';
-import { KC_ATTR, OWNER_CREATED_BY } from '../idp-admin/index.js';
+import { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from '../idp-admin/index.js';
 import {
   IdentityMismatchError,
   IdentityTakenError,
@@ -28,7 +28,8 @@ import {
 interface FakeUser {
   email: string;
   subject: string | null;
-  isCoordinator: boolean;
+  /** Set for a coordinator account. */
+  coordinator?: boolean;
 }
 
 /** One `organisations` row of the fake database. */
@@ -53,8 +54,6 @@ interface FakeState {
   takenSlugs: string[];
   /** Users the reconcile asked to release. */
   released: string[];
-  /** Addresses that belong to a coordinator. */
-  coordinatorEmails?: string[];
   /** Addresses that own an aggregator org other than Default. */
   orgOwnerEmails?: string[];
   sql: string[];
@@ -79,7 +78,7 @@ vi.mock('../../db/account-writes.js', async (importOriginal) => ({
     const id = `admin-${contactId}`;
     const email = [...h.state!.contacts].find(([, c]) => c === contactId)?.[0] ?? '';
     if (!h.state!.users.has(id)) {
-      h.state!.users.set(id, { email, subject: null, isCoordinator: false });
+      h.state!.users.set(id, { email, subject: null });
     }
     return id;
   }),
@@ -104,7 +103,7 @@ function fakeDb(state: FakeState) {
       const email = params[0] as string;
       return [
         {
-          coordinator: (state.coordinatorEmails ?? []).includes(email),
+          coordinator: [...state.users.values()].some((u) => u.email === email && u.coordinator),
           other_owner: (state.orgOwnerEmails ?? []).includes(email),
         },
       ];
@@ -125,7 +124,6 @@ function fakeDb(state: FakeState) {
           org_owner: org.owner,
           email: user.email,
           subject: user.subject,
-          is_coordinator: user.isCoordinator,
         },
       ];
     }
@@ -185,9 +183,7 @@ function migratedState(over: Partial<FakeState> = {}): FakeState {
         owner: 'u-ph',
       },
     ],
-    users: new Map([
-      ['u-ph', { email: PLACEHOLDER_OWNER_EMAIL, subject: null, isCoordinator: false }],
-    ]),
+    users: new Map([['u-ph', { email: PLACEHOLDER_OWNER_EMAIL, subject: null }]]),
     contacts: new Map([['ops@example.org', 'c-ops']]),
     takenSlugs: [],
     released: [],
@@ -246,7 +242,6 @@ describe('provisionRootIdp', () => {
     ownerUserId: 'u-1',
     ownerEmail: 'ops@example.org',
     ownerSubject: null,
-    ownerIsCoordinator: false,
     ...over,
   });
 
@@ -499,20 +494,44 @@ describe('provisionRootIdp', () => {
     expect(idp.rolesOf(kept.value.id)).toContain('org_owner');
   });
 
-  it("never links a coordinator's IdP user to the admin account", async () => {
+  it("links an existing IdP user to the owner's admin account", async () => {
     const idp = new IdpAdminFake();
     await idp.createUser({ email: 'ops@example.org', enabled: true });
     const { r, subjects } = recorder();
     const report = await provisionRootIdp(
       idp,
-      {
-        root: org({ ownerIsCoordinator: true }),
-        defaultOrg: org({ id: 'org-2', slug: 'default', ownerIsCoordinator: true }),
-      },
+      { root: org({}), defaultOrg: org({ id: 'org-2', slug: 'default' }) },
       r,
     );
+    expect(subjects.get('u-1')).toBeDefined();
+    expect(report.usersReused).toBeGreaterThan(0);
+  });
+
+  it('refuses an existing IdP user that is a coordinator login', async () => {
+    const idp = new IdpAdminFake();
+    const coord = await idp.createUser({
+      email: 'ops@example.org',
+      enabled: false,
+      attributes: { [KC_ATTR.AGGREGATOR_ID]: 'agg-1', [KC_ATTR.DECISION_MADE]: 'approved' },
+    });
+    if (!coord.ok) throw new Error('seed');
+    const warn = vi.spyOn(logger, 'warn');
+    const enable = vi.spyOn(idp, 'enableUser');
+    const { r, subjects } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      { root: org({}), defaultOrg: org({ id: 'org-2', slug: 'default' }) },
+      r,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'owner_is_coordinator_login' }),
+      expect.any(String),
+    );
     expect(subjects.size).toBe(0);
-    expect(report.usersCreated + report.usersReused).toBe(0);
+    expect(enable).not.toHaveBeenCalledWith(coord.value.id);
+    expect(idp.rolesOf(coord.value.id)).not.toContain(OWNER_REALM_ROLE);
+    expect(idp.groupsOf(coord.value.id)).toEqual([]);
+    expect(report.ownersGranted).toBe(0);
   });
 
   it('counts a failed disable while revoking a released owner this app created', async () => {
@@ -621,7 +640,6 @@ describe('reconcileRootOrganisations', () => {
     h.state.users.set('u-old', {
       email: 'old@example.org',
       subject: 's-old',
-      isCoordinator: false,
     });
     for (const o of h.state.orgs) o.owner = 'u-old';
     const state = await reconcileRootOrganisations(config());
@@ -632,18 +650,46 @@ describe('reconcileRootOrganisations', () => {
     expect(h.state.released).toEqual(['u-old', 'u-old']);
   });
 
-  it('refuses a root owner address that is a coordinator’s (P5-14)', async () => {
-    h.state = migratedState({ coordinatorEmails: ['ops@example.org'] });
+  it('refuses a root owner address that is a coordinator’s, keeping the current owner', async () => {
+    h.state = migratedState();
+    h.state.users.set('coord-1', {
+      email: 'ops@example.org',
+      subject: 's-coord',
+      coordinator: true,
+    });
     const warn = vi.spyOn(logger, 'warn');
     const state = await reconcileRootOrganisations(config());
     expect(state?.changed.rootOwner).toBe(false);
     expect(state?.root.ownerEmail).toBe(PLACEHOLDER_OWNER_EMAIL);
+    expect(state?.root.ownerUserId).toBe('u-ph');
+    expect(state?.replacedOwners).toEqual([]);
+    expect(h.state.released).toEqual([]);
+    expect(h.state.users.get('coord-1')?.subject).toBe('s-coord');
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ org: 'root', reason: 'owner_is_coordinator' }),
       expect.any(String),
     );
   });
 
+  it('refuses a Default owner address that is a coordinator’s, keeping the current owner', async () => {
+    h.state = migratedState();
+    h.state.users.set('coord-2', {
+      email: 'dflt@example.org',
+      subject: 's-coord2',
+      coordinator: true,
+    });
+    h.state.contacts.set('dflt@example.org', 'c-dflt');
+    const warn = vi.spyOn(logger, 'warn');
+    const state = await reconcileRootOrganisations(
+      config({ defaultOwnerEmail: 'dflt@example.org' }),
+    );
+    expect(state?.changed.defaultOwner).toBe(false);
+    expect(state?.defaultOrg.ownerEmail).not.toBe('dflt@example.org');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'default', reason: 'owner_is_coordinator' }),
+      expect.any(String),
+    );
+  });
   it('refuses a Default owner who already owns another org (C12)', async () => {
     h.state = migratedState({
       orgOwnerEmails: ['def@example.org'],

@@ -22,6 +22,13 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import {
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import {
@@ -205,6 +212,42 @@ describe('POST /v1/links/create — registration_mode', () => {
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  it('creates the link for the coordinator an owner acts as', async () => {
+    const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+    const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: AGG_ID,
+        orgSlug: ORG_SLUG,
+        name: 'Acme',
+        status: 'active',
+        signalstackOrgId: ORG_ID,
+        serves: ['seeker'],
+        parentOrgId: ORG,
+      }),
+    ]);
+    _setUserStore(users);
+    const orgs = new OrganisationStoreFake();
+    orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+    _setOrganisationStore(orgs);
+    await getIdentityStore().link(ADMIN, 'keycloak', 'kc-owner', 'admin');
+    await getIdentityStore().link(AGG_ID, 'keycloak', 'kc-owner', 'coordinator');
+    _setAccessTokenVerifier(async () => ({ sub: 'kc-owner', email: 'owner@x.com' }));
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/v1/links/create',
+        headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: AGG_ID },
+        payload: { domain: 'seeker' },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(store.creates[0]!.aggregatorId).toBe(AGG_ID);
+    } finally {
+      _setOrganisationStore(null);
+    }
   });
 });
 
