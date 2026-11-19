@@ -1,16 +1,17 @@
 'use client';
 
 /**
- * Coordinator-wide onboarding metrics section for the Onboarding page (`web` app).
+ * Onboarding metrics section for the Onboarding page (`web` app).
  *
  * Renders the Total / Verified / Failed / Skipped stat cards and the
- * joins-by-entry-mode bar. Data comes from `/v1/onboarding/summary` and
- * `/v1/onboarding/by-source`, not signalstack.
+ * joins-by-entry-mode bar for the selected profile type. Data comes from
+ * `/v1/onboarding/summary` and `/v1/onboarding/by-source`, not signalstack.
  */
 import { useTranslations } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
 import { I, type IconName } from '../../../../icons';
 import { useOnboardingSummary, useOnboardingBySource } from '../../../../hooks/useOnboarding';
+import { useActiveDomain } from '@/hooks/useActiveDomain';
 
 /** Tone classes per onboarding outcome card (colored chip + value). */
 const ONBOARDING_TONES = {
@@ -119,14 +120,16 @@ function OnboardingStatCard({
 }
 
 /**
- * Coordinator-wide onboarding metrics: summary stat cards + joins-by-mode bar.
+ * Onboarding metrics for the selected profile type: summary stat cards + joins-by-mode bar.
  *
  * @returns The onboarding metrics section for the Onboarding page.
  */
 export function OnboardingMetrics() {
   const t = useTranslations('dashboard');
-  const summary = useOnboardingSummary();
-  const bySource = useOnboardingBySource();
+  const { domains, active, ready } = useActiveDomain();
+  const summary = useOnboardingSummary({ domain: active, enabled: ready });
+  const bySource = useOnboardingBySource({ domain: active, enabled: ready });
+  const typeLabel = domains.find((d) => d.id === active)?.plural_label;
 
   const slices = bySource.data?.by_source ?? [];
   const totalJoins = slices.reduce((acc, s) => acc + s.passed, 0);
@@ -141,7 +144,9 @@ export function OnboardingMetrics() {
         </span>
       </div>
       <div className="text-[13px] text-ink-400 font-medium mb-3.5">
-        {t('onboardingGroup.helper')}
+        {typeLabel
+          ? t('onboardingGroup.helper', { type: typeLabel })
+          : t('onboardingGroup.helper_no_type')}
       </div>
 
       {summary.isError ? (
@@ -166,7 +171,7 @@ export function OnboardingMetrics() {
             {t('onboardingGroup.retry')}
           </Button>
         </div>
-      ) : summary.isLoading ? (
+      ) : !ready || summary.isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="bd-card p-4 animate-pulse">

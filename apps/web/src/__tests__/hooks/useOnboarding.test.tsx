@@ -113,6 +113,35 @@ describe('useOnboarding hooks', () => {
     await waitFor(() => expect(s1.result.current.isSuccess).toBe(true));
     const s2 = renderHook(() => useOnboardingBySource(), { wrapper });
     await waitFor(() => expect(s2.result.current.isSuccess).toBe(true));
+    expect(svc.summary).toHaveBeenCalledWith({});
+    expect(svc.bySource).toHaveBeenCalledWith({});
+  });
+
+  it('reads the metrics of one profile type, cached per type', async () => {
+    svc.summary!.mockResolvedValue({
+      aggregator_id: 'a1',
+      from: null,
+      to: null,
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    svc.bySource!.mockResolvedValue({ aggregator_id: 'a1', from: null, to: null, by_source: [] });
+    const { client, wrapper } = makeWrapper();
+    const s = renderHook(() => useOnboardingSummary({ domain: 'provider' }), { wrapper });
+    await waitFor(() => expect(s.result.current.isSuccess).toBe(true));
+    const b = renderHook(() => useOnboardingBySource({ domain: 'provider' }), { wrapper });
+    await waitFor(() => expect(b.result.current.isSuccess).toBe(true));
+    expect(svc.summary).toHaveBeenCalledWith({ domain: 'provider' });
+    expect(svc.bySource).toHaveBeenCalledWith({ domain: 'provider' });
+    expect(client.getQueryData(['onboarding', 'summary', 'provider'])).toBeDefined();
+  });
+
+  it('does not read the metrics while disabled', () => {
+    const { wrapper } = makeWrapper();
+    renderHook(() => useOnboardingSummary({ domain: 'seeker', enabled: false }), { wrapper });
+    expect(svc.summary).not.toHaveBeenCalled();
   });
 
   it('useBulkUpload delegates to onboardingService.uploadCsv and invalidates summary', async () => {

@@ -189,11 +189,16 @@ describe('onboardingService', () => {
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );
-    const res = await onboardingService.bySource({ from: '2026-01-01', to: '2026-02-01' });
+    const res = await onboardingService.bySource({
+      from: '2026-01-01',
+      to: '2026-02-01',
+      domain: 'provider',
+    });
     expect(res.by_source).toHaveLength(1);
     const [url] = fetchSpy.mock.calls[0] as [string];
     expect(url).toContain('from=2026-01-01');
     expect(url).toContain('to=2026-02-01');
+    expect(url).toContain('domain=provider');
   });
 
   it('createBulkUpload posts the participant type and resolves the presign envelope', async () => {

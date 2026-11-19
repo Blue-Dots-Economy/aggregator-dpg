@@ -260,17 +260,23 @@ export const onboardingService = {
     });
   },
 
-  async summary(opts: { from?: string; to?: string } = {}): Promise<OnboardingSummary> {
+  async summary(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingSummary> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
+    if (opts.domain) params.set('domain', opts.domain);
     return jsonFetch(withQuery('/api/onboarding/summary', params), OnboardingSummarySchema);
   },
 
-  async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
+  async bySource(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingBySource> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
+    if (opts.domain) params.set('domain', opts.domain);
     return jsonFetch(withQuery('/api/onboarding/by-source', params), OnboardingBySourceSchema);
   },
 

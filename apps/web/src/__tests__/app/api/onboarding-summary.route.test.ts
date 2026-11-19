@@ -55,6 +55,7 @@ describe('GET /api/onboarding/summary query check', () => {
 
   it.each([
     ['', ''],
+    ['?domain=provider', '?domain=provider'],
     ['?from=2026-01-01T00:00:00.000Z', '?from=2026-01-01T00%3A00%3A00.000Z'],
     ['?to=2026-01-01T10:00:00%2B05:30&x=1', '?to=2026-01-01T10%3A00%3A00%2B05%3A30'],
   ])('forwards %j as %j', async (query, forwarded) => {
