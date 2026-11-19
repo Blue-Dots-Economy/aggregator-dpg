@@ -35,6 +35,8 @@ export const QR_PLAN_PROBLEM = {
   VOICE_BOT_NOT_FOR_DOMAIN: 'VOICE_BOT_NOT_FOR_DOMAIN',
   VOICE_BOT_REQUIRED: 'VOICE_BOT_REQUIRED',
   INVALID_LINK_NAME: 'INVALID_LINK_NAME',
+  /** The coordinator already has a link with this slug that does not cover the row (another status, type or mode, or expired). */
+  LINK_NAME_TAKEN: 'LINK_NAME_TAKEN',
   INVALID_EXPIRY: 'INVALID_EXPIRY',
   EXPIRY_IN_PAST: 'EXPIRY_IN_PAST',
   /** The same coordinator, profile type and `link_name` as an earlier row. */
@@ -77,7 +79,8 @@ const EXPIRY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** Row lookups shared across rows, so each coordinator is read once. */
 interface PlanCache {
   coordinators: Map<string, Coordinator | null>;
-  liveLinks: Map<string, RegistrationLink[]>;
+  /** Every link of a coordinator, in all statuses: slugs are unique per coordinator across them. */
+  links: Map<string, RegistrationLink[]>;
 }
 
 /** Bounds a store lookup by the per-call timeout, when one is set. */
@@ -128,28 +131,25 @@ async function findCoordinator(
   return found;
 }
 
-/** The coordinator's live links, every page. */
-async function liveLinksOf(
+/** The coordinator's links in every status, every page. */
+async function linksOf(
   userId: string,
   cache: PlanCache,
   bound: Bound,
 ): Promise<RegistrationLink[]> {
-  const cached = cache.liveLinks.get(userId);
+  const cached = cache.links.get(userId);
   if (cached) return cached;
   const store = getRegistrationLinksStore();
   const rows: RegistrationLink[] = [];
   for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
     const page = must(
-      await bound(
-        store.list(userId, { status: 'live', limit: LIST_PAGE_SIZE, offset }),
-        'links list',
-      ),
+      await bound(store.list(userId, { limit: LIST_PAGE_SIZE, offset }), 'links list'),
       'registrationLinksStore.list',
     );
     rows.push(...page.rows);
     if (page.rows.length === 0 || rows.length >= page.total) break;
   }
-  cache.liveLinks.set(userId, rows);
+  cache.links.set(userId, rows);
   return rows;
 }
 
@@ -224,14 +224,23 @@ async function planRow(
   if (!voiceBot.ok) add(voiceBotProblem(voiceBot.error.code, row.voiceBot, ctx.cfg), 'voice_bot');
   if (!voiceBot.ok || problems.length > 0) return { link: null, problems };
 
-  const live = await liveLinksOf(coordinator.id, ctx.cache, ctx.bound);
-  const match = live.find(
-    (l) =>
-      l.registrationMode === modeKey &&
-      l.domain === domain &&
-      (l.expiresAt === null || l.expiresAt.getTime() > ctx.now.getTime()) &&
-      (row.linkName === '' || l.slug === row.linkName),
-  );
+  const all = await linksOf(coordinator.id, ctx.cache, ctx.bound);
+  const covers = (l: RegistrationLink): boolean =>
+    l.status === 'live' &&
+    l.registrationMode === modeKey &&
+    l.domain === domain &&
+    (l.expiresAt === null || l.expiresAt.getTime() > ctx.now.getTime());
+  let match: RegistrationLink | undefined;
+  if (row.linkName === '') {
+    match = all.find(covers);
+  } else {
+    // A taken slug would get a random suffix on create, and a rerun could not find that link again.
+    match = all.find((l) => l.slug === row.linkName);
+    if (match && !covers(match)) {
+      add(QR_PLAN_PROBLEM.LINK_NAME_TAKEN, 'link_name');
+      return { link: null, problems };
+    }
+  }
   return {
     link: {
       row,
@@ -287,7 +296,7 @@ export async function buildLinksPlan(input: {
   );
   const blocked = new Set(input.inputProblems.map((p) => p.line));
   const seen = new Set<string>();
-  const cache: PlanCache = { coordinators: new Map(), liveLinks: new Map() };
+  const cache: PlanCache = { coordinators: new Map(), links: new Map() };
   const { callTimeoutMs } = input;
   const bound: Bound = (promise, what) =>
     callTimeoutMs === undefined ? promise : withTimeout(promise, callTimeoutMs, what);

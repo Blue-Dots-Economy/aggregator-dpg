@@ -371,6 +371,38 @@ describe('buildLinksPlan', () => {
     expect(planned.map((p) => p.existing?.slug ?? null)).toEqual(['camp', null]);
   });
 
+  it.each<[string, Partial<RegistrationLink>]>([
+    ['retired', { status: 'retired' }],
+    ['draft', { status: 'draft' }],
+    ['expired live', { expiresAt: new Date('2026-11-01T00:00:00Z') }],
+    ['other profile type', { domain: 'provider' }],
+    ['other mode', { registrationMode: 'form' }],
+  ])(
+    'reports LINK_NAME_TAKEN when the name is held by a clashing link: %s',
+    async (_name, clash) => {
+      links.rows.push(link({ slug: 'camp', ...clash }));
+      const { links: planned, problems } = await plan([row({ linkName: 'camp' })]);
+      expect(planned).toEqual([]);
+      expect(problems).toEqual([
+        { line: 2, code: QR_PLAN_PROBLEM.LINK_NAME_TAKEN, field: 'link_name' },
+      ]);
+    },
+  );
+
+  it('still plans existing for a live same-type two-option link with that name', async () => {
+    links.rows.push(link({ slug: 'camp' }));
+    const { links: planned, problems } = await plan([row({ linkName: 'camp' })]);
+    expect(problems).toEqual([]);
+    expect(planned[0]?.existing?.slug).toBe('camp');
+  });
+
+  it('ignores links in other statuses for an unnamed row', async () => {
+    links.rows.push(link({ slug: 'old', status: 'retired' }));
+    const { links: planned, problems } = await plan([row()]);
+    expect(problems).toEqual([]);
+    expect(planned[0]?.existing).toBeNull();
+  });
+
   it('ignores an expired live link', async () => {
     links.rows.push(link({ expiresAt: new Date('2026-11-01T00:00:00Z') }));
     const { links: planned } = await plan([row()]);

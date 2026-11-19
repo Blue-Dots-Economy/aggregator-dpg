@@ -3,6 +3,7 @@ import { logger } from '../../logger.js';
 import { _setNetworkConfig } from '../../services/network-config.js';
 import { _setUserStore } from '../../services/user-store/index.js';
 import { _setRegistrationLinksStore } from '../../services/registration-links-store/index.js';
+import type { RegistrationLink } from '../../services/registration-links-store/index.js';
 import { buildPublicUrl } from '../../services/registration-links/create.js';
 import { parseLinksCsv } from '../qr-links-input.js';
 import { buildLinksPlan } from '../qr-links-plan.js';
@@ -143,6 +144,21 @@ describe('applyLinksPlan', () => {
     ]);
   });
 
+  it('refuses a sheet whose link name a retired link holds, and creates nothing', async () => {
+    links.rows.push({ ...retiredCamp() });
+    const parsed = parseLinksCsv(`${[HEADER, 'raj@x.org,seeker,,camp,'].join('\n')}\n`);
+    const plan = await buildLinksPlan({
+      rows: parsed.rows,
+      inputProblems: parsed.problems,
+      now: NOW,
+    });
+    expect(plan.problems.map((p) => p.code)).toEqual(['LINK_NAME_TAKEN']);
+    await expect(applyLinksPlan(plan, { operator: 'asha', log })).rejects.toMatchObject({
+      code: 'PLAN_HAS_PROBLEMS',
+    });
+    expect(links.creates).toEqual([]);
+  });
+
   it('refuses a plan with problems and an invalid operator', async () => {
     await expect(
       applyLinksPlan(
@@ -158,3 +174,22 @@ describe('applyLinksPlan', () => {
     ).rejects.toMatchObject({ code: 'INVALID_OPERATOR' });
   });
 });
+
+/** A retired two-option link of Raj's with slug `camp`. */
+function retiredCamp(): RegistrationLink {
+  return {
+    id: 'retired-camp',
+    aggregatorId: RAJ_ID,
+    slug: 'camp',
+    domain: 'seeker',
+    context: {},
+    registrationMode: 'voice_or_form',
+    voiceBotKey: 'bot_a',
+    qrObjectKey: null,
+    status: 'retired',
+    expiresAt: null,
+    createdBy: RAJ_ID,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
