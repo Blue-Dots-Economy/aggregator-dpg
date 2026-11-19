@@ -48,7 +48,10 @@ vi.mock('@/hooks/useOnboarding', () => ({
   useDeactivateLink: () => useDeactivateLink(),
   useRegistrationLinks: (...args: unknown[]) => useRegistrationLinks(...args),
   useUpdateLink: () => useUpdateLink(),
+  useVoiceBots: (domain: string) => useVoiceBots(domain),
 }));
+
+const { useVoiceBots } = vi.hoisted(() => ({ useVoiceBots: vi.fn() }));
 
 const { useProfile, useProfileRaw } = vi.hoisted(() => ({
   useProfile: vi.fn(),
@@ -79,7 +82,7 @@ const testMessages = {
   onboarding: messages.onboarding,
   access: messages.access,
   form: messages.form,
-  regmode: { form: 'Form', voice: 'Voice' },
+  regmode: { form: 'Form', voice: 'Voice', voice_or_form: 'Voice or Form' },
 };
 
 function renderCreate() {
@@ -112,6 +115,34 @@ const cfg = {
       public_hint_i18n_key: null,
     },
   },
+};
+
+const voiceOrFormCfg = {
+  ...cfg,
+  registration_modes: {
+    form: cfg.registration_modes.form,
+    voice: cfg.registration_modes.voice,
+    voice_or_form: {
+      label_i18n_key: 'regmode.voice_or_form',
+      submission_shape: 'account_only' as const,
+      public_hint_i18n_key: null,
+      offers: ['voice', 'form'] as const,
+    },
+  },
+};
+
+const BOT_HI = {
+  key: 'up-hi',
+  display_name: 'UP Rozgar Sahayak',
+  phone: '+911234567890',
+  languages: ['hi'],
+  description: 'Hindi, for seekers in UP',
+};
+const BOT_KN = {
+  key: 'ka-kn',
+  display_name: 'UP Kannada Bot',
+  phone: '+919876543210',
+  languages: ['kn'],
 };
 
 const twoDomainCfg = {
@@ -363,6 +394,131 @@ describe('<CreateLinkSection />', () => {
 
     expect(createMutateAsync.mock.calls[0]![0].registration_mode).toBe('voice');
   });
+
+  describe('voice bot picker', () => {
+    async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+      await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+      await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+      await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    }
+
+    beforeEach(() => {
+      useAggregatorConfig.mockReturnValue({ data: voiceOrFormCfg });
+      useVoiceBots.mockReturnValue({
+        data: { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: 'ka-kn' },
+        isError: false,
+      });
+    });
+
+    afterEach(() => {
+      searchParamsRef.current = new URLSearchParams();
+    });
+
+    it('defaults to voice_or_form when the config declares it, and shows the picker', () => {
+      renderCreate();
+      expect(screen.getByRole('combobox')).toHaveTextContent('Voice or Form');
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+      expect(useVoiceBots).toHaveBeenCalledWith('seeker');
+    });
+
+    it('defaults to form, with no picker, when voice_or_form is not declared', () => {
+      useAggregatorConfig.mockReturnValue({ data: cfg });
+      renderCreate();
+      expect(screen.getByRole('combobox')).toHaveTextContent('Form');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    });
+
+    it('hides the picker for form and voice modes', async () => {
+      renderCreate();
+      await chooseOption(screen.getByRole('combobox'), 'Form');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      await chooseOption(screen.getByRole('combobox'), 'Voice');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      await chooseOption(screen.getByRole('combobox'), 'Voice or Form');
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+    });
+
+    it('sends no voice_bot_key when the default stays selected', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      expect(screen.getByRole('radio', { name: /UP Kannada Bot/ })).toBeChecked();
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      const input = createMutateAsync.mock.calls[0]![0];
+      expect(input.registration_mode).toBe('voice_or_form');
+      expect(input).not.toHaveProperty('voice_bot_key');
+    });
+
+    it('blocks submit and asks for a choice when several bots and no default', async () => {
+      useVoiceBots.mockReturnValue({
+        data: { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: null },
+        isError: false,
+      });
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync).not.toHaveBeenCalled();
+      expect(screen.getByText('Choose a voice bot for this link.')).toBeInTheDocument();
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      expect(screen.queryByText('Choose a voice bot for this link.')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].voice_bot_key).toBe('up-hi');
+    });
+
+    it('sends the key of a non-default bot', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].voice_bot_key).toBe('up-hi');
+    });
+
+    it('sends no voice_bot_key for a mode that does not offer voice', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      await chooseOption(screen.getByRole('combobox'), 'Form');
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0]).not.toHaveProperty('voice_bot_key');
+    });
+
+    it('drops a chosen bot when the domain changes', async () => {
+      useAggregatorConfig.mockReturnValue({
+        data: { ...voiceOrFormCfg, domains: twoDomainCfg.domains },
+      });
+      useProfileRaw.mockReturnValue({ data: BOTH });
+      useVoiceBots.mockImplementation((domain: string) => ({
+        data:
+          domain === 'seeker'
+            ? { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: 'ka-kn' }
+            : { voice_bots: [BOT_KN], default_voice_bot_key: 'ka-kn' },
+        isError: false,
+      }));
+      createMutateAsync.mockResolvedValue(baseLink({ domain: 'provider' }));
+      const user = userEvent.setup();
+      const view = renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+
+      searchParamsRef.current = new URLSearchParams('domain=provider');
+      view.rerender(
+        <NextIntlClientProvider locale="en" messages={testMessages}>
+          <CreateLinkSection />
+        </NextIntlClientProvider>,
+      );
+      await waitFor(() => expect(useVoiceBots).toHaveBeenLastCalledWith('provider'));
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+      expect(createMutateAsync.mock.calls[0]![0]).not.toHaveProperty('voice_bot_key');
+    });
+  });
 });
 
 describe('<YourLinksBody />', () => {
@@ -406,6 +562,21 @@ describe('<YourLinksBody />', () => {
   afterEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+  });
+
+  it('shows the voice bot name and number on a link that has one', () => {
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ voice_bot_key: 'up-hi', voice_bot: BOT_HI }),
+        baseLink({ link_id: 'link-2', slug: 'other-drive' }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    expect(screen.getAllByText(/UP Rozgar Sahayak/)).toHaveLength(1);
+    expect(screen.getByText(/\+91 12345 67890/)).toBeInTheDocument();
+    expect(screen.queryByText(/\+911234567890/)).not.toBeInTheDocument();
   });
 
   it('shows a loading state', () => {

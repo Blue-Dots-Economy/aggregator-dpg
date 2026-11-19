@@ -10,7 +10,8 @@ import { logger } from '@/lib/logger';
 import { loadParticipantConsent } from '@/lib/participant-consent.server';
 import { summariseIssues } from '@/lib/response-shape-error';
 import { ResolveResponseSchema } from '@/lib/registration-link';
-import { PublicRegistrationView } from './PublicRegistrationView';
+import { PublicRegistrationView, type PublicRegistrationViewProps } from './PublicRegistrationView';
+import { VoiceOrFormView } from './VoiceOrFormView';
 
 export const metadata: Metadata = {
   title: 'Register',
@@ -30,7 +31,8 @@ interface PageProps {
  *
  * `org` is the aggregator's `org_slug` and `slug` is the link slug. Resolves the
  * link through the public API, loads the optional UI schema, and renders the
- * client view.
+ * client view: the two-option view when the link offers voice and has a bot,
+ * else the registration form view.
  */
 export default async function PublicRegistrationPage({ params }: PageProps) {
   const { org, slug } = await params;
@@ -120,22 +122,24 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   // Participant Terms/Privacy content for the consent modal, read from config.
   const participantConsent = await loadParticipantConsent();
 
-  return (
-    <PublicRegistrationView
-      org={org}
-      slug={slug}
-      network={resolved.network ?? ''}
-      domain={resolved.domain}
-      context={resolved.context}
-      schema={schema}
-      uiSchema={uiSchema}
-      identity={resolved.identity}
-      submissionShape={submissionShape}
-      publicHintI18nKey={hintKey}
-      registrationMode={resolved.registration_mode ?? null}
-      consentContent={participantConsent}
-    />
-  );
+  const viewProps: PublicRegistrationViewProps = {
+    org,
+    slug,
+    network: resolved.network ?? '',
+    domain: resolved.domain,
+    context: resolved.context,
+    schema,
+    uiSchema,
+    identity: resolved.identity,
+    submissionShape,
+    publicHintI18nKey: hintKey,
+    registrationMode: resolved.registration_mode ?? null,
+    consentContent: participantConsent,
+  };
+  if (resolved.offers.includes('voice') && resolved.voice_bot) {
+    return <VoiceOrFormView {...viewProps} voiceBot={resolved.voice_bot} />;
+  }
+  return <PublicRegistrationView {...viewProps} />;
 }
 
 function resolveParticipantSchemaPath(file: string): string {

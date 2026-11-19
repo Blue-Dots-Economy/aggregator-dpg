@@ -432,4 +432,55 @@ describe('onboardingService', () => {
       await expect(onboardingService.uploadCsv(file, 'seeker', true)).rejects.toThrow();
     });
   });
+
+  it('lists voice bots for a domain via the BFF proxy', async () => {
+    const payload = {
+      voice_bots: [{ key: 'a', display_name: 'A', phone: '+911', languages: ['hi'] }],
+      default_voice_bot_key: 'a',
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = await onboardingService.listVoiceBots('seeker');
+    expect(result).toEqual(payload);
+    expect(String(fetchSpy.mock.calls[0]![0])).toBe('/api/links/voice-bots?domain=seeker');
+  });
+
+  it('reads voice_bot fields on a link and tolerates their absence', async () => {
+    const base = {
+      link_id: '1',
+      slug: 'abc',
+      domain: 'seeker',
+      status: 'live',
+      context: {},
+      expires_at: null,
+      public_url: null,
+      qr_url: null,
+      qr_expires_at: null,
+      created_at: 'x',
+      updated_at: 'x',
+    };
+    const bot = { key: 'a', display_name: 'A', phone: '+911', languages: ['hi'] };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...base, voice_bot_key: 'a', voice_bot: bot }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const withBot = await onboardingService.activateLink('1');
+    expect(withBot.voice_bot).toEqual(bot);
+    expect(withBot.voice_bot_key).toBe('a');
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(base), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const without = await onboardingService.activateLink('1');
+    expect(without.voice_bot).toBeUndefined();
+  });
 });

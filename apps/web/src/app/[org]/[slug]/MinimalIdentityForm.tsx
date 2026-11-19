@@ -20,6 +20,7 @@ import { PhoneInput } from '@/components/forms/PhoneInput';
 import { isValidPhone, phoneValueMode } from '@/lib/phone';
 import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
 import { useFieldErrorCopy } from '@/components/forms/useFieldErrors';
+import { isMinorBirthYear, isValidBirthYear } from '@/lib/registration-gates';
 
 type IdentityField = 'name' | 'year_of_birth' | 'phone' | 'email' | 'consent_call';
 
@@ -63,6 +64,12 @@ export interface MinimalIdentityFormProps {
   showBirthYear: boolean;
   /** Server messages keyed by payload key (identity selectors or `year_of_birth`). */
   serverErrors?: Readonly<Record<string, string>> | null;
+  /** Heading text, already translated. Defaults to the quick sign-up title. */
+  title?: string;
+  /** Text under the heading, already translated. Defaults to the quick sign-up helper. */
+  helper?: string;
+  /** Submit button text, already translated. Defaults to "Submit". */
+  submitLabel?: string;
 }
 
 /**
@@ -115,13 +122,10 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // Age is derived from the birth year; no birthdate is stored. Guardian-gated
   // domains need it, or Signals rejects the submit with `AGE_REQUIRED`.
   const currentYear = new Date().getFullYear();
-  const yobNum = Number(yearOfBirth.trim());
-  const yobValid =
-    /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
+  const yobValid = isValidBirthYear(yearOfBirth, currentYear);
   // Minors (age <= 18) do not give consent here; they accept terms in the
   // Signalstack app after signing in. The submit still goes through.
-  const isMinor = yobValid && derivedAge <= 18;
+  const isMinor = isMinorBirthYear(yearOfBirth, currentYear);
 
   const copy = useFieldErrorCopy();
   const required = (message: string): HandFieldError => ({ kind: 'required', message });
@@ -178,9 +182,9 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
         style={{ background: props.brandColor ?? 'var(--bd-primary-600)' }}
       >
         <h1 className="font-display font-bold text-[22px] sm:text-[26px] tracking-tight leading-tight">
-          {t('title')}
+          {props.title ?? t('title')}
         </h1>
-        <p className="text-[13.5px] text-white/85 mt-1.5">{t('helper')}</p>
+        <p className="text-[13.5px] text-white/85 mt-1.5">{props.helper ?? t('helper')}</p>
       </div>
 
       <form
@@ -339,7 +343,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             style={{ background: props.brandColor ?? undefined }}
             className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-(--bd-primary-600) hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
-            {t('submit_label')}
+            {props.submitLabel ?? t('submit_label')}
           </button>
         </div>
       </form>
