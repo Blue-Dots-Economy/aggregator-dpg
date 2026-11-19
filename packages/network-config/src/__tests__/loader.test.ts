@@ -837,6 +837,33 @@ describe('FileNetworkConfigLoader — domain resolution failures', () => {
     expect((result.error as { message: string }).message).toContain('has no item_schemas');
   });
 
+  it.each([
+    [
+      'a voice bot domain',
+      'voice_bots:\n    - key: a\n      display_name: A\n      phone: "+919876543210"\n      languages: [en]\n      domains: [nope]',
+    ],
+    [
+      'a default_voice_bots key',
+      'default_voice_bots:\n    nope: a\n    seeker: a\n  voice_bots:\n    - key: a\n      display_name: A\n      phone: "+919876543210"\n      languages: [en]\n      domains: [seeker, nope]',
+    ],
+  ])(
+    'returns DOMAIN_RESOLUTION_FAILED for an unknown network domain in %s',
+    async (_name, block) => {
+      await fs.writeFile(configPath, `${BLUE_DOT_YAML}  ${block}\n`, 'utf8');
+      const loader = new FileNetworkConfigLoader({
+        configPath,
+        fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+      });
+      const result = await loader.load();
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      const error = result.error as { code: string; message: string };
+      expect(error.code).toBe('DOMAIN_RESOLUTION_FAILED');
+      expect(error.message).toContain('voice_bots');
+      expect(error.message).toContain('nope');
+    },
+  );
+
   it('returns DOMAIN_RESOLUTION_FAILED when identity selectors cannot be sniffed and no override exists', async () => {
     const loader = new FileNetworkConfigLoader({
       configPath,

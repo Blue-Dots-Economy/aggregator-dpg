@@ -173,6 +173,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
       domain: 'seeker',
       context: {},
       registrationMode: 'form',
+      voiceBotKey: null,
       qrObjectKey: null,
       status: 'live',
       expiresAt: null,

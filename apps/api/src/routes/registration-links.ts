@@ -29,6 +29,13 @@ import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import {
+  botsForDomain,
+  modeOffersVoice,
+  resolveDefaultVoiceBot,
+  resolveVoiceBot,
+} from '../services/voice-bots/index.js';
+import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
 
 type LinkMetrics = {
   total: number;
@@ -100,6 +107,14 @@ const CreateLinkBodySchema = z.object({
     .string()
     .regex(/^[a-z][a-z0-9_]*$/)
     .optional(),
+  /**
+   * Voice bot callers dial for this link. Only for modes that offer voice; omit it
+   * to follow the domain's default bot. Cannot be changed after creation.
+   */
+  voice_bot_key: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
   expires_at: z.iso
     .datetime({ offset: true })
     .nullish()
@@ -139,6 +154,26 @@ const LinkParamsSchema = z.object({
   id: z.string().min(1).describe('Registration link id (UUID).'),
 });
 
+/** Query for `GET /v1/links/voice-bots`. */
+const VoiceBotsQuerySchema = z.object({
+  domain: z.string().min(1).describe('Network domain id the link is for.'),
+});
+
+/** Wire shape of a voice bot: the config entry without `domains`. */
+const VoiceBotResponseSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  phone: z.string(),
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+
+/** 200 payload for the coordinator's voice-bot picker. */
+const VoiceBotsResponseSchema = z.object({
+  voice_bots: z.array(VoiceBotResponseSchema),
+  default_voice_bot_key: z.string().nullable(),
+});
+
 /** Canonical wire shape of a registration link (see {@link buildResponse}). */
 const LinkResponseSchema = z
   .object({
@@ -147,6 +182,8 @@ const LinkResponseSchema = z
     domain: z.string(),
     status: z.string(),
     registration_mode: z.string(),
+    voice_bot_key: z.string().nullable(),
+    voice_bot: VoiceBotResponseSchema.nullable(),
     context: z.record(z.string(), z.unknown()),
     expires_at: z.string().nullable(),
     public_url: z.string().nullable(),
@@ -232,6 +269,7 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
           fields: { declared: declaredModes, enabled: enabledModes },
         });
       }
+      const voiceBotKey = checkVoiceBotChoice(body.voice_bot_key, modeKey, body.domain, networkCfg);
       const store = getRegistrationLinksStore();
 
       // Try the caller's slug first and add a short random suffix on collision.
@@ -251,6 +289,7 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
           context: body.context,
           status: body.status,
           registrationMode: modeKey,
+          voiceBotKey,
           expiresAt: body.expires_at,
           createdBy: auth.userId,
         });
@@ -318,6 +357,49 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
       });
 
       return reply.code(201).send(await buildResponse(created, callerOrgSlug, { publicUrl }));
+    },
+  );
+
+  app.get(
+    '/v1/links/voice-bots',
+    {
+      config: { rbac: { capability: 'profiles.onboard' } },
+      schema: {
+        tags: ['registration-links'],
+        summary: 'List the voice bots a link in a domain can use',
+        description:
+          'Voice bots configured for the domain, plus the key of the domain default (null when several bots serve it and none is the default). Feeds the bot picker on the link form.',
+        security: [{ bearerAuth: [] }],
+        querystring: VoiceBotsQuerySchema,
+        response: {
+          200: VoiceBotsResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireAuth(req);
+      const log = req.log.child({
+        operation: 'registrationLinks.voiceBots',
+        actor: auth.userId,
+        aggregator_id: auth.aggregatorId,
+      });
+      const { domain } = req.query;
+      const networkCfg = await getNetworkConfig();
+      if (!networkCfg.domainIds.includes(domain)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+          fields: { domain: 'invalid' },
+        });
+      }
+      await requireServedDomain(auth, domain);
+
+      const bots = botsForDomain(domain, networkCfg);
+      log.info({ status: 'success', domain, returned: bots.length });
+      return reply.send({
+        voice_bots: bots.map(toVoiceBotResponse),
+        default_voice_bot_key: resolveDefaultVoiceBot(domain, networkCfg)?.key ?? null,
+      });
     },
   );
 
@@ -701,12 +783,17 @@ async function buildResponse(
     overrides.metrics ??
     (await fetchLinkMetrics(row.aggregatorId, [row.id])).get(row.id) ??
     ZERO_METRICS;
+  // Only modes that offer voice carry a bot; old `form`/`voice` links never show one.
+  const cfg = await getNetworkConfig();
+  const bot = modeOffersVoice(row.registrationMode, cfg) ? resolveVoiceBot(row, cfg).bot : null;
   return {
     link_id: row.id,
     slug: row.slug,
     domain: row.domain,
     status: row.status,
     registration_mode: row.registrationMode,
+    voice_bot_key: row.voiceBotKey,
+    voice_bot: bot ? toVoiceBotResponse(bot) : null,
     context: row.context,
     expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
     public_url: publicUrl,
@@ -716,6 +803,64 @@ async function buildResponse(
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Drops `domains` from a configured bot for the wire.
+ */
+function toVoiceBotResponse(bot: VoiceBot): z.infer<typeof VoiceBotResponseSchema> {
+  return {
+    key: bot.key,
+    display_name: bot.display_name,
+    phone: bot.phone,
+    languages: bot.languages,
+    ...(bot.description !== undefined ? { description: bot.description } : {}),
+  };
+}
+
+/**
+ * Validates the coordinator's voice-bot choice against the mode and domain.
+ *
+ * @param requested - `voice_bot_key` from the create body, if any.
+ * @param modeKey - The resolved registration mode.
+ * @param domain - The link's domain.
+ * @param cfg - The resolved network config.
+ * @returns The key to store: the chosen one, or `null` to follow the domain default.
+ * @throws SCHEMA_VALIDATION when the mode does not offer voice and a key was sent.
+ * @throws INVALID_VOICE_BOT when the key is unknown or serves another domain.
+ * @throws VOICE_BOT_REQUIRED when several bots serve the domain and none is the default.
+ */
+function checkVoiceBotChoice(
+  requested: string | undefined,
+  modeKey: string,
+  domain: string,
+  cfg: ResolvedNetworkConfig,
+): string | null {
+  if (!modeOffersVoice(modeKey, cfg)) {
+    if (requested !== undefined) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `voice_bot_key is not allowed for registration_mode '${modeKey}'`,
+        fields: { voice_bot_key: 'not allowed for this mode' },
+      });
+    }
+    return null;
+  }
+  const serving = botsForDomain(domain, cfg);
+  if (requested !== undefined) {
+    if (!serving.some((b) => b.key === requested)) {
+      throw httpError('INVALID_VOICE_BOT', {
+        detail: `voice_bot_key '${requested}' does not serve domain '${domain}'`,
+        fields: { configured: serving.map((b) => b.key) },
+      });
+    }
+    return requested;
+  }
+  if (serving.length > 1 && resolveDefaultVoiceBot(domain, cfg) === null) {
+    throw httpError('VOICE_BOT_REQUIRED', {
+      fields: { configured: serving.map((b) => b.key) },
+    });
+  }
+  return null;
 }
 
 /**
