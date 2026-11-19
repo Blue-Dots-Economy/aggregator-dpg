@@ -19,7 +19,7 @@ import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-o
 
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
-import { getConsoleActor } from '@/lib/console-actor';
+import { getConsoleActor, type ConsoleActorResult } from '@/lib/console-actor';
 import { isKnownAsEnabled } from '@/lib/known-as-flag';
 import { canInvite, canViewCoordinators, selfAddOrgs } from '@/lib/capabilities';
 import { AddMyselfButton } from '@/components/console/SelfAddDialog';
@@ -119,6 +119,33 @@ function filterChips(
   return chips;
 }
 
+/**
+ * The orgs the viewer owns, what it may do on the page, and which row is theirs.
+ *
+ * @param actor - The viewer, from `read/me`; nothing is offered when it could not be read.
+ * @param hasDomains - Whether the network has domains; without them there are no profile types to offer.
+ */
+function viewerOf(
+  actor: ConsoleActorResult,
+  hasDomains: boolean,
+): {
+  ownedIds: ReadonlySet<string>;
+  showInvite: boolean;
+  addSelfOrgs: Array<{ id: string; name: string }>;
+  ownAccountId: string | null;
+} {
+  if (!actor.ok) {
+    return { ownedIds: new Set(), showInvite: false, addSelfOrgs: [], ownAccountId: null };
+  }
+  return {
+    ownedIds: new Set(actor.me.orgs.map((o) => o.id)),
+    // Same gate the sidebar link used to apply, now checked here instead.
+    showInvite: canInvite(actor.me),
+    addSelfOrgs: hasDomains ? selfAddOrgs(actor.me) : [],
+    ownAccountId: actor.me.own_coordinator_account_id ?? null,
+  };
+}
+
 export default async function ConsoleCoordinatorsPage({
   searchParams,
 }: Readonly<{
@@ -152,18 +179,13 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
+  const { ownedIds, showInvite, addSelfOrgs, ownAccountId } = viewerOf(actor, domains.length > 0);
   // Users are visible only in the orgs the viewer owns, so filters and counts use those.
-  const ownedIds = new Set(actor.ok ? actor.me.orgs.map((o) => o.id) : []);
   const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
   const counts = await countCoordinators(ownOrgs, orgId, serves);
   const knownAs = isKnownAsEnabled();
   const orgOptions = orgOptionsInTreeOrder(ownOrgs, knownAs);
   const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
-  // Same gate the sidebar link used to apply, now checked here instead.
-  const showInvite = actor.ok && canInvite(actor.me);
-  // Without the network's domains there are no profile types to offer.
-  const addSelfOrgs = actor.ok && domains.length > 0 ? selfAddOrgs(actor.me) : [];
-  const ownAccountId = actor.ok ? (actor.me.own_coordinator_account_id ?? null) : null;
   const keep = activeFilters(orgId, status, serves);
   const chips = filterChips(t, {
     orgId,

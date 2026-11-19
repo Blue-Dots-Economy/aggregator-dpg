@@ -24,6 +24,7 @@ import { getConsoleActor, type ConsoleActorResult } from '../../lib/console-acto
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
 import { ACTING_ENDED_HREF } from '@/lib/acting';
 import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type { SessionData } from '@/lib/session';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -58,22 +59,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
   const actor = await getConsoleActor();
   if (acting && !actingActorUsable(actor)) redirect(ACTING_ENDED_HREF);
   const capabilities = actor.ok ? (actor.me.capabilities ?? null) : null;
-  const user: User =
-    acting && actor.ok
-      ? {
-          id: actor.me.user.id,
-          name: actor.me.user.contact.name ?? actor.me.user.contact.email,
-          org: actor.me.user.contact.email,
-          email: actor.me.user.contact.email,
-          ...(actor.me.user.contact.phone ? { phone: actor.me.user.contact.phone } : {}),
-        }
-      : {
-          id: session.sub,
-          name: session.name ?? session.email ?? session.phone ?? session.sub,
-          org: session.email ?? '',
-          ...(session.email ? { email: session.email } : {}),
-          ...(session.phone ? { phone: session.phone } : {}),
-        };
+  const user = acting && actor.ok ? accountUser(actor.me) : sessionUser(session);
   // Acting mode stays visible on a transient `/me` failure; only the org name is missing then.
   const actingInfo = acting ? { orgName: actor.ok ? coordinatorOrgName(actor.me) : null } : null;
 
@@ -93,6 +79,29 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
       </div>
     </AuthProvider>
   );
+}
+
+/** The shell's user while acting: the coordinator account from `/me`. */
+function accountUser(me: MeResponse): User {
+  const { contact } = me.user;
+  return {
+    id: me.user.id,
+    name: contact.name ?? contact.email,
+    org: contact.email,
+    email: contact.email,
+    ...(contact.phone ? { phone: contact.phone } : {}),
+  };
+}
+
+/** The shell's user from the signed-in session. */
+function sessionUser(session: SessionData): User {
+  return {
+    id: session.sub,
+    name: session.name ?? session.email ?? session.phone ?? session.sub,
+    org: session.email ?? '',
+    ...(session.email ? { email: session.email } : {}),
+    ...(session.phone ? { phone: session.phone } : {}),
+  };
 }
 
 /**

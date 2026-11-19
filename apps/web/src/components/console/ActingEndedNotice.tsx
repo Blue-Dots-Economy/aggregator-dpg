@@ -15,11 +15,8 @@ export function ActingEndedNotice() {
   const reason = useSearchParams().get('reason');
   if (reason !== ACTING_ENDED_REASON) return null;
   return (
-    <p
-      role="status"
-      className="mb-4 rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-900"
-    >
+    <output className="mb-4 block rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-900">
       {t('acting_ended')}
-    </p>
+    </output>
   );
 }

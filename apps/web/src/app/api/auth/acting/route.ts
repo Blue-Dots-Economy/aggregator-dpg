@@ -12,7 +12,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ACTING_ROLE_PREFIX } from '@aggregator-dpg/rbac';
-import { MeResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
+import { MeResponseSchema, type MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { SESSION_COOKIE } from '@/lib/cookies';
 import { getSessionStore } from '@/lib/session';
 import { callApi, refreshAccessToken } from '@/lib/upstream-client';
@@ -53,6 +53,38 @@ function tokenCanActAs(accessToken: string, accountId: string): boolean {
 }
 
 /**
+ * Reads `/me` as the signed-in owner, without the acting-account header.
+ *
+ * @returns The answer, or the response to send when it could not be read.
+ */
+async function readOwnMe(): Promise<
+  { ok: true; me: MeResponse } | { ok: false; response: NextResponse }
+> {
+  let res: Response;
+  try {
+    res = await callApi('/v1/user/read/me', { method: 'GET', asSignedInAccount: true });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'no active session') {
+      return { ok: false, response: unauthorizedResponse() };
+    }
+    logger.error({
+      operation: 'auth.acting.start',
+      status: 'failure',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, response: serviceUnavailableResponse('api') };
+  }
+  if (res.status === 401) return { ok: false, response: unauthorizedResponse() };
+  if (res.status === 403) return { ok: false, response: notAllowed() };
+  if (!res.ok) return { ok: false, response: serviceUnavailableResponse('api') };
+  const me = MeResponseSchema.safeParse(await res.json().catch(() => null));
+  if (!me.success) {
+    return { ok: false, response: serviceUnavailableResponse('api', 'unexpected /me response') };
+  }
+  return { ok: true, me: me.data };
+}
+
+/**
  * Starts acting as the owner's own coordinator account.
  *
  * Checks with `/me` (read as the owner, without the acting-account header)
@@ -71,24 +103,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!body.success) return errorResponse(400, 'SCHEMA_VALIDATION', 'Invalid request');
   const { accountId } = body.data;
 
-  let res: Response;
-  try {
-    res = await callApi('/v1/user/read/me', { method: 'GET', asSignedInAccount: true });
-  } catch (err) {
-    if (err instanceof Error && err.message === 'no active session') return unauthorizedResponse();
-    logger.error({
-      operation: 'auth.acting.start',
-      status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return serviceUnavailableResponse('api');
-  }
-  if (res.status === 401) return unauthorizedResponse();
-  if (res.status === 403) return notAllowed();
-  if (!res.ok) return serviceUnavailableResponse('api');
-  const me = MeResponseSchema.safeParse(await res.json().catch(() => null));
-  if (!me.success) return serviceUnavailableResponse('api', 'unexpected /me response');
-  if (me.data.own_coordinator_account_id !== accountId) return notAllowed();
+  const me = await readOwnMe();
+  if (!me.ok) return me.response;
+  if (me.me.own_coordinator_account_id !== accountId) return notAllowed();
 
   const accessToken = await refreshAccessToken();
   if (!accessToken) return unauthorizedResponse();

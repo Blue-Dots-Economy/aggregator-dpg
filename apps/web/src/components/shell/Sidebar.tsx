@@ -65,6 +65,19 @@ function NavLink({
   );
 }
 
+/** The message under a nav entry, such as why its action failed; nothing without one. */
+function NavAlert({ item }: Readonly<{ item: NavItem }>) {
+  if (!item.alert) return null;
+  return (
+    <p
+      role="alert"
+      className={cn('px-3 pb-1 text-[12px] text-rose-600', item.section !== undefined && 'ml-5')}
+    >
+      {item.alert}
+    </p>
+  );
+}
+
 /** The icon of a group heading, drawn like a link's icon. */
 function SectionIcon({ name }: Readonly<{ name: IconName }>) {
   const Ic = I[name];
@@ -258,6 +271,8 @@ function SidebarPanel({
     };
   }, [detailsOpen]);
 
+  const navigateProps = onNavigate ? { onClick: onNavigate } : {};
+
   return (
     <>
       <div className="px-5 pt-6 pb-5 flex items-start gap-2">
@@ -271,7 +286,7 @@ function SidebarPanel({
           // session, so it must never be prefetched.
           <a
             href={topLink.href}
-            {...(onNavigate ? { onClick: onNavigate } : {})}
+            {...navigateProps}
             className="mb-1 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium text-(--bd-fg-muted) transition-all hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
           >
             <I.arrowL size={18} stroke={1.7} />
@@ -309,7 +324,7 @@ function SidebarPanel({
                 {sectionOpen ? (
                   <NavLink
                     item={n}
-                    {...(onNavigate ? { onClick: onNavigate } : {})}
+                    {...navigateProps}
                     className={cn(
                       'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
                       n.section !== undefined &&
@@ -335,17 +350,7 @@ function SidebarPanel({
                     )}
                   </NavLink>
                 ) : null}
-                {sectionOpen && n.alert ? (
-                  <p
-                    role="alert"
-                    className={cn(
-                      'px-3 pb-1 text-[12px] text-rose-600',
-                      n.section !== undefined && 'ml-5',
-                    )}
-                  >
-                    {n.alert}
-                  </p>
-                ) : null}
+                {sectionOpen ? <NavAlert item={n} /> : null}
               </Fragment>
             );
           })}
@@ -508,7 +513,7 @@ export function AppSidebar({
   portalLabel,
   account,
   topLink,
-}: AppSidebarProps) {
+}: Readonly<AppSidebarProps>) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
