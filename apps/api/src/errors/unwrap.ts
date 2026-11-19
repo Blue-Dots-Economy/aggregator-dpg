@@ -28,8 +28,8 @@ export function unwrapOrThrow<T>(
   if (result.ok) return result.value;
   const { code, detail, fields, cause } = result.error;
   throw httpError(code, {
-    ...(detail !== undefined ? { detail } : {}),
-    ...(fields !== undefined ? { fields } : {}),
-    ...(cause !== undefined ? { cause } : {}),
+    ...(detail === undefined ? {} : { detail }),
+    ...(fields === undefined ? {} : { fields }),
+    ...(cause === undefined ? {} : { cause }),
   });
 }

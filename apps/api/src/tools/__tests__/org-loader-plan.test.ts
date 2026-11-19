@@ -672,7 +672,7 @@ describe('org-loader-plan-tree', () => {
       { key: 'z', parent: { kind: 'planned', key: 'x' }, existing: null },
     ]);
     expect(order).toEqual(['a', 'b', 'c']);
-    expect([...cycle].sort()).toEqual(['x', 'y']);
+    expect([...cycle].sort((a, b) => a.localeCompare(b))).toEqual(['x', 'y']);
   });
 
   it('counts an existing in-file parent by its org id', () => {

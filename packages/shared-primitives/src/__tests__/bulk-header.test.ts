@@ -11,6 +11,9 @@ import {
   normaliseHeaderCells,
 } from '../bulk-columns/index.js';
 
+/** Sorts column names as text. */
+const byText = (a: string, b: string): number => a.localeCompare(b);
+
 const SCHEMA = {
   type: 'object',
   required: ['name', 'phone', 7],
@@ -27,7 +30,9 @@ describe('bulkHeaderColumns', () => {
   it('requires the schema required strings and allows its properties plus well-known columns', () => {
     const cols = bulkHeaderColumns(SCHEMA);
     expect(cols.required).toEqual(['name', 'phone']);
-    expect([...cols.allowed].sort()).toEqual(['age', GEO_LOCATION_COLUMN, 'name', 'phone'].sort());
+    expect([...cols.allowed].sort(byText)).toEqual(
+      ['age', GEO_LOCATION_COLUMN, 'name', 'phone'].sort(byText),
+    );
   });
 
   it('requires nothing and allows only well-known columns for a schema without either', () => {

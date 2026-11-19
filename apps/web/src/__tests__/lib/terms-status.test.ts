@@ -21,11 +21,11 @@ describe('fetchTermsStatus', () => {
   function respond(status: number, body: unknown): void {
     globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       seen.push({
-        url: input.toString(),
+        url: input instanceof Request ? input.url : input.toString(),
         auth: new Headers(init?.headers).get('authorization'),
       });
       return new Response(JSON.stringify(body), { status });
-    }) as unknown as typeof fetch;
+    });
   }
 
   const statusBody = (outstanding: boolean) => ({
@@ -68,7 +68,7 @@ describe('fetchTermsStatus', () => {
     const warn = vi.spyOn(logger, 'warn');
     globalThis.fetch = vi.fn(async () => {
       throw new Error('down');
-    }) as unknown as typeof fetch;
+    });
     expect(await fetchTermsStatus('tok-1', logger)).toEqual({ status: 'unknown' });
     expect(warn).toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe('fetchTermsStatus', () => {
         new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
         }),
-    ) as unknown as typeof fetch;
+    );
 
     const pending = fetchTermsStatus('tok-1', logger);
     await vi.advanceTimersByTimeAsync(TERMS_STATUS_TIMEOUT_MS);

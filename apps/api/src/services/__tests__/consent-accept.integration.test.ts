@@ -14,7 +14,7 @@
  * @module @aggregator-dpg/api
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -55,7 +55,7 @@ const CONSENT = {
 const noConsent = async (): Promise<void> => undefined;
 
 function phone(): string {
-  return `+91${String(Math.floor(Math.random() * 1e10)).padStart(10, '0')}`;
+  return `+91${String(randomInt(1e10)).padStart(10, '0')}`;
 }
 function email(): string {
   return `cacc-${randomUUID().slice(0, 8)}@example.org`;
@@ -66,7 +66,7 @@ class FailingNthLedger extends ConsentLedgerBase {
   constructor(
     private readonly inner: PostgresConsentLedger,
     private readonly nth: number,
-    private calls = { n: 0 },
+    private readonly calls = { n: 0 },
   ) {
     super();
   }

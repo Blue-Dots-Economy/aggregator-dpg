@@ -99,7 +99,7 @@ async function resolveCoordinatorOrg(
     return null;
   }
   const existing = await ctx.names.find(row.org);
-  if (!existing || existing.status !== 'active' || existing.isDefault) {
+  if (existing?.status !== 'active' || existing.isDefault) {
     ctx.problems.coordinator(row.line, PLAN_PROBLEM.UNKNOWN_ORG, 'org');
     return null;
   }
@@ -147,32 +147,8 @@ export async function planCoordinator(
     contact: { name: row.name, email: row.email, phone: phoneE164 },
     locations: [],
   };
-  let checked: { contact: BecknContact; domains: string[] };
-  try {
-    const result = await checkCoordinatorForm(body, { consentRequired: false });
-    if (!result.ok) {
-      if (result.error.code === 'INVALID_PHONE') {
-        problems.coordinator(row.line, PLAN_PROBLEM.INVALID_PHONE, 'phone');
-        return null;
-      }
-      const fields = result.error.fields ?? {};
-      const issues = AjvIssuesSchema.safeParse(fields['issues']);
-      const named = new Set<string | undefined>(
-        'type' in fields
-          ? ['profile_types']
-          : issues.success
-            ? issues.data.map((i) => coordinatorField(i))
-            : [undefined],
-      );
-      for (const f of named) problems.coordinator(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION, f);
-      return null;
-    }
-    checked = result.value;
-  } catch (err: unknown) {
-    logCheckFailure('coordinators', row.line, err);
-    problems.coordinator(row.line, PLAN_PROBLEM.CHECK_FAILED);
-    return null;
-  }
+  const checked = await checkCoordinatorRowForm(row, body, problems);
+  if (!checked) return null;
 
   const base = { row, orgRef: org.ref, body, contact: checked.contact, domains: checked.domains };
   const existing = await checkCoordinatorContact(row, phoneE164, org.orgId, problems);
@@ -187,6 +163,42 @@ export async function planCoordinator(
     action: existing.status === 'pending' ? 'resume' : 'already_loaded',
     existingUserId: existing.id,
   };
+}
+
+/**
+ * Checks a coordinator row's form against the schema.
+ *
+ * @returns The checked contact and domains, or `null` after reporting the problem.
+ */
+async function checkCoordinatorRowForm(
+  row: CoordinatorRow,
+  body: CoordinatorForm,
+  problems: Problems,
+): Promise<{ contact: BecknContact; domains: string[] } | null> {
+  try {
+    const result = await checkCoordinatorForm(body, { consentRequired: false });
+    if (result.ok) return result.value;
+    if (result.error.code === 'INVALID_PHONE') {
+      problems.coordinator(row.line, PLAN_PROBLEM.INVALID_PHONE, 'phone');
+      return null;
+    }
+    for (const f of schemaProblemFields(result.error.fields ?? {})) {
+      problems.coordinator(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION, f);
+    }
+    return null;
+  } catch (err: unknown) {
+    logCheckFailure('coordinators', row.line, err);
+    problems.coordinator(row.line, PLAN_PROBLEM.CHECK_FAILED);
+    return null;
+  }
+}
+
+/** The CSV columns a failed coordinator form check names; `undefined` when it names none. */
+function schemaProblemFields(fields: Readonly<Record<string, unknown>>): Set<string | undefined> {
+  if ('type' in fields) return new Set<string | undefined>(['profile_types']);
+  const issues = AjvIssuesSchema.safeParse(fields['issues']);
+  if (!issues.success) return new Set<string | undefined>([undefined]);
+  return new Set<string | undefined>(issues.data.map((i) => coordinatorField(i)));
 }
 
 /**
@@ -239,17 +251,22 @@ async function checkCoordinatorContact(
     problems.coordinator(row.line, PLAN_PROBLEM.COORDINATOR_EXISTS_ELSEWHERE, 'org');
     return false;
   }
-  const mismatch =
-    byEmail.contactPhone !== phoneE164
-      ? 'phone'
-      : personKey(byEmail.contact.name) !== personKey(row.name)
-        ? 'name'
-        : !LIVE_STATUSES.has(byEmail.status)
-          ? 'email'
-          : null;
+  const mismatch = contactMismatch(byEmail, row, phoneE164);
   if (mismatch) {
     problems.coordinator(row.line, PLAN_PROBLEM.CONTACT_TAKEN, mismatch);
     return false;
   }
   return byEmail;
+}
+
+/** The field on which an existing coordinator differs from the row, or `null` when it matches and is live. */
+function contactMismatch(
+  existing: Coordinator,
+  row: CoordinatorRow,
+  phoneE164: string,
+): 'phone' | 'name' | 'email' | null {
+  if (existing.contactPhone !== phoneE164) return 'phone';
+  if (personKey(existing.contact.name) !== personKey(row.name)) return 'name';
+  if (!LIVE_STATUSES.has(existing.status)) return 'email';
+  return null;
 }

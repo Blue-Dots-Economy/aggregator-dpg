@@ -61,7 +61,7 @@ export function AcceptTermsView({
         body: JSON.stringify({ terms_version: termsVersion, privacy_version: privacyVersion }),
       });
       if (res.status === 200) {
-        window.location.assign(returnTo);
+        globalThis.location.assign(returnTo);
         return;
       }
       if (res.status === 409) {
@@ -93,7 +93,7 @@ export function AcceptTermsView({
         <p className="mt-1 text-sm text-red-700">{tRegister('consent.load_failed_detail')}</p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={() => globalThis.location.reload()}
           className="mt-3 rounded-lg bg-(--bd-primary-600) px-4 py-2 text-sm font-semibold text-white"
         >
           {t('reload')}
@@ -106,7 +106,7 @@ export function AcceptTermsView({
         <p className="text-sm text-red-700">{t('failed')}</p>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={() => globalThis.location.reload()}
           className="mt-3 rounded-lg bg-(--bd-primary-600) px-4 py-2 text-sm font-semibold text-white"
         >
           {t('reload')}

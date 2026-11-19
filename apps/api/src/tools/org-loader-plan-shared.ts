@@ -108,7 +108,7 @@ export function nameKey(name: string): string {
 
 /** A person name compared without case or repeated spaces. */
 export function personKey(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+  return name.trim().replaceAll(/\s+/g, ' ').toLowerCase();
 }
 
 /** The E.164 phone, or `null` when it does not normalise. */

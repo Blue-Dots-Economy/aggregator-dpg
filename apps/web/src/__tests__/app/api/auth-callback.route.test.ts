@@ -27,7 +27,7 @@ vi.mock('@/lib/session', () => ({
 const { activateInviteeMock } = vi.hoisted(() => ({ activateInviteeMock: vi.fn() }));
 vi.mock('@/lib/invite-activation', () => ({ activateInvitee: activateInviteeMock }));
 const { fetchTermsStatusMock } = vi.hoisted(() => ({
-  fetchTermsStatusMock: vi.fn(async () => ({ status: 'ok' as string })),
+  fetchTermsStatusMock: vi.fn(async () => ({ status: 'ok' })),
 }));
 vi.mock('@/lib/terms-status.server', () => ({
   ACCEPT_TERMS_PATH: '/accept-terms',

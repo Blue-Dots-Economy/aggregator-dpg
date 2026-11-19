@@ -140,19 +140,10 @@ async function discardHalfCreated(
     const g = await idp.deleteGroup(org.kcGroupId);
     if (!g.ok) return fail(APPLY_ERROR.IDP_UNAVAILABLE);
   }
-  let ownerSub: string | undefined;
-  let removedSub: string | undefined;
-  if (org.ownerKcSub) {
-    const shared = await store.ownerIsShared(org.id);
-    if (!shared.ok) return fail(APPLY_ERROR.DB_UNAVAILABLE);
-    if (shared.value) {
-      ownerSub = org.ownerKcSub;
-    } else {
-      const u = await idp.deleteUser(org.ownerKcSub);
-      if (!u.ok && u.error.code !== 'USER_NOT_FOUND') return fail(APPLY_ERROR.IDP_UNAVAILABLE);
-      removedSub = org.ownerKcSub;
-    }
-  }
+  const login = await releaseOwnerLogin(org);
+  if (!login.ok) return fail(login.code);
+  let { ownerSub } = login;
+  const { removedSub } = login;
   if (!ownerSub) {
     const owned = await store.listOwnedBy(org.ownerUserId);
     if (!owned.ok) return fail(APPLY_ERROR.DB_UNAVAILABLE);
@@ -172,6 +163,28 @@ async function discardHalfCreated(
     'removed a half-created org before creating it again',
   );
   return { ok: true, ownerSub, removedSub };
+}
+
+/**
+ * Keeps a half-created org's owner login when the owner is shared, else deletes it.
+ *
+ * @returns The login kept or the one removed, if the org has one; or the error code.
+ */
+async function releaseOwnerLogin(
+  org: Organisation,
+): Promise<
+  | { ok: true; ownerSub: string | undefined; removedSub: string | undefined }
+  | { ok: false; code: string }
+> {
+  if (!org.ownerKcSub) return { ok: true, ownerSub: undefined, removedSub: undefined };
+  const shared = await getOrganisationStore().ownerIsShared(org.id);
+  if (!shared.ok) return { ok: false, code: APPLY_ERROR.DB_UNAVAILABLE };
+  if (shared.value) return { ok: true, ownerSub: org.ownerKcSub, removedSub: undefined };
+  const u = await getIdpAdmin().deleteUser(org.ownerKcSub);
+  if (!u.ok && u.error.code !== 'USER_NOT_FOUND') {
+    return { ok: false, code: APPLY_ERROR.IDP_UNAVAILABLE };
+  }
+  return { ok: true, ownerSub: undefined, removedSub: org.ownerKcSub };
 }
 
 /**

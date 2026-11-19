@@ -46,7 +46,12 @@ export function orderParentsFirst(nodes: readonly TreeNode[]): {
   order: string[];
   cycle: Set<string>;
 } {
-  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  const order = placeParentsFirst(nodes);
+  return { order, cycle: findCycles(nodes, new Set(order)) };
+}
+
+/** Keys of the nodes whose parents can all be placed, parents first, in file order where the tree allows. */
+function placeParentsFirst(nodes: readonly TreeNode[]): string[] {
   const placed = new Set<string>();
   const order: string[] = [];
   let progress = true;
@@ -60,6 +65,12 @@ export function orderParentsFirst(nodes: readonly TreeNode[]): {
       progress = true;
     }
   }
+  return order;
+}
+
+/** Keys of the unplaced nodes that sit on a parent cycle. */
+function findCycles(nodes: readonly TreeNode[], placed: ReadonlySet<string>): Set<string> {
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
   const cycle = new Set<string>();
   for (const start of nodes) {
     if (placed.has(start.key) || cycle.has(start.key)) continue;
@@ -73,7 +84,7 @@ export function orderParentsFirst(nodes: readonly TreeNode[]): {
       for (const key of path.slice(path.indexOf(cur.key))) cycle.add(key);
     }
   }
-  return { order, cycle };
+  return cycle;
 }
 
 /**

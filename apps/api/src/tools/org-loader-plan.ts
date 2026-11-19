@@ -13,6 +13,7 @@ import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { treeRules } from '../services/known-as.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
+import type { Organisation, TreeRules } from '../services/organisation-store/interface.js';
 import { isProvisioned } from '../services/provisioned.js';
 import { orgArrayFields, orgSchemaFields } from '../services/org-schema-validator.js';
 import {
@@ -53,7 +54,7 @@ import {
   type TreeParent,
 } from './org-loader-plan-tree.js';
 
-export { PLAN_PROBLEM };
+export { PLAN_PROBLEM } from './org-loader-plan-shared.js';
 export type {
   LoadPlan,
   PlanAction,
@@ -103,23 +104,7 @@ export async function buildLoadPlan(input: {
   checkOrgRowsInFile(input.orgs, ctx);
   checkCoordinatorRowsInFile(input.coordinators, input.orgs, problems);
 
-  const candidates = new Map<string, PlannedOrg>();
-  const nodes: TreeNode[] = [];
-  for (const row of input.orgs) {
-    if (ctx.fileOrgs.get(nameKey(row.name)) !== row) continue;
-    const parent = await resolveParent(row, ctx);
-    if (!parent) continue;
-    const planned = await planOrg(row, parent, ctx, input.orgs);
-    nodes.push({
-      key: nameKey(row.name),
-      parent: parent.tree,
-      existing:
-        planned?.existingOrgId !== undefined
-          ? { orgId: planned.existingOrgId, depth: planned.existingDepth }
-          : null,
-    });
-    if (planned) candidates.set(nameKey(row.name), planned.org);
-  }
+  const { candidates, nodes } = await planFileOrgs(input.orgs, ctx);
 
   const { order, cycle } = orderParentsFirst(nodes);
   for (const key of cycle) {
@@ -127,26 +112,11 @@ export async function buildLoadPlan(input: {
     if (row) problems.org(row.line, PLAN_PROBLEM.PARENT_CYCLE);
   }
   const byKey = new Map(nodes.map((n) => [n.key, n]));
-  const ordered = order.flatMap((k) => byKey.get(k) ?? []);
-  const store = getOrganisationStore();
-  const existingParents = [
-    root.id,
-    ...ordered.flatMap((n) => (n.parent.kind === 'existing' ? [n.parent.orgId] : [])),
-    ...ordered.flatMap((n) => (n.existing ? [n.existing.orgId] : [])),
-  ];
-  const [counts, total] = await Promise.all([
-    store.childCounts([...new Set(existingParents)]),
-    store.countTotal(),
-  ]);
-  const refusals = treeLimitRefusals(ordered, rules, {
-    rootId: root.id,
-    childCounts: new Map(Object.entries(must(counts, 'orgStore.childCounts'))),
-    total: must(total, 'orgStore.countTotal'),
-  });
-  for (const [key, limit] of refusals) {
-    const row = ctx.fileOrgs.get(key);
-    if (row) problems.org(row.line, PLAN_PROBLEM.TREE_LIMIT, limit);
-  }
+  await reportTreeLimits(
+    order.flatMap((k) => byKey.get(k) ?? []),
+    rules,
+    ctx,
+  );
 
   reportBlockedChildren(ctx);
 
@@ -158,12 +128,7 @@ export async function buildLoadPlan(input: {
   );
   for (const [key, p] of candidates) ctx.planned.set(key, p);
 
-  const coordinators: PlannedCoordinator[] = [];
-  for (const row of input.coordinators) {
-    if (problems.isBlocked('coordinators', row.line)) continue;
-    const planned = await planCoordinator(row, ctx);
-    if (planned && !problems.isBlocked('coordinators', row.line)) coordinators.push(planned);
-  }
+  const coordinators = await planCoordinators(input.coordinators, ctx);
 
   const fileOrder = { orgs: 0, coordinators: 1 };
   problems.list.sort((a, b) => fileOrder[a.file] - fileOrder[b.file] || a.line - b.line);
@@ -184,6 +149,93 @@ export async function buildLoadPlan(input: {
     'org-loader plan built',
   );
   return { orgs, coordinators, problems: problems.list };
+}
+
+/** An org row that passed its checks, with the existing org it resumes, if any. */
+interface OrgPlanResult {
+  org: PlannedOrg;
+  existingOrgId?: string;
+  existingDepth: number;
+}
+
+/**
+ * Resolves each file org's parent and plans the org.
+ *
+ * @returns The planned orgs by name key, and one tree node per org whose parent resolved.
+ * @throws {UpstreamError} When a lookup fails.
+ */
+async function planFileOrgs(
+  rows: readonly OrgRow[],
+  ctx: PlanContext,
+): Promise<{ candidates: Map<string, PlannedOrg>; nodes: TreeNode[] }> {
+  const candidates = new Map<string, PlannedOrg>();
+  const nodes: TreeNode[] = [];
+  for (const row of rows) {
+    if (ctx.fileOrgs.get(nameKey(row.name)) !== row) continue;
+    const parent = await resolveParent(row, ctx);
+    if (!parent) continue;
+    const planned = await planOrg(row, parent, ctx, rows);
+    nodes.push({ key: nameKey(row.name), parent: parent.tree, existing: existingNodeOf(planned) });
+    if (planned) candidates.set(nameKey(row.name), planned.org);
+  }
+  return { candidates, nodes };
+}
+
+/** The tree's view of the existing org a planned row resumes, or `null` for a new org. */
+function existingNodeOf(planned: OrgPlanResult | null): TreeNode['existing'] {
+  if (planned?.existingOrgId === undefined) return null;
+  return { orgId: planned.existingOrgId, depth: planned.existingDepth };
+}
+
+/**
+ * Reports TREE_LIMIT on each org row that would break the network's depth, children or total limit.
+ *
+ * @param ordered - The tree nodes, parents first.
+ * @throws {UpstreamError} When the child or total count lookup fails.
+ */
+async function reportTreeLimits(
+  ordered: readonly TreeNode[],
+  rules: TreeRules,
+  ctx: PlanContext,
+): Promise<void> {
+  const store = getOrganisationStore();
+  const existingParents = [
+    ctx.root.id,
+    ...ordered.flatMap((n) => (n.parent.kind === 'existing' ? [n.parent.orgId] : [])),
+    ...ordered.flatMap((n) => (n.existing ? [n.existing.orgId] : [])),
+  ];
+  const [counts, total] = await Promise.all([
+    store.childCounts([...new Set(existingParents)]),
+    store.countTotal(),
+  ]);
+  const refusals = treeLimitRefusals(ordered, rules, {
+    rootId: ctx.root.id,
+    childCounts: new Map(Object.entries(must(counts, 'orgStore.childCounts'))),
+    total: must(total, 'orgStore.countTotal'),
+  });
+  for (const [key, limit] of refusals) {
+    const row = ctx.fileOrgs.get(key);
+    if (row) ctx.problems.org(row.line, PLAN_PROBLEM.TREE_LIMIT, limit);
+  }
+}
+
+/**
+ * Plans each coordinator row that has no problem of its own.
+ *
+ * @throws {UpstreamError} When a lookup fails.
+ */
+async function planCoordinators(
+  rows: readonly CoordinatorRow[],
+  ctx: PlanContext,
+): Promise<PlannedCoordinator[]> {
+  const { problems } = ctx;
+  const coordinators: PlannedCoordinator[] = [];
+  for (const row of rows) {
+    if (problems.isBlocked('coordinators', row.line)) continue;
+    const planned = await planCoordinator(row, ctx);
+    if (planned && !problems.isBlocked('coordinators', row.line)) coordinators.push(planned);
+  }
+  return coordinators;
 }
 
 /** `orgs.csv` columns the org form reads besides the fixed, address and schema ones. */
@@ -223,22 +275,36 @@ function checkOrgRowsInFile(rows: readonly OrgRow[], ctx: PlanContext): void {
         ctx.problems.org(row.line, PLAN_PROBLEM.DUPLICATE_ORG_NAME, 'name');
       else ctx.fileOrgs.set(key, row);
     }
-    const { email } = row.owner;
-    if (email === '') continue;
-    const phone = e164(row.owner.phone) ?? row.owner.phone;
-    const first = owners.get(email);
-    if (!first) {
-      owners.set(email, { phone, name: personKey(row.owner.name) });
-    } else if (first.phone !== phone) {
-      ctx.problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_phone');
-    } else if (first.name !== personKey(row.owner.name)) {
-      ctx.problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_name');
-    }
-    const phoneOwner = phones.get(phone);
-    if (phoneOwner === undefined) phones.set(phone, email);
-    else if (phoneOwner !== email) {
-      ctx.problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_email');
-    }
+    if (row.owner.email !== '') checkOwnerContact(row, owners, phones, ctx.problems);
+  }
+}
+
+/**
+ * Reports OWNER_CONTACT_MISMATCH when a row's owner differs from an earlier row with the same email or phone.
+ *
+ * @param owners - First phone and name seen per owner email; updated.
+ * @param phones - First owner email seen per phone; updated.
+ */
+function checkOwnerContact(
+  row: OrgRow,
+  owners: Map<string, { phone: string; name: string }>,
+  phones: Map<string, string>,
+  problems: Problems,
+): void {
+  const { email } = row.owner;
+  const phone = e164(row.owner.phone) ?? row.owner.phone;
+  const first = owners.get(email);
+  if (!first) {
+    owners.set(email, { phone, name: personKey(row.owner.name) });
+  } else if (first.phone !== phone) {
+    problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_phone');
+  } else if (first.name !== personKey(row.owner.name)) {
+    problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_name');
+  }
+  const phoneOwner = phones.get(phone);
+  if (phoneOwner === undefined) phones.set(phone, email);
+  else if (phoneOwner !== email) {
+    problems.org(row.line, PLAN_PROBLEM.OWNER_CONTACT_MISMATCH, 'owner_email');
   }
 }
 
@@ -261,7 +327,7 @@ async function resolveParent(row: OrgRow, ctx: PlanContext): Promise<ResolvedPar
     return { ref: { kind: 'planned', name: inFile.name }, tree: { kind: 'planned', key } };
   }
   const existing = await ctx.names.find(row.parent);
-  if (existing && existing.status === 'active' && !existing.isDefault) {
+  if (existing?.status === 'active' && !existing.isDefault) {
     return {
       ref: { kind: 'existing', orgId: existing.id },
       tree: { kind: 'existing', orgId: existing.id, depth: existing.depth },
@@ -353,7 +419,7 @@ async function planOrg(
   parent: ResolvedParent,
   ctx: PlanContext,
   allRows: readonly OrgRow[],
-): Promise<{ org: PlannedOrg; existingOrgId?: string; existingDepth: number } | null> {
+): Promise<OrgPlanResult | null> {
   const { problems } = ctx;
   if (problems.isBlocked('orgs', row.line)) return null;
   const phoneE164 = e164(row.owner.phone);
@@ -361,60 +427,17 @@ async function planOrg(
     problems.org(row.line, PLAN_PROBLEM.INVALID_PHONE, 'owner_phone');
     return null;
   }
-  let form: OrgForm;
-  let schemaValues: Record<string, unknown>;
-  try {
-    form = orgFormOf(row, coerceExtras(row.extra, await orgArrayFields()), phoneE164);
-    const checked = await checkOrgForm(form);
-    if (!checked.ok) {
-      if (checked.error.code === 'INVALID_PHONE') {
-        problems.org(row.line, PLAN_PROBLEM.INVALID_PHONE, 'owner_phone');
-      } else {
-        const fieldErrors = OrgFieldErrorsSchema.safeParse(checked.error.fields?.['field_errors']);
-        const fields = fieldErrors.success ? Object.keys(fieldErrors.data) : [];
-        if (fields.length === 0) problems.org(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION);
-        for (const f of fields) problems.org(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION, f);
-      }
-      return null;
-    }
-    schemaValues = checked.value.schemaValues;
-  } catch (err: unknown) {
-    logCheckFailure('orgs', row.line, err);
-    problems.org(row.line, PLAN_PROBLEM.CHECK_FAILED);
-    return null;
-  }
+  const checked = await checkOrgRowForm(row, phoneE164, problems);
+  if (!checked) return null;
 
-  const email = row.owner.email;
-  if (reservedOwnerEmails().includes(email)) {
+  if (reservedOwnerEmails().includes(row.owner.email)) {
     problems.org(row.line, PLAN_PROBLEM.OWNER_RESERVED, 'owner_email');
     return null;
   }
-  const base = { row, parentRef: parent.ref, form, schemaValues, phoneE164 };
+  const base = { row, parentRef: parent.ref, ...checked, phoneE164 };
 
   const existing = await ctx.names.find(row.name);
-  if (existing) {
-    if (existing.ownerEmail !== email) {
-      problems.org(row.line, PLAN_PROBLEM.ORG_EXISTS_OTHER_OWNER, 'name');
-      return null;
-    }
-    if (existing.status === 'pending' && !isProvisioned(existing.createdBy)) {
-      problems.org(row.line, PLAN_PROBLEM.NOT_PROVISIONED_PENDING, 'name');
-      return null;
-    }
-    const action: PlanAction = existing.status === 'pending' ? 'resume' : 'already_loaded';
-    return {
-      org: {
-        ...base,
-        action,
-        existingOrgId: existing.id,
-        ownerRef: existing.ownerKcSub
-          ? { kind: 'existing', kcSub: existing.ownerKcSub }
-          : { kind: 'new' },
-      },
-      existingOrgId: existing.id,
-      existingDepth: existing.depth,
-    };
-  }
+  if (existing) return planExistingOrg(existing, base, problems);
 
   const owner = await checkNewOrgOwner(row, phoneE164, ctx, allRows);
   if (!owner.ok) return null;
@@ -425,6 +448,70 @@ async function planOrg(
       ownerRef: owner.kcSub ? { kind: 'existing', kcSub: owner.kcSub } : { kind: 'new' },
     },
     existingDepth: 0,
+  };
+}
+
+/**
+ * Builds an org row's form and checks it against the schema.
+ *
+ * @returns The form and its schema values, or `null` after reporting the problem.
+ */
+async function checkOrgRowForm(
+  row: OrgRow,
+  phoneE164: string,
+  problems: Problems,
+): Promise<{ form: OrgForm; schemaValues: Record<string, unknown> } | null> {
+  try {
+    const form = orgFormOf(row, coerceExtras(row.extra, await orgArrayFields()), phoneE164);
+    const checked = await checkOrgForm(form);
+    if (checked.ok) return { form, schemaValues: checked.value.schemaValues };
+    if (checked.error.code === 'INVALID_PHONE') {
+      problems.org(row.line, PLAN_PROBLEM.INVALID_PHONE, 'owner_phone');
+    } else {
+      const fieldErrors = OrgFieldErrorsSchema.safeParse(checked.error.fields?.['field_errors']);
+      const fields = fieldErrors.success ? Object.keys(fieldErrors.data) : [];
+      if (fields.length === 0) problems.org(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION);
+      for (const f of fields) problems.org(row.line, PLAN_PROBLEM.SCHEMA_VALIDATION, f);
+    }
+    return null;
+  } catch (err: unknown) {
+    logCheckFailure('orgs', row.line, err);
+    problems.org(row.line, PLAN_PROBLEM.CHECK_FAILED);
+    return null;
+  }
+}
+
+/**
+ * Plans a row whose org already exists: resumed when pending, skipped when already loaded.
+ *
+ * @returns The planned org, or `null` after reporting why the existing org cannot be reused.
+ */
+function planExistingOrg(
+  existing: Organisation,
+  base: Omit<PlannedOrg, 'action' | 'existingOrgId' | 'ownerRef'>,
+  problems: Problems,
+): OrgPlanResult | null {
+  const { row } = base;
+  if (existing.ownerEmail !== row.owner.email) {
+    problems.org(row.line, PLAN_PROBLEM.ORG_EXISTS_OTHER_OWNER, 'name');
+    return null;
+  }
+  if (existing.status === 'pending' && !isProvisioned(existing.createdBy)) {
+    problems.org(row.line, PLAN_PROBLEM.NOT_PROVISIONED_PENDING, 'name');
+    return null;
+  }
+  const action: PlanAction = existing.status === 'pending' ? 'resume' : 'already_loaded';
+  return {
+    org: {
+      ...base,
+      action,
+      existingOrgId: existing.id,
+      ownerRef: existing.ownerKcSub
+        ? { kind: 'existing', kcSub: existing.ownerKcSub }
+        : { kind: 'new' },
+    },
+    existingOrgId: existing.id,
+    existingDepth: existing.depth,
   };
 }
 

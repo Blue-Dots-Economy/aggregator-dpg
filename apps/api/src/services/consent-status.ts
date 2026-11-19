@@ -37,7 +37,7 @@ export interface ConsentStatus {
   outstandingOrgIds: string[];
 }
 
-export { ACCEPTED_CONSENT_SOURCES };
+export { ACCEPTED_CONSENT_SOURCES } from './consent-sources.js';
 
 /** Current terms and privacy versions of one audience. */
 interface AudienceVersions {
