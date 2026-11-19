@@ -21,6 +21,7 @@ import { logger } from '../../logger.js';
 import {
   _setBulkUploadsStore,
   BulkUploadsStoreFake,
+  buildBulkUpload,
   type BulkUpload,
   type BulkUploadStatus,
   type CreateBulkUploadInput,
@@ -457,6 +458,38 @@ describe('bulk-upload command', () => {
       expect(lines).toEqual([expect.stringMatching(/^FAILED: DB_UNAVAILABLE: /)]);
     });
 
+    it('names a pending upload that may exist when the create times out', async () => {
+      vi.spyOn(store, 'create').mockReturnValue(new Promise(() => undefined));
+      expect(await run(args(), io(undefined, { callTimeoutMs: 20 }))).toBe(1);
+      expect(lines).toEqual([
+        'FAILED: upload create timed out after 20 ms; a pending upload may exist, but it never starts on its own, so it is safe to run again',
+      ]);
+    });
+
+    const started = (reason: string) =>
+      `FAILED: upload ${UPLOAD_1} started; check with --upload-id ${UPLOAD_1} (${reason})`;
+
+    it('keeps the upload id when a status read times out after the start', async () => {
+      enqueueMock.mockResolvedValue(undefined);
+      const real = store.findById.bind(store);
+      let reads = 0;
+      vi.spyOn(store, 'findById').mockImplementation((id, agg) => {
+        reads += 1;
+        return reads >= 2 ? new Promise(() => undefined) : real(id, agg);
+      });
+      expect(await run(args(), io(undefined, { callTimeoutMs: 20 }))).toBe(1);
+      expect(lines.at(-2)).toBe(`upload ${UPLOAD_1} started`);
+      expect(lines.at(-1)).toBe(started('upload status read timed out after 20 ms'));
+    });
+
+    it('keeps the upload id when the counts cannot be read after completion', async () => {
+      _setCountsLoader(async () => {
+        throw new Error('db down');
+      });
+      expect(await run(args(), io())).toBe(1);
+      expect(lines.at(-1)).toBe(started('db down'));
+    });
+
     const unknownState = `FAILED: upload ${UPLOAD_1} state unknown after timeout — check with --upload-id ${UPLOAD_1} before retrying`;
 
     it('stops a call that hangs and leaves the upload alone', async () => {
@@ -523,6 +556,16 @@ describe('bulk-upload command', () => {
       lines = [];
       expect(await run(['--coordinator', COORD, '--upload-id', UPLOAD_1], io())).toBe(1);
       expect(lines).toEqual(['status: file_failed (header_mismatch)']);
+    });
+
+    it('reports an upload that never started at once, without waiting', async () => {
+      store.seed([buildBulkUpload({ id: UPLOAD_1, aggregatorId: COORD })]);
+      const reads = vi.spyOn(store, 'findById');
+      expect(await run(['--coordinator', COORD, '--upload-id', UPLOAD_1], io())).toBe(1);
+      expect(lines).toEqual([
+        `upload ${UPLOAD_1} never started; it is safe to run the upload again`,
+      ]);
+      expect(reads).toHaveBeenCalledTimes(1);
     });
 
     it('refuses the errors report of an upload that has none', async () => {

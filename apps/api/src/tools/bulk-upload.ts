@@ -82,11 +82,16 @@ class UsageError extends Error {}
 /** A call that did not finish within the per-call timeout; whether it took effect is unknown. */
 class CallTimeout extends Error {}
 
-/** A failure after the upload row was created; carries the upload id for the message. */
+/**
+ * A failure after the upload row was created; carries the upload id for the
+ * message. `started` is true once the start succeeded, so the upload is
+ * processing whatever the command does next.
+ */
 class UploadFailure extends Error {
   constructor(
     readonly uploadId: string,
     readonly failure: unknown,
+    readonly started: boolean,
   ) {
     super(errorMessage(failure), { cause: failure });
   }
@@ -299,7 +304,13 @@ async function followUp(
   io: CommandIo,
 ): Promise<number> {
   const coordinator = await activeCoordinator(coordinatorRef, io);
-  if (errorsCsv) return writeErrorsCsv(await readUpload(uploadId, coordinator.id, io), io);
+  const upload = await readUpload(uploadId, coordinator.id, io);
+  if (errorsCsv) return writeErrorsCsv(upload, io);
+  // A `pending` upload whose command has exited never progresses.
+  if (upload.status === 'pending') {
+    io.out(`upload ${uploadId} never started; it is safe to run the upload again`);
+    return 1;
+  }
   const done = await waitForResult(uploadId, coordinator.id, io);
   if (!done) {
     io.out(`upload ${uploadId} is still processing`);
@@ -412,7 +423,13 @@ async function upload(values: Flags, coordinatorRef: string, io: CommandIo): Pro
     }),
     io.callTimeoutMs,
     'upload create',
-  );
+  ).catch((err: unknown) => {
+    if (!(err instanceof CallTimeout)) throw err;
+    throw new Error(
+      `${err.message}; a pending upload may exist, but it never starts on its own, so it is safe to run again`,
+      { cause: err },
+    );
+  });
   const uploadId = reserved.id;
   io.out(`upload ${uploadId} created`);
   const runLog = log.child({ upload_id: uploadId });
@@ -435,17 +452,21 @@ async function upload(values: Flags, coordinatorRef: string, io: CommandIo): Pro
     if (!(err instanceof CallTimeout)) {
       await discardIfNotStarted(uploadId, coordinator.id, ref, runLog, io);
     }
-    throw new UploadFailure(uploadId, err);
+    throw new UploadFailure(uploadId, err, false);
   }
   runLog.info({ status: 'success', skip_rate_limit: skipRateLimit });
   io.out(`upload ${uploadId} started`);
 
-  const done = await waitForResult(uploadId, coordinator.id, io);
-  if (!done) {
-    io.out(`upload ${uploadId} is still processing; check later with --upload-id ${uploadId}`);
-    return 1;
+  try {
+    const done = await waitForResult(uploadId, coordinator.id, io);
+    if (!done) {
+      io.out(`upload ${uploadId} is still processing; check later with --upload-id ${uploadId}`);
+      return 1;
+    }
+    return await report(done, io);
+  } catch (err) {
+    throw new UploadFailure(uploadId, err, true);
   }
-  return report(done, io);
 }
 
 /**
@@ -482,6 +503,18 @@ export async function run(args: string[], io: CommandIo): Promise<number> {
   } catch (thrown) {
     const uploadId = thrown instanceof UploadFailure ? thrown.uploadId : undefined;
     const err = thrown instanceof UploadFailure ? thrown.failure : thrown;
+    if (thrown instanceof UploadFailure && thrown.started) {
+      const reason = err instanceof HttpError ? `${err.code}: ${err.detail}` : errorMessage(err);
+      logger.error({
+        operation: 'tools.bulkUpload',
+        status: 'failure',
+        upload_id: uploadId,
+        error: reason,
+        error_type: errorType(err),
+      });
+      io.out(`FAILED: upload ${uploadId} started; check with --upload-id ${uploadId} (${reason})`);
+      return 1;
+    }
     if (uploadId !== undefined && err instanceof CallTimeout) {
       io.out(
         `FAILED: upload ${uploadId} state unknown after timeout — check with --upload-id ${uploadId} before retrying`,
