@@ -18,6 +18,8 @@ import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 import { recordLoginIdentity } from '../identity-store/record.js';
+import type { Coordinator } from '../user-store/interface.js';
+import { logActing, readActingHeader, resolveActingAccount } from './acting.js';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
@@ -58,13 +60,23 @@ export interface AuthContext {
    * log's actor client.
    */
   azp?: string;
+  /**
+   * Set when an org owner acts as its own coordinator account
+   * (`x-acting-account`). The login is the owner's, so nothing records it
+   * as the coordinator's login.
+   */
+  acting?: true;
 }
 
 export type AuthError =
   | { code: 'MISSING_TOKEN'; message: string }
   | { code: 'INVALID_TOKEN'; message: string }
   | { code: 'MISSING_AGGREGATOR_ID'; message: string }
-  | { code: 'NOT_APPROVED'; message: string };
+  | { code: 'NOT_APPROVED'; message: string }
+  /** `x-acting-account` names an account this login may not act as (403). */
+  | { code: 'ACTING_ACCOUNT_INVALID'; message: string }
+  /** A store failed while checking `x-acting-account` (503). */
+  | { code: 'ACTING_UNAVAILABLE'; message: string };
 
 export type AuthResult = { ok: true; context: AuthContext } | { ok: false; error: AuthError };
 
@@ -106,6 +118,29 @@ export async function authenticate(
   req: FastifyRequest,
   opts?: { allowedAzp?: readonly string[] },
 ): Promise<AuthResult> {
+  const verified = await verifyRequest(req, opts);
+  if (!verified.ok) return verified;
+  const { sub, payload } = verified;
+  const aggregatorId = readAggregatorId(payload);
+  if (!aggregatorId) return missingAggregatorId();
+  return { ok: true, context: hydrateContext(sub, aggregatorId, payload) };
+}
+
+/** A verified Bearer token: its `sub` and claims. */
+type VerifiedRequest =
+  { ok: true; sub: string; payload: JWTPayload } | { ok: false; error: AuthError };
+
+/**
+ * Verifies the request's Bearer token and requires a `sub` claim.
+ *
+ * @param req - The Fastify request.
+ * @param opts.allowedAzp - `azp` allow-list that replaces `KEYCLOAK_ALLOWED_AZP`.
+ * @returns The subject and claims, or `MISSING_TOKEN` / `INVALID_TOKEN`.
+ */
+async function verifyRequest(
+  req: FastifyRequest,
+  opts?: { allowedAzp?: readonly string[] },
+): Promise<VerifiedRequest> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return { ok: false, error: { code: 'MISSING_TOKEN', message: 'missing Bearer token' } };
@@ -131,17 +166,18 @@ export async function authenticate(
   if (!payload.sub) {
     return { ok: false, error: { code: 'INVALID_TOKEN', message: 'missing sub claim' } };
   }
-  const aggregatorId = readAggregatorId(payload);
-  if (!aggregatorId) {
-    return {
-      ok: false,
-      error: {
-        code: 'MISSING_AGGREGATOR_ID',
-        message: 'token has no aggregator_id claim',
-      },
-    };
-  }
-  return { ok: true, context: hydrateContext(payload.sub, aggregatorId, payload) };
+  return { ok: true, sub: payload.sub, payload };
+}
+
+function missingAggregatorId(): AuthResult {
+  return {
+    ok: false,
+    error: { code: 'MISSING_AGGREGATOR_ID', message: 'token has no aggregator_id claim' },
+  };
+}
+
+function actingInvalid(message: string): AuthResult {
+  return { ok: false, error: { code: 'ACTING_ACCOUNT_INVALID', message } };
 }
 
 /**
@@ -153,8 +189,44 @@ export async function authenticate(
  * @returns The auth context; optional fields set only when present.
  */
 function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
-  const claims = payload as Record<string, unknown>;
-  const ctx: AuthContext = { userId, aggregatorId, serves: readStringList(claims.aggregator_type) };
+  const claims: Record<string, unknown> = payload;
+  const ctx: AuthContext = {
+    userId,
+    aggregatorId,
+    serves: readStringList(claims.aggregator_type),
+    ...identityOf(payload),
+  };
+  const decision = readStringOrFirst(claims.decision_made);
+  if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
+    ctx.decisionMade = decision;
+  }
+  const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
+  if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
+  return ctx;
+}
+
+/** The identity fields of an {@link AuthContext}, read from the token. */
+type TokenIdentityFields = Pick<
+  AuthContext,
+  | 'email'
+  | 'emailVerified'
+  | 'preferredUsername'
+  | 'azp'
+  | 'firstName'
+  | 'lastName'
+  | 'phoneNumber'
+  | 'phoneNumberVerified'
+>;
+
+/**
+ * Reads the caller's identity claims (email, names, phone, client).
+ *
+ * @param payload - The verified JWT payload.
+ * @returns The fields present in the token.
+ */
+function identityOf(payload: JWTPayload): TokenIdentityFields {
+  const claims: Record<string, unknown> = payload;
+  const ctx: TokenIdentityFields = {};
   if (typeof claims.email === 'string') ctx.email = claims.email;
   if (typeof claims.email_verified === 'boolean') ctx.emailVerified = claims.email_verified;
   if (typeof claims.preferred_username === 'string') {
@@ -168,13 +240,85 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
   const phoneVerified = claims.phone_number_verified ?? claims.phoneNumberVerified;
   if (typeof phoneVerified === 'boolean') ctx.phoneNumberVerified = phoneVerified;
   else if (typeof phoneVerified === 'string') ctx.phoneNumberVerified = phoneVerified === 'true';
-  const decision = readStringOrFirst(claims.decision_made);
-  if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
-    ctx.decisionMade = decision;
-  }
-  const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
-  if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
   return ctx;
+}
+
+/**
+ * The approval state of a coordinator row, in `decision_made` terms.
+ *
+ * @param status - The row's registration status.
+ * @returns `approved` for an active row, `pending` for a pending one, else `rejected`.
+ */
+function decisionOf(status: Coordinator['status']): NonNullable<AuthContext['decisionMade']> {
+  if (status === 'active') return 'approved';
+  if (status === 'pending') return 'pending';
+  return 'rejected';
+}
+
+/**
+ * Builds the {@link AuthContext} of an owner acting as its own coordinator
+ * account. The account fields come from the coordinator row; the token
+ * supplies only the identity fields.
+ *
+ * @param sub - The token `sub`.
+ * @param accountId - The `x-acting-account` value.
+ * @param payload - The verified JWT payload.
+ * @returns The context, `ACTING_ACCOUNT_INVALID`, or `ACTING_UNAVAILABLE`.
+ */
+async function actingContext(
+  sub: string,
+  accountId: string,
+  payload: JWTPayload,
+): Promise<AuthResult> {
+  const acting = await resolveActingAccount(sub, accountId);
+  if (!acting.success) {
+    logActing(acting.error.code);
+    const code =
+      acting.error.code === 'UNAVAILABLE' ? 'ACTING_UNAVAILABLE' : 'ACTING_ACCOUNT_INVALID';
+    return { ok: false, error: { code, message: acting.error.message } };
+  }
+  logActing(null);
+  const row = acting.value;
+  const ctx: AuthContext = {
+    userId: sub,
+    aggregatorId: row.id,
+    serves: row.serves,
+    decisionMade: decisionOf(row.status),
+    ...identityOf(payload),
+    acting: true,
+  };
+  if (row.signalstackOrgId) ctx.signalstackOrgId = row.signalstackOrgId;
+  return { ok: true, context: ctx };
+}
+
+/**
+ * {@link authenticate} that also accepts an org owner acting as its own
+ * coordinator account (`x-acting-account`, see {@link requireApproved}).
+ * Runs no approval gate, backfill or login record, so a route that must show
+ * a pending account (the profile self-read) can use it.
+ *
+ * @param req - The Fastify request.
+ * @returns The context (`acting: true` when acting) or the auth error.
+ */
+export async function authenticateAllowingActing(req: FastifyRequest): Promise<AuthResult> {
+  const verified = await verifyRequest(req);
+  if (!verified.ok) return verified;
+  const { sub, payload } = verified;
+  const acting = readActingHeader(req);
+  if (acting.kind === 'malformed') {
+    logActing('MALFORMED');
+    return actingInvalid('x-acting-account is not an account id');
+  }
+  const claimed = readAggregatorId(payload);
+  if (!claimed) {
+    if (acting.kind === 'absent') return missingAggregatorId();
+    return actingContext(sub, acting.id, payload);
+  }
+  if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
+    logActing('CLAIM_MISMATCH');
+    return actingInvalid('x-acting-account differs from the token aggregator_id');
+  }
+  return { ok: true, context: hydrateContext(sub, claimed, payload) };
 }
 
 /**
@@ -186,10 +330,27 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
  * upsert, Keycloak attribute, DB row) and sets it on the context. The user's
  * token carries the claim after the next refresh. Backfill failures are
  * logged and do not block the request.
+ *
+ * An org owner may act as its own coordinator account by sending
+ * `x-acting-account` with a token that has no `aggregator_id`. The account
+ * must be the coordinator linked to this login, the login must also hold an
+ * admin account, and the coordinator and its org must be active. The context
+ * then comes from the coordinator row, and neither the backfill nor the
+ * login record runs: both would write to the owner's login. A coordinator
+ * token whose header differs from its claim is refused.
  */
 export async function requireApproved(req: FastifyRequest): Promise<AuthResult> {
-  const result = await authenticate(req);
+  const result = await authenticateAllowingActing(req);
   if (!result.ok) return result;
+  if (result.context.acting) {
+    if (result.context.decisionMade !== 'approved' || !result.context.signalstackOrgId) {
+      return {
+        ok: false,
+        error: { code: 'NOT_APPROVED', message: 'acting account has no signalstack organisation' },
+      };
+    }
+    return result;
+  }
   if (result.context.decisionMade !== 'approved') {
     return {
       ok: false,

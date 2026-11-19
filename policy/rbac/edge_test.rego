@@ -331,3 +331,83 @@ test_real_table_encoded_template_path_keeps_its_permission if {
 	body(d).fields.permission == "profiles.onboard"
 	d.dynamic_metadata.rbac_edge.route == "/v1/bulk-uploads/template"
 }
+
+# ── Acting account (x-acting-account) ───────────────────────────────────────
+# An owner acting as its own coordinator account sends its owner token with
+# `x-acting-account: <coordinator id>`. The token's `roles` claim holds the
+# owner's role keys plus `acting:<id>:<roleKey>` entries for that account.
+
+# The built-in coordinator and owner roles, as far as these tests need them.
+acting_catalogue := {
+	"mode": "enforce",
+	"roles": {
+		"coordinator": {"permissions": ["profiles.view", "profiles.onboard", "profiles.view_pii", "campaigns.run"]},
+		"org_admin": {"permissions": ["profiles.view", "profiles.export", "profiles.onboard", "org.manage"]},
+	},
+}
+
+acting_req(method, path, payload, account) := {"attributes": {
+	"request": {"http": {"method": method, "path": path, "headers": {"x-request-id": "req-1", "x-acting-account": account}}},
+	"metadataContext": {"filterMetadata": {"envoy.filters.http.jwt_authn": {"jwt_payload": payload}}},
+}}
+
+decide_acting(i) := d if {
+	d := edge.decision with input as i with data.catalogue as acting_catalogue
+}
+
+owner_with_account := user(["org_admin", "acting:a1:coordinator"])
+
+errors_csv := "/v1/bulk-uploads/0b1c/errors.csv"
+
+test_acting_entries_grant_nothing_without_the_header if {
+	d := decide_acting(req("GET", errors_csv, owner_with_account))
+	d.http_status == 403
+	body(d).fields.permission == "profiles.view_pii"
+	decide_acting(req("GET", "/v1/user/read/me", owner_with_account)).allowed
+	decide_acting(req("GET", "/v1/roles", owner_with_account)).allowed
+}
+
+test_acting_only_entries_are_no_roles_without_the_header if {
+	d := decide_acting(req("GET", "/v1/user/read/me", user(["acting:a1:coordinator"])))
+	d.http_status == 403
+	body(d).fields.permission == "signed_in"
+}
+
+test_acting_with_the_header_applies_the_account_roles_only if {
+	decide_acting(acting_req("GET", errors_csv, owner_with_account, "a1")).allowed
+	decide_acting(acting_req("POST", "/v1/links/create", owner_with_account, "a1")).allowed
+	decide_acting(acting_req("GET", "/v1/user/read/me", owner_with_account, "a1")).allowed
+	d := decide_acting(acting_req("GET", "/v1/roles", owner_with_account, "a1"))
+	d.http_status == 403
+	body(d).fields.permission == "org.manage"
+}
+
+test_acting_header_is_matched_case_insensitively if {
+	decide_acting(acting_req("GET", errors_csv, owner_with_account, "A1")).allowed
+}
+
+test_acting_header_for_another_account_has_no_roles if {
+	every url in [errors_csv, "/v1/roles"] {
+		decide_acting(acting_req("GET", url, owner_with_account, "b2")).http_status == 403
+	}
+	decide_acting(acting_req("POST", "/v1/links/create", owner_with_account, "b2")).http_status == 403
+	d := decide_acting(acting_req("GET", "/v1/user/read/me", owner_with_account, "b2"))
+	d.http_status == 403
+	body(d).fields.permission == "signed_in"
+}
+
+test_acting_header_on_a_coordinator_token_has_no_roles if {
+	decide_acting(acting_req("POST", "/v1/links/create", user(["coordinator"]), "x9")).http_status == 403
+	decide_acting(acting_req("GET", errors_csv, user(["coordinator"]), "x9")).http_status == 403
+}
+
+test_coordinator_token_without_the_header_is_unchanged if {
+	decide_acting(req("POST", "/v1/links/create", user(["coordinator"]))).allowed
+	decide_acting(req("GET", errors_csv, user(["coordinator"]))).allowed
+	decide_acting(req("GET", "/v1/roles", user(["coordinator"]))).http_status == 403
+}
+
+test_an_empty_acting_header_is_no_header if {
+	decide_acting(acting_req("GET", "/v1/roles", owner_with_account, "")).allowed
+	decide_acting(acting_req("GET", errors_csv, owner_with_account, "")).http_status == 403
+}

@@ -34,6 +34,14 @@ describe('middleware', () => {
     expect(res.headers.get('x-pathname')).toBe('/');
   });
 
+  it('passes x-pathname on to the request, overwriting a client-sent value', () => {
+    const req = new NextRequest('http://localhost/console/profile', {
+      headers: { 'x-pathname': '/onboarding' },
+    });
+    const res = middleware(req);
+    expect(res.headers.get('x-middleware-request-x-pathname')).toBe('/console/profile');
+  });
+
   it('exports a matcher config excluding _next static/image and favicon', () => {
     expect(config.matcher).toEqual(['/((?!_next/static|_next/image|favicon.ico).*)']);
   });

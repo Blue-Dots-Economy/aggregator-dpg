@@ -9,6 +9,7 @@
  *   POST  /v1/user/invite                invite coordinators into an org
  *   POST  /v1/user/invite/search         unused coordinator invites of an org
  *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
+ *   POST  /v1/user/self/add              an owner adds their own coordinator account to an org they own
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
  * Every handler calls `requireActor` first. Only `read/me`, `consent/status`
@@ -26,6 +27,7 @@ import {
   UserInviteResponseSchema,
   UserInviteSearchRequestSchema,
   ActivateResponseSchema,
+  SelfAddRequestSchema,
   InviteSearchResponseSchema,
   UserMetadataUpdateRequestSchema,
   UserSchema,
@@ -57,11 +59,18 @@ import {
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { searchOpenInvites } from './invite-shared.js';
 import { activateInvitedAccount } from '../services/invites/activate.js';
+import { ownerSelfAdd, type SelfAddError } from '../services/registration/owner-self-add.js';
+import { stampConsent } from '../services/registration-consent.js';
+import type { ErrorCode } from '../errors/codes.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
+import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import { isSharedLogin } from '../services/auth/shared-login.js';
+import { resolveActingAccount } from '../services/auth/acting.js';
 import { KC_ATTR } from '../services/idp-admin/attributes.js';
 import {
   decodeUserCursor,
@@ -135,6 +144,47 @@ async function findCoordinatorLogin(aggregatorId: string, log: FastifyBaseLogger
 }
 
 /**
+ * The Keycloak user id of a coordinator's login for a write, or `null` when
+ * its recorded login is an owner's shared login (an admin account and no
+ * `aggregator_id`), which coordinator paths never write in Keycloak.
+ * Any other login is found by its `aggregator_id`.
+ *
+ * @param aggregatorId - The coordinator's `users.id`.
+ * @param log - Request logger.
+ * @returns The Keycloak user id, or `null` for a shared login.
+ * @throws DB_UNAVAILABLE if the identity store fails; IDP_UNAVAILABLE if Keycloak fails or as {@link findCoordinatorLogin}.
+ */
+async function coordinatorLoginForWrite(
+  aggregatorId: string,
+  log: FastifyBaseLogger,
+): Promise<string | null> {
+  const identities = getIdentityStore();
+  const linked = await identities.subjectOf(aggregatorId, IDP_PROVIDER);
+  if (!linked.ok) dbDown('identityStore.subjectOf', linked.error.message);
+  if (linked.value !== null) {
+    const accounts = await identities.accountsOf(IDP_PROVIDER, linked.value);
+    if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
+    const shared = await isSharedLogin(linked.value, accounts.value);
+    if (!shared.ok) {
+      log.error({ status: 'failure', sub_operation: 'idp.findById', code: shared.error.code });
+      throw httpError('IDP_UNAVAILABLE', { fields: { sub_operation: 'idp.findById' } });
+    }
+    if (shared.value) return null;
+  }
+  return findCoordinatorLogin(aggregatorId, log);
+}
+
+/** HTTP error of each self-add refusal. */
+const SELF_ADD_ERRORS: Record<SelfAddError['code'], ErrorCode> = {
+  NOT_ORG_OWNER: 'NOT_ORG_OWNER',
+  ORG_NOT_ELIGIBLE: 'ORG_NOT_ELIGIBLE',
+  ALREADY_COORDINATOR: 'ALREADY_COORDINATOR',
+  NO_PROFILE_TYPES: 'SCHEMA_VALIDATION',
+  OWNER_PHONE_REQUIRED: 'OWNER_PHONE_REQUIRED',
+  UNAVAILABLE: 'SELF_ADD_UNAVAILABLE',
+};
+
+/**
  * Writes a coordinator's profile types to its multivalued `aggregator_type`
  * attribute, the source of the token claim the API checks.
  *
@@ -192,18 +242,18 @@ async function restoreTokenTypes(
  * already changed. Best effort: each failure is logged for an operator to
  * repair.
  *
- * @param kcUserId - The coordinator's Keycloak user id.
+ * @param kcUserId - The coordinator's Keycloak user id, or `null` for a shared login (not written).
  * @param previous - The profile types stored before the change.
  * @param log - Request logger.
  * @param pushDomains - Writes the Signals org's domains, or null when Signals was not changed.
  */
 async function rollbackServes(
-  kcUserId: string,
+  kcUserId: string | null,
   previous: string[],
   log: FastifyBaseLogger,
   pushDomains: ((domains: string[]) => Promise<boolean>) | null,
 ): Promise<void> {
-  await restoreTokenTypes(kcUserId, previous, log);
+  if (kcUserId !== null) await restoreTokenTypes(kcUserId, previous, log);
   if (!pushDomains) return;
   // Signals is not sent an empty list; its org keeps the new domains, which
   // give no access because requests are checked against the token claim.
@@ -240,6 +290,64 @@ async function manageScope(
   purpose: ScopePurpose = 'manage',
 ): Promise<string[]> {
   return manageableOrgIds(req, actor, await rootOrgId(), purpose);
+}
+
+/** Rejects a `serves` list that names a domain the network does not have. */
+function assertKnownDomains(serves: string[], domainIds: string[]): void {
+  const unknown = serves.filter((d) => !domainIds.includes(d));
+  if (unknown.length > 0) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'serves lists a domain this network does not have.',
+      fields: { field: 'serves', unknown },
+    });
+  }
+}
+
+/**
+ * Pushes a coordinator's domains to its Signals organisation, or null when no
+ * Signals writer is configured.
+ */
+function buildPushDomains(
+  row: { id: string; name: string; orgSlug: string },
+  requestId: string,
+  log: FastifyBaseLogger,
+): ((domains: string[]) => Promise<boolean>) | null {
+  const signalstack = getSignalStackWriter();
+  if (!signalstack) return null;
+  return async (domains) => {
+    const upsert = await signalstack.upsertAggregator({
+      external_id: row.id,
+      name: row.name,
+      slug: row.orgSlug,
+      domains,
+      requestId,
+    });
+    if (!upsert.success) {
+      log.error({
+        status: 'failure',
+        sub_operation: 'signalstack.upsertAggregator',
+        code: upsert.error.code,
+      });
+    }
+    return upsert.success;
+  };
+}
+
+function logLogoutFailure(log: FastifyBaseLogger, code: string): void {
+  log.warn({ status: 'failure', sub_operation: 'idp.logoutSessions', code });
+}
+
+/** Tells the owning org's owner that an admin changed a user's domains. */
+async function notifyOwnerOfDomainChange(
+  actor: Parameters<typeof notifyOwnerOfAdminAction>[0],
+  parentOrgId: string | null | undefined,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (!parentOrgId) return;
+  const org = await getOrganisationStore().findById(parentOrgId);
+  if (org.ok && org.value) {
+    await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", log);
+  }
 }
 
 /**
@@ -327,30 +435,55 @@ async function liveRolesOf(rows: readonly Coordinator[]): Promise<Map<string, st
 }
 
 /**
- * Builds the `read/me` answer for an actor.
+ * The admin's own coordinator account, when the login may act as it now.
+ *
+ * @param subject - The token `sub`.
+ * @param coordinatorId - The coordinator linked to the same login, or null.
+ * @returns The id when acting would be accepted, else `null`.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function usableOwnCoordinator(
+  subject: string,
+  coordinatorId: string | null,
+): Promise<string | null> {
+  if (coordinatorId === null) return null;
+  const acting = await resolveActingAccount(subject, coordinatorId);
+  if (acting.success) return acting.value.id;
+  if (acting.error.code === 'UNAVAILABLE') dbDown('resolveActingAccount', acting.error.message);
+  return null;
+}
+
+/** The `read/me` contact of a person. */
+type MeContact = { name: string | null; email: string; phone: string | null };
+
+/**
+ * A coordinator's own contact.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE; USER_NOT_PROVISIONED when the row is gone.
+ */
+async function coordinatorContact(userId: string): Promise<MeContact> {
+  const row = await getUserStore().findById(userId);
+  if (!row.ok) dbDown('userStore.findById', row.error.message);
+  if (!row.value) throw httpError('USER_NOT_PROVISIONED');
+  return {
+    name: row.value.contact.name ?? null,
+    email: row.value.contact.email,
+    phone: row.value.contact.phone ?? null,
+  };
+}
+
+/**
+ * Loads each of the actor's orgs that still exists, with its decision-engine target.
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<MeResponse> {
+async function resolveMeOrgs(
+  actor: Actor,
+): Promise<Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }>> {
   const orgStore = getOrganisationStore();
-  const orgs: MeOrg[] = [];
-  let self: { name: string | null; email: string; phone: string | null } | null = null;
-
-  if (actor.userType === 'coordinator') {
-    const row = await getUserStore().findById(actor.userId);
-    if (!row.ok) dbDown('userStore.findById', row.error.message);
-    if (!row.value) throw httpError('USER_NOT_PROVISIONED');
-    self = {
-      name: row.value.contact.name ?? null,
-      email: row.value.contact.email,
-      phone: row.value.contact.phone ?? null,
-    };
-  }
-
   const root = await orgStore.findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   const rootId = root.value?.id ?? null;
-  // Ask the decision engine once per distinct question; this route runs on every page load.
   const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
   for (const o of actor.orgs) {
     const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
@@ -365,34 +498,70 @@ async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<Me
         ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
       },
     });
-    // An admin's own contact is its orgs' owner contact (one person).
-    if (!self && o.relation === 'owner') self = ownerContact(found.value);
   }
+  return resolved;
+}
+
+/**
+ * The coordinator account an admin's login may act as, else `null`.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function ownCoordinatorAccountOf(subject: string): Promise<string | null> {
+  const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, subject);
+  if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
+  return usableOwnCoordinator(subject, accounts.value.coordinator);
+}
+
+/**
+ * Builds the `read/me` answer for an actor.
+ *
+ * For an admin, `own_coordinator_account_id` is the coordinator account
+ * linked to the same login when the login may act as it (active, in an
+ * active org), else `null`.
+ *
+ * @param subject - The token `sub`.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function meOf(
+  /* NOSONAR */ req: FastifyRequest,
+  actor: Actor,
+  subject: string,
+): Promise<MeResponse> {
+  let self: MeContact | null =
+    actor.userType === 'coordinator' ? await coordinatorContact(actor.userId) : null;
+  // Ask the decision engine once per distinct question; this route runs on every page load.
+  const resolved = await resolveMeOrgs(actor);
   const capabilitiesByOrg = await listCapabilitiesForTargets(
     req,
     actor,
     resolved.map((r) => r.target),
   );
-  for (const { org: o, found } of resolved) {
-    orgs.push({
-      id: found.id,
-      name: found.displayName,
-      slug: found.slug,
-      org_type: o.orgType,
-      role: o.relation,
-      is_default: found.isDefault,
-      capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
-    });
-  }
+  const orgs: MeOrg[] = resolved.map(({ org: o, found }) => ({
+    id: found.id,
+    name: found.displayName,
+    slug: found.slug,
+    org_type: o.orgType,
+    role: o.relation,
+    is_default: found.isDefault,
+    capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
+  }));
+  // An admin's own contact is its orgs' owner contact (one person).
+  const owned = resolved.find((r) => r.org.relation === 'owner');
+  if (!self && owned) self = ownerContact(owned.found);
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 
-  return {
+  const me: MeResponse = {
     kind: actor.userType,
     user: { id: actor.userId, contact: self },
     orgs,
     is_network_admin: isNetworkAdmin(actor),
     capabilities: await listActorCapabilities(req, actor),
   };
+  if (actor.userType === 'admin') {
+    me.own_coordinator_account_id = await ownCoordinatorAccountOf(subject);
+  }
+  return me;
 }
 
 /**
@@ -413,8 +582,8 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const { actor } = await requireActor(req, { allowCoordinator: true });
-      return reply.status(200).send(await meOf(req, actor));
+      const { actor, auth } = await requireActor(req, { allowCoordinator: true });
+      return reply.status(200).send(await meOf(req, actor, auth.subject));
     },
   );
 
@@ -703,6 +872,55 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
     },
   );
 
+  app.post(
+    '/v1/user/self/add',
+    {
+      config: { rbac: { capability: 'org.manage' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Add the signed-in owner to the team of an organisation they own',
+        description:
+          "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated.",
+        body: SelfAddRequestSchema,
+        response: { 201: UserSchema, ...errorResponses(400, 401, 403, 409, 429, 503) },
+      },
+    },
+    async (req, reply) => {
+      const { actor, auth } = await requireActor(req);
+      await guardWriteRate(actor, reply);
+      const consent = stampConsent(req.body.consent);
+      if (!consent) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'consent.valid_till must be in the future.',
+          fields: { 'consent.valid_till': 'invalid' },
+        });
+      }
+      const added = await ownerSelfAdd(
+        actor,
+        auth.subject,
+        { ...req.body, consent },
+        req.log,
+        req.id,
+      );
+      if (!added.success) {
+        throw httpError(SELF_ADD_ERRORS[added.error.code], {
+          ...(added.error.code === 'NO_PROFILE_TYPES'
+            ? {
+                detail: 'serves lists a domain this network does not have.',
+                fields: { field: 'serves' },
+              }
+            : {}),
+        });
+      }
+      const row = added.value;
+      return reply
+        .status(201)
+        .send(
+          toWireUser(row, { masked: !(await showsContact(req, actor, row.parentOrgId ?? null)) }),
+        );
+    },
+  );
+
   app.patch(
     '/v1/user/metadata/update/:id',
     {
@@ -726,13 +944,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
 
       const networkCfg = await getNetworkConfig();
       const serves = [...new Set(body.serves)];
-      const unknown = serves.filter((d) => !networkCfg.domainIds.includes(d));
-      if (unknown.length > 0) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'serves lists a domain this network does not have.',
-          fields: { field: 'serves', unknown },
-        });
-      }
+      assertKnownDomains(serves, networkCfg.domainIds);
       const log = req.log.child({
         operation: 'console.user.update',
         actor_id: actor.userId,
@@ -740,33 +952,15 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       });
 
       // The token claim decides what the coordinator may act on, so Keycloak
-      // is written first: a failure here changes nothing.
-      const kcUserId = await findCoordinatorLogin(row.id, log);
-      await writeTokenTypes(kcUserId, serves, log);
+      // is written first: a failure here changes nothing. A shared login is
+      // the owner's and is not written.
+      const kcUserId = await coordinatorLoginForWrite(row.id, log);
+      if (kcUserId !== null) await writeTokenTypes(kcUserId, serves, log);
 
       // An approved coordinator's Signals org carries its domains. If a later
       // step fails, Keycloak and Signals are put back, so every side stays
       // unchanged.
-      const signalstack = getSignalStackWriter();
-      const pushDomains = signalstack
-        ? async (domains: string[]): Promise<boolean> => {
-            const upsert = await signalstack.upsertAggregator({
-              external_id: row.id,
-              name: row.name,
-              slug: row.orgSlug,
-              domains,
-              requestId: req.id,
-            });
-            if (!upsert.success) {
-              log.error({
-                status: 'failure',
-                sub_operation: 'signalstack.upsertAggregator',
-                code: upsert.error.code,
-              });
-            }
-            return upsert.success;
-          }
-        : null;
+      const pushDomains = buildPushDomains(row, req.id, log);
       // What Keycloak and Signals are put back to: the stored types still in
       // the network, the same value the profile-types sync writes.
       const previous = servedDomains(row.serves, networkCfg.domainIds);
@@ -785,14 +979,8 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         dbDown('userStore.update', updated.error.message);
       }
       // End the coordinator's sessions so its next login carries the new types.
-      const logout = await getIdpAdmin().logoutSessions(kcUserId);
-      if (!logout.ok) {
-        log.warn({
-          status: 'failure',
-          sub_operation: 'idp.logoutSessions',
-          code: logout.error.code,
-        });
-      }
+      const logout = kcUserId === null ? null : await getIdpAdmin().logoutSessions(kcUserId);
+      if (logout && !logout.ok) logLogoutFailure(log, logout.error.code);
       // Approved meanwhile with the old domains: push again. Saving again
       // repeats the push.
       if (
@@ -805,14 +993,14 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
           detail: 'The domains were saved, but Signals was not updated. Save them again.',
         });
       }
-      log.info({ status: 'success', fields: ['serves'], sessions_ended: logout.ok });
+      log.info({
+        status: 'success',
+        fields: ['serves'],
+        sessions_ended: logout?.ok ?? false,
+        shared_login: kcUserId === null,
+      });
 
-      if (row.parentOrgId) {
-        const org = await getOrganisationStore().findById(row.parentOrgId);
-        if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", req.log);
-        }
-      }
+      await notifyOwnerOfDomainChange(actor, row.parentOrgId, req.log);
       return reply.status(200).send(
         toWireUser(updated.value, {
           masked: !(await showsContact(req, actor, row.parentOrgId ?? null)),

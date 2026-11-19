@@ -18,7 +18,7 @@ import { LanguageSwitcher } from '@/components/shell/LanguageSwitcher';
 import { ThemeToggle } from '@/components/shell/ThemeToggle';
 import { tokenAggregatorId } from '@/lib/jwt';
 import { logger } from '@/lib/logger';
-import { isSafeReturnTo } from '@/lib/safe-return';
+import { safeReturnPath } from '@/lib/return-to';
 import { getSession } from '@/lib/server-session';
 import { storeTermsStatus } from '@/lib/terms-guard.server';
 import { ACCEPT_TERMS_PATH, fetchTermsStatus, type TermsCheck } from '@/lib/terms-status.server';
@@ -55,7 +55,7 @@ export default async function AcceptTermsPage({
 
   const { returnTo: requested } = await searchParams;
   const fallback = tokenAggregatorId(session.accessToken) ? '/dashboard' : '/console';
-  const returnTo = isSafeReturnTo(typeof requested === 'string' ? requested : null, fallback, [
+  const returnTo = safeReturnPath(typeof requested === 'string' ? requested : null, fallback, [
     ACCEPT_TERMS_PATH,
   ]);
 

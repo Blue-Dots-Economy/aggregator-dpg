@@ -13,7 +13,9 @@ import {
   IdentityTakenError,
   linkAdminAccount,
   linkIdentity,
+  accountsOfSubject,
   subjectOf,
+  userOfSubject,
 } from '../account-writes.js';
 import type { DbExecutor } from '../contact-writes.js';
 
@@ -33,7 +35,7 @@ function fakeDb(script: Script): { db: DbExecutor; sql: string[]; params: unknow
   const selects = [...(script.selects ?? [])];
   const chain = (rows: unknown): Promise<unknown> => {
     const p = Promise.resolve(rows);
-    for (const m of ['from', 'where']) {
+    for (const m of ['from', 'where', 'orderBy', 'limit']) {
       Object.defineProperty(p, m, { value: () => p });
     }
     return p;
@@ -85,6 +87,13 @@ describe('linkIdentity', () => {
     await expect(linkIdentity(db, 'u1', 'keycloak', 's1')).resolves.toBe('linked');
   });
 
+  it('writes the account type with the link', async () => {
+    const { db, sql } = fakeDb({ executes: [[{ user_id: 'u1' }]] });
+    await linkIdentity(db, 'u1', 'keycloak', 's1');
+    expect(sql[0]).toMatch(/INSERT INTO user_identities \(user_id, user_type, provider, subject\)/);
+    expect(sql[0]).toMatch(/SELECT u\.id, u\.user_type,/);
+  });
+
   it('returns already when this exact link exists', async () => {
     const { db } = fakeDb({ executes: [[]], selects: [[{ subject: 's1' }]] });
     await expect(linkIdentity(db, 'u1', 'keycloak', 's1')).resolves.toBe('already');
@@ -125,5 +134,46 @@ describe('subjectOf', () => {
     expect(
       await subjectOf(fakeDb({ executes: [], selects: [[]] }).db, 'u1', 'keycloak'),
     ).toBeNull();
+  });
+});
+
+describe('userOfSubject', () => {
+  it('returns the account id or null', async () => {
+    expect(
+      await userOfSubject(
+        fakeDb({ executes: [], selects: [[{ userId: 'u1' }]] }).db,
+        'keycloak',
+        's',
+      ),
+    ).toBe('u1');
+    expect(
+      await userOfSubject(
+        fakeDb({ executes: [], selects: [[]] }).db,
+        'keycloak',
+        's',
+        'coordinator',
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('accountsOfSubject', () => {
+  it('sorts the rows into admin and coordinator', async () => {
+    const rows = [
+      { userId: 'c1', userType: 'coordinator' },
+      { userId: 'a1', userType: 'admin' },
+    ];
+    expect(
+      await accountsOfSubject(fakeDb({ executes: [], selects: [rows] }).db, 'keycloak', 's'),
+    ).toEqual({
+      admin: 'a1',
+      coordinator: 'c1',
+    });
+    expect(
+      await accountsOfSubject(fakeDb({ executes: [], selects: [[]] }).db, 'keycloak', 's'),
+    ).toEqual({
+      admin: null,
+      coordinator: null,
+    });
   });
 });

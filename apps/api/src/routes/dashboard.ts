@@ -13,6 +13,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
@@ -393,6 +394,7 @@ async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
     await recordRouteCaller(req, callerFromAuth(result.context));
     return result.context;
   }
+  throwIfActingError(result.error);
   if (result.error.code === 'MISSING_AGGREGATOR_ID') {
     throw httpError('FORBIDDEN', {
       detail: result.error.message,

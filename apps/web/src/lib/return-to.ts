@@ -1,26 +1,26 @@
 /**
- * Open-redirect guard for `returnTo` values (`@aggregator-dpg/web`).
+ * Same-origin return paths for BFF redirects in the aggregator portal web app.
  *
- * @module apps/web/src/lib/safe-return
+ * @module apps/web/src/lib/return-to
  */
 
-/** Base used only to parse a relative `returnTo`; the `.invalid` TLD never resolves. */
+/** Base used only to parse a relative path; the `.invalid` TLD never resolves. */
 const PARSE_BASE = 'https://placeholder.invalid';
 
 /**
  * Returns `value` when it is a same-origin path, else `fallback`.
  *
- * Rejects full URLs, `//host`, `/\host`, encoded tricks such as `/%09/host`,
- * control characters, and any path listed in `exclude`.
+ * Prevents open redirects: rejects `//host`, `/\host`, encoded tricks such as
+ * `/%09/host`, full URLs, control characters, and any path listed in `exclude`.
  *
- * @param value - The requested return path.
- * @param fallback - Path used when `value` is missing or unsafe.
+ * @param value - The requested return path, from untrusted input.
+ * @param fallback - The path to use when `value` is absent or unsafe.
  * @param exclude - Paths that must never be returned to, matched without the query.
- * @returns The normalised path with its query and hash, or `fallback`.
+ * @returns A path with its query and hash.
  */
-export function isSafeReturnTo(
+export function safeReturnPath(
   value: string | null | undefined,
-  fallback = '/',
+  fallback: string,
   exclude: readonly string[] = [],
 ): string {
   if (!value) return fallback;

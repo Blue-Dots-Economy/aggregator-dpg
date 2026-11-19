@@ -38,6 +38,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  foreignKey,
   unique,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
@@ -321,6 +322,8 @@ export const users = pgTable(
     index('users_status_idx').on(table.status),
     // One account per person per role.
     uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
+    // Target of the composite FK from `user_identities (user_id, user_type)`.
+    unique('users_id_type_unique').on(table.id, table.userType),
     index('users_org_idx').on(table.orgId),
     index('users_invite_idx')
       .on(table.inviteId)
@@ -330,7 +333,9 @@ export const users = pgTable(
 
 // ─── user_identities ─────────────────────────────────────────────────────────
 // Login identities per account: one per provider per account, and one account
-// per external login. `provider` is currently 'keycloak'.
+// per type per external login (an admin and a coordinator may share a login).
+// `user_type` copies `users.user_type`; the composite FK keeps them equal.
+// `provider` is currently 'keycloak'.
 
 export const userIdentities = pgTable(
   'user_identities',
@@ -338,13 +343,23 @@ export const userIdentities = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    userType: userTypeEnum('user_type').notNull(),
     provider: text('provider').notNull(),
     subject: text('subject').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ name: 'user_identities_pkey', columns: [table.userId, table.provider] }),
-    unique('user_identities_provider_subject_unique').on(table.provider, table.subject),
+    unique('user_identities_provider_subject_type_unique').on(
+      table.provider,
+      table.subject,
+      table.userType,
+    ),
+    foreignKey({
+      name: 'user_identities_user_type_fk',
+      columns: [table.userId, table.userType],
+      foreignColumns: [users.id, users.userType],
+    }).onDelete('cascade'),
   ],
 );
 
@@ -538,6 +553,8 @@ export const registrationLinks = pgTable(
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
+    // Voice bot key (a `voice_bots` config key) chosen at create. Immutable after create.
+    voiceBotKey: text('voice_bot_key'),
     // Not written. QR codes are generated client-side. Kept for reading old rows.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
