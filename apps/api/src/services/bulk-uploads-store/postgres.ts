@@ -135,6 +135,27 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     }
   }
 
+  async setStorageKey(id: string, storageKey: string): Promise<StoreResult<void>> {
+    const start = Date.now();
+    try {
+      await getDb()
+        .update(bulkUploads)
+        .set({ storageKey, updatedAt: new Date() })
+        .where(eq(bulkUploads.id, id));
+      return { ok: true, value: undefined };
+    } catch (err: unknown) {
+      logger.error({
+        operation: 'bulkUploadsStore.setStorageKey',
+        status: 'failure',
+        error: errorMessage(err),
+        error_type: errorType(err),
+        latency_ms: Date.now() - start,
+        upload_id: id,
+      });
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
+    }
+  }
+
   async markUploaded(
     id: string,
     aggregatorId: string,

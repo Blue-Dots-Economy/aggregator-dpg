@@ -172,6 +172,30 @@ describe('bulk-queue', () => {
     expect(closeMock).not.toHaveBeenCalled();
   });
 
+  it('_setBulkFileEnqueuer replaces the queue until reset with null', async () => {
+    addMock.mockResolvedValue(undefined);
+    const { enqueueBulkFileProcess, _setBulkFileEnqueuer } = await import('./index.js');
+    const payload = {
+      uploadId: 'up-2',
+      aggregatorId: 'agg-1',
+      s3Key: 'k',
+      participantType: 'seeker',
+      schemaId: 's',
+      schemaVersion: '1.0',
+    };
+    const seen: string[] = [];
+    _setBulkFileEnqueuer(async (p) => {
+      seen.push(p.uploadId);
+    });
+    await enqueueBulkFileProcess(payload);
+    expect(seen).toEqual(['up-2']);
+    expect(addMock).not.toHaveBeenCalled();
+
+    _setBulkFileEnqueuer(null);
+    await enqueueBulkFileProcess(payload);
+    expect(addMock).toHaveBeenCalledTimes(1);
+  });
+
   it('_resetBulkQueue delegates to closeBulkQueue', async () => {
     addMock.mockResolvedValue(undefined);
     closeMock.mockResolvedValue(undefined);

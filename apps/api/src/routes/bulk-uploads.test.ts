@@ -200,6 +200,12 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     return { ok: true, value: updated };
   }
 
+  /** Records the write on `dbUpdateSpy`, which the storage-key assertions read. */
+  async setStorageKey(_id: string, storageKey: string): Promise<StoreResult<void>> {
+    dbUpdateSpy({ storageKey });
+    return { ok: true, value: undefined };
+  }
+
   async deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>> {
     const row = this.rows.get(id);
     if (row && row.aggregatorId === aggregatorId && row.status === 'pending') {

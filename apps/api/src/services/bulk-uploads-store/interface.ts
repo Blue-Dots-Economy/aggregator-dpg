@@ -87,6 +87,11 @@ export abstract class BulkUploadsStoreBase {
     aggregatorId: string,
     contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>>;
+  /**
+   * Record the real storage key of an upload's CSV; it needs the row id, so
+   * `create` stores a placeholder.
+   */
+  abstract setStorageKey(id: string, storageKey: string): Promise<StoreResult<void>>;
   /** Delete a row that is still `pending`. */
   abstract deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>>;
 }

@@ -67,8 +67,19 @@ async function loadCountsFromOnboarding(uploadId: string): Promise<UploadCounts>
   };
 }
 
+/** Replaces {@link loadCounts} in tests; `null` reads Redis and the database. */
+let countsOverride: ((uploadId: string, status: string) => Promise<UploadCounts>) | null = null;
+
+/** Test helper — replace {@link loadCounts} with `fn`; `null` restores it. */
+export function _setCountsLoader(
+  fn: ((uploadId: string, status: string) => Promise<UploadCounts>) | null,
+): void {
+  countsOverride = fn;
+}
+
 /** Picks the right counter source based on upload status. */
 export async function loadCounts(uploadId: string, status: string): Promise<UploadCounts> {
+  if (countsOverride) return countsOverride(uploadId, status);
   if (status === 'completed') return loadCountsFromOnboarding(uploadId);
   if (status === 'pending' || status === 'uploaded') return ZERO_COUNTS;
   return loadCountsFromRedis(uploadId);

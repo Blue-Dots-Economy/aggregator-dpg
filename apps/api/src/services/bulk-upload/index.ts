@@ -6,15 +6,12 @@
  */
 
 import type { FastifyBaseLogger } from 'fastify';
-import { eq } from 'drizzle-orm';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import type { ObjectStat } from '@aggregator-dpg/object-storage/interface';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { errorMessage, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../../config.js';
-import { getDb } from '../../db/client.js';
-import { bulkUploads } from '../../db/schema.js';
 import { httpError } from '../../errors/http-error.js';
 import { enqueueBulkFileProcess } from '../bulk-queue/index.js';
 import { getBulkUploadsStore } from '../bulk-uploads-store/index.js';
@@ -88,13 +85,14 @@ export async function reserveBulkUpload(
   return { upload: created.value, ref: { area: 'bulk-uploads', key: storageKey } };
 }
 
-/** Stores the upload's real storage key once the file's destination is ready. */
+/**
+ * Stores the upload's real storage key once the file's destination is ready.
+ *
+ * @throws {Error} When the store cannot write it.
+ */
 export async function saveStorageKey(uploadId: string, storageKey: string): Promise<void> {
-  // The store has no method for this, so use Drizzle directly.
-  await getDb()
-    .update(bulkUploads)
-    .set({ storageKey, updatedAt: new Date() })
-    .where(eq(bulkUploads.id, uploadId));
+  const saved = await getBulkUploadsStore().setStorageKey(uploadId, storageKey);
+  if (!saved.ok) throw new Error(saved.error.message);
 }
 
 /** Input of {@link startBulkUpload}. */

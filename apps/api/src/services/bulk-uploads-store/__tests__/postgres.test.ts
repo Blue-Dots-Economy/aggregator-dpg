@@ -294,6 +294,36 @@ describe('PostgresBulkUploadsStore.deletePending', () => {
 
 // ─── markUploaded ───────────────────────────────────────────────────────────
 
+describe('PostgresBulkUploadsStore.setStorageKey', () => {
+  it('writes the key and bumps updatedAt', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      captured = chain;
+      return undefined;
+    });
+    _setDbClients(null, db as never);
+    const result = await new PostgresBulkUploadsStore().setStorageKey('upload-1', 'k/raw.csv');
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(hasCall(captured, 'update')).toBe(true);
+    expect(callArgs(captured, 'set')?.[0]).toMatchObject({
+      storageKey: 'k/raw.csv',
+      updatedAt: expect.any(Date),
+    });
+  });
+
+  it('returns DB_UNAVAILABLE when the update throws', async () => {
+    const db = makeFakeDb(() => {
+      throw new Error('connection refused');
+    });
+    _setDbClients(null, db as never);
+    const result = await new PostgresBulkUploadsStore().setStorageKey('upload-1', 'k/raw.csv');
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'connection refused' },
+    });
+  });
+});
+
 describe('PostgresBulkUploadsStore.markUploaded', () => {
   it('transitions pending -> uploaded and stamps the etag', async () => {
     let updateChain: ChainCall[] = [];

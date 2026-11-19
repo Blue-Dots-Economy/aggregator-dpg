@@ -19,15 +19,14 @@ import { run, type CommandIo } from '../bulk-upload.js';
 import { config } from '../../config.js';
 import {
   _setBulkUploadsStore,
-  BulkUploadsStoreBase,
+  BulkUploadsStoreFake,
   type BulkUpload,
+  type BulkUploadStatus,
   type CreateBulkUploadInput,
   type StoreResult,
 } from '../../services/bulk-uploads-store/index.js';
-import type {
-  BulkUploadStatus,
-  ListBulkUploadsResult,
-} from '../../services/bulk-uploads-store/interface.js';
+import { _setBulkFileEnqueuer } from '../../services/bulk-queue/index.js';
+import { _setCountsLoader, type UploadCounts } from '../../services/bulk-upload/counts.js';
 import {
   _setBulkUploadRateChecker,
   type BulkUploadRateResult,
@@ -39,30 +38,10 @@ import { _setNetworkConfig } from '../../services/network-config.js';
 import { _setSchemaLoader } from '../../services/schema-loader/index.js';
 import { _setUserStore, buildCoordinator, UserStoreFake } from '../../services/user-store/index.js';
 
-const { enqueueMock, loadConsentConfigMock, onboardingRows, keyUpdates } = vi.hoisted(() => ({
-  enqueueMock: vi.fn(),
-  loadConsentConfigMock: vi.fn(),
-  onboardingRows: [] as Array<Record<string, unknown>>,
-  keyUpdates: [] as string[],
-}));
+const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 
-vi.mock('../../services/bulk-queue/index.js', () => ({ enqueueBulkFileProcess: enqueueMock }));
+// The consent config loader reads files and has no fake.
 vi.mock('@aggregator-dpg/config-loader/fs', () => ({ loadConsentConfig: loadConsentConfigMock }));
-vi.mock('../../db/client.js', () => ({
-  getDb: () => ({
-    update: () => ({
-      set: (vals: { storageKey: string }) => ({
-        where: () => {
-          keyUpdates.push(vals.storageKey);
-          return Promise.resolve();
-        },
-      }),
-    }),
-    select: () => ({
-      from: () => ({ where: () => ({ limit: () => Promise.resolve(onboardingRows) }) }),
-    }),
-  }),
-}));
 
 const COORD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const PENDING = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -93,55 +72,31 @@ class SchemaLoaderFake extends NetworkSchemaLoader {
   }
 }
 
-/** Bulk-uploads store fake; the real storage key arrives through the mocked DB update. */
-class StoreFake extends BulkUploadsStoreBase {
-  rows = new Map<string, BulkUpload>();
+/** The store fake with a fixed upload id and statuses that advance on each read. */
+class StoreFake extends BulkUploadsStoreFake {
   /** Statuses `findById` steps through once the upload has left `pending`. */
   progress: BulkUploadStatus[] = [];
 
-  async create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>> {
-    const now = new Date('2026-11-19T00:00:00Z');
-    const row: BulkUpload = {
-      ...input,
-      id: UPLOAD_1,
-      contentFingerprint: null,
-      status: 'pending',
-      statusReason: null,
-      errorsCsvStorageKey: null,
-      lastProgressAt: null,
-      createdAt: now,
-      updatedAt: now,
-      completedAt: null,
-    };
+  override async create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>> {
+    const created = await super.create(input);
+    if (!created.ok) return created;
+    this.rows.delete(created.value.id);
+    const row: BulkUpload = { ...created.value, id: UPLOAD_1 };
     this.rows.set(row.id, row);
     return { ok: true, value: row };
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>> {
-    const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
-    const key =
-      row.storageKey === 'pending' ? (keyUpdates.at(-1) ?? row.storageKey) : row.storageKey;
-    const next = row.status !== 'pending' ? this.progress.shift() : undefined;
-    const current: BulkUpload = { ...row, storageKey: key, status: next ?? row.status };
-    this.rows.set(id, current);
-    return { ok: true, value: current };
-  }
-
-  async list(): Promise<StoreResult<ListBulkUploadsResult>> {
-    return { ok: true, value: { rows: [...this.rows.values()], total: this.rows.size } };
-  }
-
-  async markUploaded(id: string, _agg: string, fp: string): Promise<StoreResult<BulkUpload>> {
-    const row = this.rows.get(id);
-    if (!row) return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
-    const updated: BulkUpload = { ...row, status: 'uploaded', contentFingerprint: fp };
-    this.rows.set(id, updated);
-    return { ok: true, value: updated };
-  }
-
-  async deletePending(): Promise<StoreResult<void>> {
-    return { ok: true, value: undefined };
+  override async findById(
+    id: string,
+    aggregatorId: string,
+  ): Promise<StoreResult<BulkUpload | null>> {
+    const found = await super.findById(id, aggregatorId);
+    if (!found.ok || !found.value || found.value.status === 'pending') return found;
+    const next = this.progress.shift();
+    if (!next) return found;
+    const row: BulkUpload = { ...found.value, status: next };
+    this.rows.set(id, row);
+    return { ok: true, value: row };
   }
 }
 
@@ -155,6 +110,8 @@ describe('bulk-upload command', () => {
   let store: StoreFake;
   let storage: FakeObjectStorage;
   let ledger: ConsentLedgerFake;
+  let enqueueMock: ReturnType<typeof vi.fn<(payload: { uploadId: string }) => Promise<void>>>;
+  let counts: UploadCounts;
   let rateChecker: ReturnType<typeof vi.fn<(key: string) => Promise<BulkUploadRateResult>>>;
   let lines: string[];
   let csvOut: PassThrough;
@@ -197,9 +154,8 @@ describe('bulk-upload command', () => {
     csvChunks = [];
     csvOut = new PassThrough();
     csvOut.on('data', (c: Buffer) => csvChunks.push(c));
-    keyUpdates.length = 0;
-    onboardingRows.length = 0;
-    onboardingRows.push({ total: 2, passed: 1, failed: 1, skipped: 0 });
+    counts = { totalRows: 2, passed: 1, failed: 1, skipped: 0 };
+    _setCountsLoader(async () => counts);
 
     loadConsentConfigMock.mockReset().mockResolvedValue({
       audiences: {
@@ -217,13 +173,14 @@ describe('bulk-upload command', () => {
     store = new StoreFake();
     _setBulkUploadsStore(store);
     // Stands in for the worker: completes the upload with one failed row.
-    enqueueMock.mockReset().mockImplementation(async ({ uploadId }: { uploadId: string }) => {
-      const row = store.rows.get(uploadId);
+    enqueueMock = vi.fn(async ({ uploadId }: { uploadId: string }) => {
+      const row = store.get(uploadId);
       if (!row) return;
       const errorsKey = row.storageKey.replace('raw.csv', 'errors.csv');
       storage.seed({ area: 'bulk-uploads', key: errorsKey }, Buffer.from(ERRORS_CSV));
-      store.rows.set(uploadId, { ...row, status: 'completed', errorsCsvStorageKey: errorsKey });
+      store.seed([{ ...row, status: 'completed', errorsCsvStorageKey: errorsKey }]);
     });
+    _setBulkFileEnqueuer(enqueueMock);
     ledger = new ConsentLedgerFake();
     _setConsentLedger(ledger);
 
@@ -258,6 +215,8 @@ describe('bulk-upload command', () => {
   });
 
   afterEach(async () => {
+    _setBulkFileEnqueuer(null);
+    _setCountsLoader(null);
     _setBulkUploadRateChecker(null);
     _setSchemaLoader(null);
   });
@@ -266,7 +225,7 @@ describe('bulk-upload command', () => {
     it('uploads as the coordinator with the portal attestation and points to the errors report', async () => {
       expect(await run(args(), io())).toBe(0);
 
-      const upload = store.rows.get(UPLOAD_1);
+      const upload = store.get(UPLOAD_1);
       expect(upload?.uploadedBy).toBe(SUBJECT);
       expect(upload?.aggregatorId).toBe(COORD);
       expect(storage.read(rawRef)?.toString()).toBe(csv);
@@ -311,7 +270,7 @@ describe('bulk-upload command', () => {
       rateChecker.mockResolvedValue({ allowed: false, retryAfterSeconds: 60 });
       expect(await run(args(), io())).toBe(1);
       expect(lines).toEqual(['REFUSED: rate limited; retry in 60s']);
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
 
       expect(await run(args({}, ['--skip-rate-limit']), io())).toBe(0);
       expect(rateChecker).toHaveBeenCalledTimes(1);
@@ -333,7 +292,7 @@ describe('bulk-upload command', () => {
     ])('refuses %s', async (_name, over, message) => {
       expect(await run(args(over), io())).toBe(1);
       expect(lines.join('\n')).toMatch(message);
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
     });
 
     it('refuses a header the worker would reject', async () => {
@@ -346,7 +305,7 @@ describe('bulk-upload command', () => {
       lines = [];
       expect(await run(args(), io(stdinOf(`${header},shoe_size\n${row},9\n`)))).toBe(1);
       expect(lines).toEqual(['REFUSED: unknown columns: shoe_size']);
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
     });
 
     it.each([
@@ -363,7 +322,7 @@ describe('bulk-upload command', () => {
     ])('refuses %s, as the worker does', async (_name, body, message) => {
       expect(await run(args(), io(stdinOf(body)))).toBe(1);
       expect(lines).toEqual([expect.stringMatching(message)]);
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
     });
 
     it.each([
@@ -382,7 +341,7 @@ describe('bulk-upload command', () => {
         'REFUSED: the file is empty',
         `REFUSED: the file is larger than ${config.BULK_UPLOAD_MAX_BYTES} bytes`,
       ]);
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
     });
   });
 
@@ -391,7 +350,7 @@ describe('bulk-upload command', () => {
       storage.failNext('put', new UpstreamError('storage down'));
       expect(await run(args(), io())).toBe(1);
       expect(lines).toEqual([`upload ${UPLOAD_1} created`, 'FAILED: storage down']);
-      expect(store.rows.get(UPLOAD_1)?.status).toBe('pending');
+      expect(store.get(UPLOAD_1)?.status).toBe('pending');
     });
 
     it('fails closed and deletes the stored CSV when the attestation cannot be recorded', async () => {
@@ -408,7 +367,7 @@ describe('bulk-upload command', () => {
       enqueueMock.mockRejectedValue(new Error('redis down'));
       expect(await run(args(), io())).toBe(1);
       expect(lines.at(-1)).toMatch(/^REFUSED: INTERNAL: /);
-      expect(store.rows.get(UPLOAD_1)?.status).toBe('uploaded');
+      expect(store.get(UPLOAD_1)?.status).toBe('uploaded');
       expect(storage.read(rawRef)?.toString()).toBe(csv);
     });
 
@@ -435,13 +394,9 @@ describe('bulk-upload command', () => {
     it('reports an earlier upload', async () => {
       enqueueMock.mockResolvedValue(undefined);
       await run(args(), io(undefined, { pollTimeoutMs: 0 }));
-      const row = store.rows.get(UPLOAD_1);
+      const row = store.get(UPLOAD_1);
       if (row) {
-        store.rows.set(UPLOAD_1, {
-          ...row,
-          status: 'file_failed',
-          statusReason: 'header_mismatch',
-        });
+        store.seed([{ ...row, status: 'file_failed', statusReason: 'header_mismatch' }]);
       }
       lines = [];
       expect(await run(['--coordinator', COORD, '--upload-id', UPLOAD_1], io())).toBe(1);
@@ -450,8 +405,8 @@ describe('bulk-upload command', () => {
 
     it('refuses the errors report of an upload that has none', async () => {
       enqueueMock.mockImplementation(async ({ uploadId }: { uploadId: string }) => {
-        const row = store.rows.get(uploadId);
-        if (row) store.rows.set(uploadId, { ...row, status: 'completed' });
+        const row = store.get(uploadId);
+        if (row) store.seed([{ ...row, status: 'completed' }]);
       });
       await run(args(), io());
       lines = [];
@@ -484,7 +439,7 @@ describe('bulk-upload command', () => {
     it.each(['seekers.csv', '/etc/passwd', './-'])('answers 2 for --file %j', async (file) => {
       expect(await run(args({ file }), io())).toBe(2);
       expect(lines[0]).toBe('--file must be - (the CSV is read from stdin)');
-      expect(store.rows.size).toBe(0);
+      expect(store.get(UPLOAD_1)).toBeUndefined();
     });
 
     it.each(['ops:team', 'ops team'])('answers 2 for operator %j', async (operator) => {
