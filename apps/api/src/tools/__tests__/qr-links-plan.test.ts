@@ -327,7 +327,28 @@ describe('buildLinksPlan', () => {
       row({ coordinatorEmail: 'RAJ@x.org', linkName: 'camp' }),
       row({ profileType: 'provider', linkName: 'camp' }),
     ]);
-    expect(problems).toEqual([{ line: 4, code: QR_PLAN_PROBLEM.DUPLICATE_ROW }]);
+    expect(problems).toEqual([
+      { line: 4, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' },
+      { line: 5, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' },
+    ]);
+  });
+
+  it('reports one link name for two profile types of one coordinator as DUPLICATE_ROW', async () => {
+    const { links: planned, problems } = await plan([
+      row({ linkName: 'camp' }),
+      row({ profileType: 'provider', linkName: 'camp' }),
+    ]);
+    expect(planned.map((p) => p.row.line)).toEqual([2]);
+    expect(problems).toEqual([
+      { line: 3, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' },
+    ]);
+  });
+
+  it('does not match an unnamed row to a link a named row of the sheet claims', async () => {
+    links.rows.push(link({ slug: 'camp' }));
+    const { links: planned, problems } = await plan([row(), row({ linkName: 'camp' })]);
+    expect(problems).toEqual([]);
+    expect(planned.map((p) => p.existing?.slug ?? null)).toEqual([null, 'camp']);
   });
 
   it('treats two unnamed rows for one coordinator and type as duplicates', async () => {

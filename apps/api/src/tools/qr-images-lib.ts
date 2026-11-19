@@ -37,6 +37,22 @@ export function qrFileName(row: {
 }
 
 /**
+ * Picks a file name no earlier row used. Two rows can sanitise to one name, so
+ * the later gets its sheet line (`-<line>`), then a counter until the name is free.
+ *
+ * @param name - The row's {@link qrFileName}.
+ * @param sheetLine - The report's `line` cell: the links sheet line.
+ * @param used - Names already written in this run.
+ */
+function freeName(name: string, sheetLine: string, used: ReadonlySet<string>): string {
+  if (!used.has(name)) return name;
+  const stem = `${name.slice(0, -'.png'.length)}-${sheetLine.toLowerCase().replaceAll(/[^a-z0-9-]/g, '-')}`;
+  let candidate = `${stem}.png`;
+  for (let n = 2; used.has(candidate); n++) candidate = `${stem}-${n}.png`;
+  return candidate;
+}
+
+/**
  * Writes one PNG per `created` or `already_loaded` row of the report.
  *
  * @param csvText - The `apply` report CSV.
@@ -61,15 +77,14 @@ export async function renderQrImages(
     }
     const url = cells['url'];
     if (!url) throw new Error(`line ${line}: a ${outcome} row has no url`);
-    let name = qrFileName({
+    const name = qrFileName({
       coordinatorEmail: unneutralise(cells['coordinator_email'] ?? ''),
       profileType: cells['profile_type'] ?? '',
       slug: unneutralise(cells['slug'] ?? ''),
     });
-    // Two rows can sanitise to one name; the later gets its sheet line so no image is lost.
-    if (used.has(name)) name = `${name.slice(0, -'.png'.length)}-${line}.png`;
-    used.add(name);
-    await writeFile(join(outDir, name), await QRCode.toBuffer(url, QR_OPTIONS));
+    const file = freeName(name, cells['line'] || String(line), used);
+    used.add(file);
+    await writeFile(join(outDir, file), await QRCode.toBuffer(url, QR_OPTIONS));
     written += 1;
   }
   return { written, skipped };

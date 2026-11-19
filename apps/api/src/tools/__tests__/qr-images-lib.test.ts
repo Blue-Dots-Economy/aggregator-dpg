@@ -59,6 +59,21 @@ describe('renderQrImages', () => {
     expect((await readdir(dir)).sort()).toEqual(['a-b-seeker-camp-3.png', 'a-b-seeker-camp.png']);
   });
 
+  it('suffixes with the report line column and loops until the name is free', async () => {
+    const clash = [
+      HEADER,
+      '4,a-b@x.org,seeker,,camp-9,https://h/r/o/camp-9,created,',
+      '7,a.b@x.org,seeker,,camp,https://h/r/o/camp,created,',
+      '9,a-b@x.org,seeker,,camp,https://h/r/o/camp2,created,',
+    ].join('\n');
+    expect(await renderQrImages(clash, dir)).toEqual({ written: 3, skipped: 0 });
+    expect((await readdir(dir)).sort()).toEqual([
+      'a-b-seeker-camp-9-2.png',
+      'a-b-seeker-camp-9.png',
+      'a-b-seeker-camp.png',
+    ]);
+  });
+
   it('never starts a file name with a dash', () => {
     expect(qrFileName({ coordinatorEmail: '+x@x.org', profileType: 'seeker', slug: '-c' })).toBe(
       'x-seeker--c.png',

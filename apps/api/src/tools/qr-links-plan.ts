@@ -39,7 +39,7 @@ export const QR_PLAN_PROBLEM = {
   LINK_NAME_TAKEN: 'LINK_NAME_TAKEN',
   INVALID_EXPIRY: 'INVALID_EXPIRY',
   EXPIRY_IN_PAST: 'EXPIRY_IN_PAST',
-  /** The same coordinator, profile type and `link_name` as an earlier row. */
+  /** An earlier row has the same coordinator and `link_name`, or, with no `link_name`, the same coordinator and profile type. */
   DUPLICATE_ROW: 'DUPLICATE_ROW',
   /** The network declares no two-option mode, or this deployment does not enable it. */
   MODE_NOT_ENABLED: 'MODE_NOT_ENABLED',
@@ -184,7 +184,14 @@ async function planRow(
   row: LinkRow,
   email: string,
   modeKey: string | null,
-  ctx: { cfg: ResolvedNetworkConfig; now: Date; cache: PlanCache; bound: Bound },
+  ctx: {
+    cfg: ResolvedNetworkConfig;
+    now: Date;
+    cache: PlanCache;
+    bound: Bound;
+    /** `link_name`s other rows of this sheet give for the same coordinator. */
+    claimed: ReadonlySet<string>;
+  },
 ): Promise<{ link: PlannedLink | null; problems: InputProblem[] }> {
   const problems: InputProblem[] = [];
   const add = (code: QrPlanProblemCode, field?: string): void => {
@@ -232,7 +239,8 @@ async function planRow(
     (l.expiresAt === null || l.expiresAt.getTime() > ctx.now.getTime());
   let match: RegistrationLink | undefined;
   if (row.linkName === '') {
-    match = all.find(covers);
+    // A link a named row of this sheet claims is that row's, not this one's.
+    match = all.find((l) => covers(l) && !ctx.claimed.has(l.slug));
   } else {
     // A taken slug would get a random suffix on create, and a rerun could not find that link again.
     match = all.find((l) => l.slug === row.linkName);
@@ -300,18 +308,40 @@ export async function buildLinksPlan(input: {
   const { callTimeoutMs } = input;
   const bound: Bound = (promise, what) =>
     callTimeoutMs === undefined ? promise : withTimeout(promise, callTimeoutMs, what);
+  const claimedBy = new Map<string, Set<string>>();
+  for (const row of input.rows) {
+    if (row.linkName === '' || blocked.has(row.line)) continue;
+    const email = row.coordinatorEmail.trim().toLowerCase();
+    const names = claimedBy.get(email) ?? new Set<string>();
+    names.add(row.linkName);
+    claimedBy.set(email, names);
+  }
 
   for (const row of missingColumn ? [] : input.rows) {
     if (blocked.has(row.line)) continue;
     const email = row.coordinatorEmail.trim().toLowerCase();
-    const key = JSON.stringify([email, row.profileType, row.linkName]);
+    // A link name is one slug per coordinator, whatever the profile type.
+    const named = row.linkName !== '';
+    const key = JSON.stringify(
+      named ? ['name', email, row.linkName] : ['type', email, row.profileType],
+    );
     if (seen.has(key)) {
-      problems.push({ line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW });
+      problems.push(
+        named
+          ? { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' }
+          : { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW },
+      );
       continue;
     }
     seen.add(key);
     try {
-      const planned = await planRow(row, email, modeKey, { cfg, now, cache, bound });
+      const planned = await planRow(row, email, modeKey, {
+        cfg,
+        now,
+        cache,
+        bound,
+        claimed: claimedBy.get(email) ?? new Set<string>(),
+      });
       problems.push(...planned.problems);
       if (planned.link) links.push(planned.link);
     } catch (err) {

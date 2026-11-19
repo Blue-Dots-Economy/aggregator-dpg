@@ -159,6 +159,27 @@ describe('applyLinksPlan', () => {
     expect(links.creates).toEqual([]);
   });
 
+  it('fails the row with LINK_NAME_TAKEN when create stores a suffixed slug', async () => {
+    const parsed = parseLinksCsv(
+      `${[HEADER, 'raj@x.org,seeker,,camp,', 'meera@x.org,seeker,,,'].join('\n')}\n`,
+    );
+    const plan = await buildLinksPlan({
+      rows: parsed.rows,
+      inputProblems: parsed.problems,
+      now: NOW,
+    });
+    expect(plan.problems).toEqual([]);
+    // Taken between check and apply.
+    links.rows.push({ ...retiredCamp() });
+    const { rows, failed } = await applyLinksPlan(plan, { operator: 'asha', log });
+    expect(failed).toBe(true);
+    expect(rows.map((r) => [r.outcome, r.errorCode, r.slug])).toEqual([
+      ['failed', 'LINK_NAME_TAKEN', ''],
+      ['not_run', '', ''],
+    ]);
+    expect(links.creates.map((c) => c.slug)).toEqual(['camp', expect.stringMatching(/^camp-/)]);
+  });
+
   it('refuses a plan with problems and an invalid operator', async () => {
     await expect(
       applyLinksPlan(

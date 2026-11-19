@@ -24,6 +24,11 @@ export const LINK_APPLY_ERROR = {
   CALL_TIMEOUT: 'CALL_TIMEOUT',
   /** The create call threw. */
   UNEXPECTED: 'UNEXPECTED',
+  /**
+   * The row's `link_name` was taken after check, so create stored a suffixed slug.
+   * That link exists; the log line has its slug so it can be retired.
+   */
+  LINK_NAME_TAKEN: 'LINK_NAME_TAKEN',
 } as const;
 
 /** One row of the operator's report. Holds the coordinator's email; never log it. */
@@ -155,6 +160,17 @@ async function create(
       : withTimeout(call, callTimeoutMs, 'link create'));
     if (!result.ok) return { ok: false, code: result.error.code };
     const { link: stored, publicUrl } = result.value;
+    if (link.slug !== undefined && stored.slug !== link.slug) {
+      // A rerun could never find the suffixed link by its name, so the row fails here.
+      log.warn({
+        status: 'failure',
+        line: link.row.line,
+        user_id: link.userId,
+        error_code: LINK_APPLY_ERROR.LINK_NAME_TAKEN,
+        created_slug: stored.slug,
+      });
+      return { ok: false, code: LINK_APPLY_ERROR.LINK_NAME_TAKEN };
+    }
     return {
       ok: true,
       slug: stored.slug,
