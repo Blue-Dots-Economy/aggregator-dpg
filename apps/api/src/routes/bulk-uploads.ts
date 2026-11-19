@@ -16,14 +16,12 @@
  * aggregator's upload answers 403. Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
-import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
-import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -32,16 +30,20 @@ import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
 import { buildXlsxTemplate } from '../services/xlsx-template/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { getConsentLedger } from '../services/consent-ledger/index.js';
-import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { config } from '../config.js';
-import { getDb } from '../db/client.js';
-import { onboarding } from '../db/schema.js';
-import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
-import { errorMessage, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { requireServedDomain } from './served-domains-shared.js';
+import {
+  reserveBulkUpload,
+  saveStorageKey,
+  startBulkUpload,
+} from '../services/bulk-upload/index.js';
+import {
+  loadCounts,
+  loadCountsBatch,
+  ZERO_COUNTS,
+  type UploadCounts,
+} from '../services/bulk-upload/counts.js';
 
 /**
  * Returns the valid participant types for the active network.
@@ -322,43 +324,15 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
       const start = Date.now();
 
-      // Check the type against the network config.
-      const { participant_type: participantType } = req.body;
-      const validTypes = await getValidParticipantTypes();
-      if (!validTypes.has(participantType)) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `participant_type must be one of: ${[...validTypes].join(', ')}.`,
-          fields: { participant_type: 'invalid' },
-        });
-      }
-      await requireServedDomain(auth, participantType);
-
-      // Record the schema version at create time. Only v1 exists.
-      const schemaId = `participant-${participantType}`;
-      const schemaVersion = 'v1';
-
-      const store = getBulkUploadsStore();
-      const created = await store.create({
+      const { upload, ref: rawRef } = await reserveBulkUpload({
         aggregatorId: auth.aggregatorId,
-        participantType,
-        // Placeholder; the real key needs the row id and is set below.
-        storageKey: 'pending',
-        schemaId,
-        schemaVersion,
         uploadedBy: auth.userId,
+        serves: auth.serves,
+        participantType: req.body.participant_type,
+        log,
       });
-      if (!created.ok) {
-        log.error({
-          status: 'failure',
-          error: created.error.code,
-          latency_ms: Date.now() - start,
-        });
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(created.error.message) });
-      }
-
-      const uploadId = created.value.id;
-      const storedKey = buildKey('bulk-uploads', auth.aggregatorId, uploadId, 'raw.csv');
-      const rawRef: ObjectRef = { area: 'bulk-uploads', key: storedKey };
+      const uploadId = upload.id;
+      const storedKey = rawRef.key;
       const storage = getObjectStorage();
       const [signed, signedPut] = await Promise.all([
         storage.createUpload({
@@ -376,15 +350,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       if (!signed.success) throw signed.error;
       if (!signedPut.success) throw signedPut.error;
       const instructions = signed.value;
-
-      // Store the real key. The store has no method for this, so use Drizzle directly.
-      const { getDb } = await import('../db/client.js');
-      const { bulkUploads } = await import('../db/schema.js');
-      const { eq } = await import('drizzle-orm');
-      await getDb()
-        .update(bulkUploads)
-        .set({ storageKey: storedKey, updatedAt: new Date() })
-        .where(eq(bulkUploads.id, uploadId));
+      await saveStorageKey(uploadId, storedKey);
 
       log.info({
         status: 'success',
@@ -406,8 +372,8 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         expires_at: instructions.expiresAt,
         content_type: 'text/csv',
         max_bytes: config.BULK_UPLOAD_MAX_BYTES,
-        schema_id: schemaId,
-        schema_version: schemaVersion,
+        schema_id: upload.schemaId,
+        schema_version: upload.schemaVersion,
         status: 'pending',
       });
     },
@@ -443,124 +409,24 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       });
       const start = Date.now();
 
-      const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
-
-      const upload = found.value;
-      // Already past 'uploaded': return the current state.
-      if (upload.status !== 'pending' && upload.status !== 'uploaded') {
-        log.warn({
-          status: 'skipped',
-          reason: 'invalid_transition',
-          current_status: upload.status,
-          latency_ms: Date.now() - start,
-        });
-        return reply.send(toResponse(upload));
-      }
-
-      // The aggregator must attest permission to submit these participants.
-      // Checked before any storage call or state change.
-      if (body.attestation !== true) {
-        throw httpError('CONSENT_REQUIRED', {
-          detail: 'You must confirm authority to upload before starting.',
-          fields: { attestation: body.attestation ?? null },
-        });
-      }
-
-      const uploadRef: ObjectRef = { area: 'bulk-uploads', key: upload.storageKey };
-      const statResult = await getObjectStorage().stat(uploadRef);
-      if (!statResult.success && !(statResult.error instanceof ValidationError)) {
-        throw statResult.error;
-      }
-      const head = statResult.success ? statResult.value : null;
-      if (!head) {
-        log.warn({
-          status: 'failure',
-          reason: 'storage_object_missing',
-          storage_key: upload.storageKey,
-          latency_ms: Date.now() - start,
-        });
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'CSV upload not found in object storage. Complete the upload and retry.',
-          fields: { reason: 'upload_missing' },
-        });
-      }
-      if (head.size === 0) {
-        await deleteRejectedUpload(uploadRef, log);
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'Uploaded CSV is empty.',
-          fields: { reason: 'empty' },
-        });
-      }
-      if (head.size > config.BULK_UPLOAD_MAX_BYTES) {
-        await deleteRejectedUpload(uploadRef, log);
-        log.warn({
-          status: 'failure',
-          reason: 'object_too_large',
-          storage_key: upload.storageKey,
-          content_length: head.size,
-          max_bytes: config.BULK_UPLOAD_MAX_BYTES,
-        });
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `Uploaded CSV is too large (${head.size} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
-          fields: { reason: 'too_large', max_bytes: config.BULK_UPLOAD_MAX_BYTES },
-        });
-      }
-
-      // Record the attestation before the state change. Fails closed: no upload
-      // is processed without one.
-      const attestationRecorded = await recordBulkUploadAttestation({
-        aggregatorId: auth.aggregatorId,
+      const outcome = await startBulkUpload({
         uploadId,
+        aggregatorId: auth.aggregatorId,
+        attestation: body.attestation,
         log,
       });
-      if (!attestationRecorded) {
-        throw httpError('CONSENT_WRITE_FAILED', {
-          fields: { sub_operation: 'recordBulkUploadAttestation' },
-        });
-      }
-
-      // Re-uploading the same file is allowed, so a failure here is never a duplicate.
-      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.fingerprint);
-      if (!marked.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
-      }
-
-      try {
-        await enqueueBulkFileProcess({
-          uploadId: marked.value.id,
-          aggregatorId: auth.aggregatorId,
-          s3Key: marked.value.storageKey,
-          participantType: marked.value.participantType,
-          schemaId: marked.value.schemaId,
-          schemaVersion: marked.value.schemaVersion,
-        });
-      } catch (err) {
-        // The row stays 'uploaded'; the stuck-job watchdog picks it up.
-        log.error({
-          status: 'failure',
-          sub_operation: 'enqueue.bulk-file-process',
-          error: errorMessage(err),
-        });
-        throw httpError('INTERNAL', { cause: err });
-      }
+      if (outcome.kind === 'already_started') return reply.send(toResponse(outcome.upload));
+      const { upload: marked, head } = outcome;
 
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
         fingerprint: head.fingerprint,
         content_length: head.size,
-        next_status: marked.value.status,
+        next_status: marked.status,
       });
 
-      return reply.send(toResponse(marked.value));
+      return reply.send(toResponse(marked));
     },
   );
 
@@ -772,15 +638,6 @@ type BulkUploadResponseShape = {
   completed_at: string | null;
 };
 
-interface UploadCounts {
-  totalRows: number | null;
-  passed: number;
-  failed: number;
-  skipped: number;
-}
-
-const ZERO_COUNTS: UploadCounts = { totalRows: null, passed: 0, failed: 0, skipped: 0 };
-
 interface UploadShape {
   id: string;
   status: string;
@@ -814,110 +671,6 @@ function toResponse(
   };
 }
 
-/** Deletes a rejected stored file; a failed delete is logged and never changes the response. */
-async function deleteRejectedUpload(ref: ObjectRef, log: FastifyBaseLogger): Promise<void> {
-  const deleted = await getObjectStorage().delete(ref);
-  if (deleted.success) return;
-  log.warn({
-    status: 'failure',
-    reason: 'rejected_upload_delete_failed',
-    storage_key: ref.key,
-    error: deleted.error.message,
-  });
-}
-
-/**
- * Loads live counters from Redis for an in-flight upload.
- *
- * Returns ZERO_COUNTS when the keys are missing.
- */
-async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
-  try {
-    const redis = getRedis();
-    const ns = `bu:${uploadId}`;
-    const [counters, meta] = await Promise.all([
-      redis.hmget(`${ns}:counters`, 'passed', 'failed', 'skipped'),
-      redis.hget(`${ns}:meta`, 'total_rows'),
-    ]);
-    const passed = Number.parseInt(counters[0] ?? '0', 10) || 0;
-    const failed = Number.parseInt(counters[1] ?? '0', 10) || 0;
-    const skipped = Number.parseInt(counters[2] ?? '0', 10) || 0;
-    const totalRows = meta ? Number.parseInt(meta, 10) || null : null;
-    return { totalRows, passed, failed, skipped };
-  } catch {
-    return ZERO_COUNTS;
-  }
-}
-
-/**
- * Loads final counters from the `onboarding` row written by `bulk-finalise`.
- *
- * Returns ZERO_COUNTS when the row is missing.
- */
-async function loadCountsFromOnboarding(uploadId: string): Promise<UploadCounts> {
-  const rows = await getDb()
-    .select({
-      total: onboarding.total,
-      passed: onboarding.passed,
-      failed: onboarding.failed,
-      skipped: onboarding.skipped,
-    })
-    .from(onboarding)
-    .where(and(eq(onboarding.source, 'bulk'), eq(onboarding.batchId, uploadId)))
-    .limit(1);
-  const row = rows[0];
-  if (!row) return ZERO_COUNTS;
-  return {
-    totalRows: row.total,
-    passed: row.passed,
-    failed: row.failed,
-    skipped: row.skipped,
-  };
-}
-
-/** Picks the right counter source based on upload status. */
-async function loadCounts(uploadId: string, status: string): Promise<UploadCounts> {
-  if (status === 'completed') return loadCountsFromOnboarding(uploadId);
-  if (status === 'pending' || status === 'uploaded') return ZERO_COUNTS;
-  return loadCountsFromRedis(uploadId);
-}
-
-/** Batch counter load for list view — one onboarding query, Redis fan-out for active rows. */
-async function loadCountsBatch(
-  uploads: Array<{ id: string; status: string }>,
-): Promise<Map<string, UploadCounts>> {
-  const out = new Map<string, UploadCounts>();
-  const completedIds = uploads.filter((u) => u.status === 'completed').map((u) => u.id);
-  if (completedIds.length > 0) {
-    const rows = await getDb()
-      .select({
-        batchId: onboarding.batchId,
-        total: onboarding.total,
-        passed: onboarding.passed,
-        failed: onboarding.failed,
-        skipped: onboarding.skipped,
-      })
-      .from(onboarding)
-      .where(and(eq(onboarding.source, 'bulk'), inArray(onboarding.batchId, completedIds)));
-    for (const r of rows) {
-      if (!r.batchId) continue;
-      out.set(r.batchId, {
-        totalRows: r.total,
-        passed: r.passed,
-        failed: r.failed,
-        skipped: r.skipped,
-      });
-    }
-  }
-  const liveUploads = uploads.filter(
-    (u) => u.status !== 'completed' && u.status !== 'pending' && u.status !== 'uploaded',
-  );
-  for (const u of liveUploads) {
-    out.set(u.id, await loadCountsFromRedis(u.id));
-  }
-  return out;
-}
-
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
   if (!result.ok) {
@@ -931,78 +684,4 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
-}
-
-/**
- * Records the operator's bulk-upload attestation in the consent ledger.
- *
- * The `source` is `bulk_upload:<uploadId>:v<n>`; the terms and privacy
- * versions go in their own columns. Returns `false` on any failure so the
- * caller aborts the upload.
- *
- * @param aggregatorId - The uploading aggregator (ledger subject).
- * @param uploadId - The bulk_uploads row this attestation authorises.
- * @param log - Request-scoped logger.
- * @returns `true` when the ledger row was written; `false` on any failure.
- */
-async function recordBulkUploadAttestation({
-  aggregatorId,
-  uploadId,
-  log,
-}: {
-  aggregatorId: string;
-  uploadId: string;
-  log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<boolean> {
-  const { network, brand } = resolveActiveNetwork();
-  let termsVersion: number;
-  let privacyVersion: number;
-  let attestationVersion: number;
-  try {
-    const consentCfg = await loadConsentConfig(network, brand);
-    const docs = consentCfg.audiences.aggregator.documents;
-    const attestation = docs.bulk_upload_attestation;
-    if (!attestation) {
-      log.error(
-        { operation: 'consentLedger.recordBulkUploadAttestation', status: 'failure' },
-        'bulk_upload_attestation not configured for the aggregator audience',
-      );
-      return false;
-    }
-    termsVersion = docs.terms.current_version;
-    privacyVersion = docs.privacy.current_version;
-    attestationVersion = attestation.current_version;
-  } catch (e) {
-    log.error(
-      {
-        operation: 'consentLedger.recordBulkUploadAttestation',
-        status: 'failure',
-        error: errorMessage(e),
-      },
-      'consent config load failed — bulk upload rejected',
-    );
-    return false;
-  }
-
-  const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'user',
-    subjectId: aggregatorId,
-    network,
-    brand: brand ?? null,
-    termsVersion,
-    privacyVersion,
-    source: `bulk_upload:${uploadId}:v${attestationVersion}`,
-  });
-  if (!result.success) {
-    log.error(
-      {
-        operation: 'consentLedger.recordBulkUploadAttestation',
-        status: 'failure',
-        error: result.error.message,
-      },
-      'attestation ledger write failed — bulk upload rejected',
-    );
-    return false;
-  }
-  return true;
 }
