@@ -11,6 +11,7 @@ Rehearse the whole runbook on UAT before UP.
 ## 1. Rules before you start
 
 - **Deploy #1120 before telling anyone to log in.** The terms screen (#1120) must be live on the instance first. A provisioned account has accepted nothing; without the terms screen it would sign in without ever seeing the terms.
+- **Restart web and API together after any `consent.json` change.** Both read the versions, and the API caches them per process. A mismatch shows users who still have terms outstanding a load error until both match.
 - The CSV files hold names, emails and phones. They stay on your machine: the tool reads them from stdin and writes the report to stdout (its default), so **no file is ever written in the pod**. Never paste rows into a ticket or chat.
 - The reports hold names and emails too. Treat them like the input files, and delete all of them after handing the results over (§7).
 - `kubectl exec` stdout and stderr go only to your terminal. They do not reach the pod's logs. The tool's own log lines (ids, counts and error codes) go to stderr.
