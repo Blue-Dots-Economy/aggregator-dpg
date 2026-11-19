@@ -14,6 +14,10 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import { is, SQL } from 'drizzle-orm';
 
 interface SummaryRow {
   total: number;
@@ -71,18 +75,36 @@ describe('onboarding routes', () => {
       if (token === 'pending') {
         return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'pending' };
       }
+      if (token === 'serves-both') {
+        return {
+          sub: 'kc-1',
+          aggregator_id: AGG_A,
+          decision_made: 'approved',
+          aggregator_type: ['seeker', 'provider'],
+        };
+      }
+      if (token === 'serves-seeker') {
+        return {
+          sub: 'kc-1',
+          aggregator_id: AGG_A,
+          decision_made: 'approved',
+          aggregator_type: ['seeker'],
+        };
+      }
       if (token === 'no-agg-id') {
         return { sub: 'kc-2', decision_made: 'approved' };
       }
       throw new Error('invalid token');
     });
 
+    _setNetworkConfig(buildBlueDotConfig());
     app = await buildApp();
   });
 
   afterAll(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
   });
 
   const AUTH = (token: string) => ({ authorization: `Bearer ${token}` });
@@ -261,6 +283,68 @@ describe('onboarding routes', () => {
       const body = res.json() as { from: string; to: string | null };
       expect(body.from).toBe(from);
       expect(body.to).toBeNull();
+    });
+  });
+
+  describe('?domain= profile type filter', () => {
+    /** The where clause of the last query, rendered as Postgres SQL. */
+    const lastWhereSql = (): { sql: string; params: unknown[] } => {
+      if (!is(lastWhereCondition, SQL)) throw new Error('no query ran');
+      return new PgDialect().sqlToQuery(lastWhereCondition);
+    };
+
+    for (const path of ['/v1/onboarding/summary', '/v1/onboarding/by-source']) {
+      it(`${path} counts only the requested type's uploads and links`, async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `${path}?domain=provider`,
+          headers: AUTH('serves-both'),
+        });
+        expect(res.statusCode).toBe(200);
+        const where = lastWhereSql();
+        expect(where.sql).toContain('"bulk_uploads"."participant_type" = $');
+        expect(where.sql).toContain('"registration_links"."domain" = $');
+        expect(where.params).toContain('provider');
+      });
+
+      it(`${path} counts every type when no domain is given`, async () => {
+        const res = await app.inject({ method: 'GET', url: path, headers: AUTH('serves-both') });
+        expect(res.statusCode).toBe(200);
+        expect(lastWhereSql().sql).not.toContain('bulk_uploads');
+      });
+    }
+
+    it('does not filter when the coordinator serves only the requested type', async () => {
+      summaryRows = [{ total: 4, passed: 3, failed: 1, skipped: 0 }];
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary?domain=seeker',
+        headers: AUTH('serves-seeker'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ total: 4, passed: 3 });
+      expect(lastWhereSql().sql).not.toContain('bulk_uploads');
+    });
+
+    it('403 DOMAIN_NOT_SERVED for a type the coordinator does not serve', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/by-source?domain=provider',
+        headers: AUTH('serves-seeker'),
+      });
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
+      expect(lastWhereCondition).toBeUndefined();
+    });
+
+    it('400 SCHEMA_VALIDATION for a domain the network does not have', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary?domain=astronaut',
+        headers: AUTH('serves-both'),
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
     });
   });
 });
