@@ -196,6 +196,13 @@ export const ERR = {
     detail: 'Your account does not manage an active organisation.',
     hint: 'Admin account resolved by subject but owns no active org (pending, rejected or released). See services/auth/actor.',
   },
+  ACTING_ACCOUNT_INVALID: {
+    code: 'ACTING_ACCOUNT_INVALID',
+    status: 403,
+    title: 'Account not available',
+    detail: 'You cannot act as this account. Switch back to your own account and try again.',
+    hint: 'x-acting-account is not a guid, differs from the aggregator_id claim, is not the coordinator linked to this login, the login holds no owner account, or the coordinator or its org is not active. See services/auth/acting.ts.',
+  },
   DOMAIN_NOT_SERVED: {
     code: 'DOMAIN_NOT_SERVED',
     status: 403,

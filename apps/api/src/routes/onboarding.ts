@@ -18,6 +18,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
 import { getDb } from '../db/client.js';
 import { bulkUploads, onboarding, registrationLinks } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
@@ -208,6 +209,7 @@ function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
   if (!result.ok) {
+    throwIfActingError(result.error);
     if (result.error.code === 'NOT_APPROVED') {
       throw httpError('NOT_APPROVED', { detail: result.error.message });
     }

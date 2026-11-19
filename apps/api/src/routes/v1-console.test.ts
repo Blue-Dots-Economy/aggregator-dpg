@@ -21,7 +21,10 @@ import {
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import type { Organisation } from '../services/organisation-store/index.js';
-import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  ACTING_ACCOUNT_HEADER,
+  type KnownAsValues,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -339,6 +342,52 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(body.kind).toBe('coordinator');
       expect(body.orgs).toEqual([expect.objectContaining({ id: ORG_A, role: 'member' })]);
       expect(body.user.contact.email).toBe('c3@x.org');
+    });
+
+    it("names an owner's own coordinator account, and resolves to it with the header", async () => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      coordinators.seed([coordinator(C4, ORG_A, 'active', 4)]);
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+
+      const plain = (await get('/v1/user/read/me', 'a')).json() as {
+        kind: string;
+        own_coordinator_account_id?: string | null;
+      };
+      expect(plain.kind).toBe('admin');
+      expect(plain.own_coordinator_account_id).toBe(C4);
+
+      const acting = await app.inject({
+        method: 'GET',
+        url: '/v1/user/read/me',
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C4 },
+      });
+      expect(acting.statusCode).toBe(200);
+      expect(acting.json()).toMatchObject({ kind: 'coordinator', user: { id: C4 } });
+
+      // Console admin routes refuse the acting coordinator, as any coordinator.
+      const admin = await app.inject({
+        method: 'GET',
+        url: `/v1/user/read/${C1}`,
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C4 },
+      });
+      expect(admin.statusCode).toBe(403);
+    });
+
+    it('gives an owner with no coordinator account a null own_coordinator_account_id', async () => {
+      const body = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(body.own_coordinator_account_id).toBeNull();
+    });
+
+    it('403 ACTING_ACCOUNT_INVALID for a coordinator not linked to the login', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/user/read/me',
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C3 },
+      });
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('ACTING_ACCOUNT_INVALID');
     });
   });
 

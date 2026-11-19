@@ -3,8 +3,13 @@
  * own coordinator account when both accounts share one IdP login.
  */
 
+import type { FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { httpError } from '../../errors/http-error.js';
 import { logger } from '../../logger.js';
+import type { AuthError } from './access-token.js';
 import { getIdentityStore } from '../identity-store/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
@@ -61,4 +66,57 @@ export async function resolveActingAccount(
     return err({ code: 'INACTIVE', message: 'organisation is not active' });
   }
   return ok(coordinator);
+}
+
+/** The `x-acting-account` header of a request. */
+export type ActingHeader =
+  { kind: 'absent' } | { kind: 'malformed' } | { kind: 'account'; id: string };
+
+const AccountIdSchema = z.guid();
+
+/**
+ * Reads the `x-acting-account` header once.
+ *
+ * A repeated header, an empty value or a value that is not a guid is
+ * `malformed`; callers refuse it with `403 ACTING_ACCOUNT_INVALID`.
+ *
+ * @param req - The request.
+ * @returns The header state.
+ */
+export function readActingHeader(req: FastifyRequest): ActingHeader {
+  const raw = req.headers[ACTING_ACCOUNT_HEADER];
+  if (raw === undefined) return { kind: 'absent' };
+  const parsed = AccountIdSchema.safeParse(raw);
+  return parsed.success ? { kind: 'account', id: parsed.data } : { kind: 'malformed' };
+}
+
+/**
+ * Logs the outcome of an acting-account check. Carries the status and the
+ * error code only, never ids or the subject.
+ *
+ * @param code - The {@link ActingError} code, or `null` on success.
+ */
+export function logActing(code: ActingError['code'] | 'MALFORMED' | 'CLAIM_MISMATCH' | null): void {
+  if (code === null) logger.debug({ operation: 'auth.acting', status: 'success' });
+  else logger.warn({ operation: 'auth.acting', status: 'failure', error: code });
+}
+
+/**
+ * Throws the HTTP error for a refused or unchecked acting account, for the
+ * auth wrappers of the routes that use `requireApproved`. Does nothing for
+ * any other error.
+ *
+ * @param error - The `requireApproved` error.
+ * @throws {HttpError} `ACTING_ACCOUNT_INVALID` (403) or `DB_UNAVAILABLE` (503).
+ */
+export function throwIfActingError(error: AuthError): void {
+  if (error.code === 'ACTING_ACCOUNT_INVALID') {
+    throw httpError('ACTING_ACCOUNT_INVALID', { detail: error.message });
+  }
+  if (error.code === 'ACTING_UNAVAILABLE') {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(error.message),
+      fields: { sub_operation: 'resolveActingAccount' },
+    });
+  }
 }

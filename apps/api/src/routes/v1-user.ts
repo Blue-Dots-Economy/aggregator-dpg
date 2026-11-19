@@ -60,6 +60,8 @@ import { getRegistrationInvitesStore } from '../services/registration-invites-st
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
+import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
+import { getIdentityStore } from '../services/identity-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/attributes.js';
 import {
   decodeUserCursor,
@@ -304,9 +306,17 @@ async function liveRolesOf(rows: readonly Coordinator[]): Promise<Map<string, st
 /**
  * Builds the `read/me` answer for an actor.
  *
+ * For an admin, `own_coordinator_account_id` is the coordinator account
+ * linked to the same login, or `null`.
+ *
+ * @param subject - The token `sub`.
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<MeResponse> {
+async function meOf(
+  /* NOSONAR */ req: FastifyRequest,
+  actor: Actor,
+  subject: string,
+): Promise<MeResponse> {
   const orgStore = getOrganisationStore();
   const orgs: MeOrg[] = [];
   let self: { name: string | null; email: string; phone: string | null } | null = null;
@@ -361,13 +371,19 @@ async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<Me
   }
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 
-  return {
+  const me: MeResponse = {
     kind: actor.userType,
     user: { id: actor.userId, contact: self },
     orgs,
     is_network_admin: isNetworkAdmin(actor),
     capabilities: await listActorCapabilities(req, actor),
   };
+  if (actor.userType === 'admin') {
+    const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, subject);
+    if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
+    me.own_coordinator_account_id = accounts.value.coordinator;
+  }
+  return me;
 }
 
 /**
@@ -388,8 +404,8 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const { actor } = await requireActor(req, { allowCoordinator: true });
-      return reply.status(200).send(await meOf(req, actor));
+      const { actor, auth } = await requireActor(req, { allowCoordinator: true });
+      return reply.status(200).send(await meOf(req, actor, auth.subject));
     },
   );
 

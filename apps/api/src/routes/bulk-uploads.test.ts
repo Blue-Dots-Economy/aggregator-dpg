@@ -39,6 +39,13 @@ import { err } from '@aggregator-dpg/shared-primitives/result';
 import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
 import { _setRedis } from '../services/redis/index.js';
 import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import {
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 
 // Hoisted so the vi.mock factories can reference them (mocks are hoisted
 // above module code).
@@ -1191,6 +1198,44 @@ describe('bulk-uploads routes', () => {
       });
       const body = res.json() as { items: Array<{ upload_id: string }> };
       expect(body.items.map((i) => i.upload_id)).toEqual(['mine']);
+    });
+
+    it('lists the uploads of the coordinator an owner acts as', async () => {
+      const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+      const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+      const users = seedCoordinators();
+      users.seed([
+        buildCoordinator({
+          id: AGG_B,
+          orgSlug: 'agg-b',
+          serves: ['seeker'],
+          status: 'active',
+          parentOrgId: ORG,
+          signalstackOrgId: 'org-b',
+        }),
+      ]);
+      _setUserStore(users);
+      const orgs = new OrganisationStoreFake();
+      orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+      _setOrganisationStore(orgs);
+      await getIdentityStore().link(ADMIN, 'keycloak', 'kc-noagg', 'admin');
+      await getIdentityStore().link(AGG_B, 'keycloak', 'kc-noagg', 'coordinator');
+      store.seed([
+        buildUpload({ id: 'mine', aggregatorId: AGG_A, status: 'completed' }),
+        buildUpload({ id: 'acting', aggregatorId: AGG_B, status: 'completed' }),
+      ]);
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/v1/bulk-uploads',
+          headers: { ...AUTH('no-agg-id'), [ACTING_ACCOUNT_HEADER]: AGG_B },
+        });
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { items: Array<{ upload_id: string }> };
+        expect(body.items.map((i) => i.upload_id)).toEqual(['acting']);
+      } finally {
+        _setOrganisationStore(null);
+      }
     });
 
     it('leaves out uploads that were never started', async () => {

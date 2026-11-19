@@ -17,6 +17,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -894,6 +895,7 @@ function buildPublicUrl(orgSlug: string, slug: string): string {
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
   if (!result.ok) {
+    throwIfActingError(result.error);
     if (result.error.code === 'NOT_APPROVED') {
       throw httpError('NOT_APPROVED', { detail: result.error.message });
     }

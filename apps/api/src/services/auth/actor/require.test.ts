@@ -15,6 +15,7 @@ import { _setAccessTokenVerifier } from '../access-token.js';
 import { HttpError } from '../../../errors/http-error.js';
 import { ActorResolverFake, buildAdminActor, _setActorResolver } from './index.js';
 import { requireActor } from './require.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
 
 const SUBJECT = 'kc-sub-1';
 
@@ -54,7 +55,10 @@ describe('requireActor', () => {
   });
 
   it('FORBIDDEN for a service-account token', async () => {
-    const req = reqWithClaims({ sub: SUBJECT, preferred_username: 'service-account-aggregator-bff' });
+    const req = reqWithClaims({
+      sub: SUBJECT,
+      preferred_username: 'service-account-aggregator-bff',
+    });
     await expectHttp(requireActor(req), 'FORBIDDEN');
   });
 
@@ -118,5 +122,42 @@ describe('requireActor', () => {
     });
     const caller = await requireActor(req, { allowCoordinator: true });
     expect(caller.actor).toEqual(actor);
+  });
+  describe('x-acting-account header', () => {
+    const ACTING = '00000000-0000-4000-8000-0000000000c1';
+
+    function reqActing(value: string): FastifyRequest {
+      _setAccessTokenVerifier(async () => ({ sub: SUBJECT, preferred_username: 'owner' }));
+      return {
+        headers: { authorization: 'Bearer stub', [ACTING_ACCOUNT_HEADER]: value },
+      } as unknown as FastifyRequest;
+    }
+
+    it('passes the acting account to the resolver', async () => {
+      const actor = { userId: ACTING, userType: 'coordinator' as const, active: true, orgs: [] };
+      resolver.seed(ACTING, actor);
+      const caller = await requireActor(reqActing(ACTING), { allowCoordinator: true });
+      expect(caller.actor).toEqual(actor);
+    });
+
+    it('FORBIDDEN on an admin-only route: the acting actor is a coordinator', async () => {
+      resolver.seed(ACTING, { userId: ACTING, userType: 'coordinator', active: true, orgs: [] });
+      await expectHttp(requireActor(reqActing(ACTING)), 'FORBIDDEN');
+    });
+
+    it('ACTING_ACCOUNT_INVALID for a malformed header value', async () => {
+      await expectHttp(requireActor(reqActing('nope')), 'ACTING_ACCOUNT_INVALID');
+    });
+
+    it('ACTING_ACCOUNT_INVALID when the resolver refuses the account', async () => {
+      resolver.resolve = async () => ({
+        ok: false,
+        error: { code: 'ACTING_ACCOUNT_INVALID', message: 'not linked' },
+      });
+      await expectHttp(
+        requireActor(reqActing(ACTING), { allowCoordinator: true }),
+        'ACTING_ACCOUNT_INVALID',
+      );
+    });
   });
 });

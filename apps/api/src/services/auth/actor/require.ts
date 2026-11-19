@@ -9,6 +9,7 @@
 import type { FastifyRequest } from 'fastify';
 import { authenticateAny, type AnyAuthContext } from '../access-token.js';
 import { httpError } from '../../../errors/http-error.js';
+import { logActing, readActingHeader } from '../acting.js';
 import { getActorResolver } from './resolver.js';
 import type { Actor } from './interface.js';
 
@@ -37,7 +38,8 @@ export interface RequireActorOptions {
  * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
  *   account, wrong client, or a coordinator on an admin route),
  *   `USER_NOT_PROVISIONED`, `NOT_APPROVED` (coordinator not approved),
- *   `NOT_ORG_ADMIN` (admin without an active org), `DB_UNAVAILABLE`, and
+ *   `NOT_ORG_ADMIN` (admin without an active org), `ACTING_ACCOUNT_INVALID`
+ *   (an `x-acting-account` this login may not use), `DB_UNAVAILABLE`, and
  *   `FORBIDDEN` with `fields.permission` when RBAC enforces a missing
  *   capability.
  */
@@ -56,11 +58,21 @@ export async function requireActor(
     throw httpError('FORBIDDEN', { detail: 'console routes require a signed-in user' });
   }
 
+  const acting = readActingHeader(req);
+  if (acting.kind === 'malformed') {
+    logActing('MALFORMED');
+    throw httpError('ACTING_ACCOUNT_INVALID');
+  }
+
   const resolved = await getActorResolver().resolve({
     subject: auth.context.subject,
     ...(auth.context.aggregatorId ? { aggregatorId: auth.context.aggregatorId } : {}),
+    ...(acting.kind === 'account' ? { actingAccountId: acting.id } : {}),
   });
   if (!resolved.ok) {
+    if (resolved.error.code === 'ACTING_ACCOUNT_INVALID') {
+      throw httpError('ACTING_ACCOUNT_INVALID', { detail: resolved.error.message });
+    }
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(resolved.error.message),
       fields: { sub_operation: 'actorResolver.resolve' },

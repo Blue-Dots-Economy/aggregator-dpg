@@ -282,4 +282,71 @@ describe('StoreActorResolver', () => {
       );
     });
   });
+  describe('acting account (owner acting as its own coordinator)', () => {
+    const ORG_ID = '33333333-3333-4333-8333-333333333333';
+    const OTHER_ID = '44444444-4444-4444-8444-444444444444';
+
+    function seedShared(): void {
+      identity.seed([
+        { userId: COORD_ID, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUBJECT },
+        { userId: ADMIN_ID, userType: 'admin', provider: IDP_PROVIDER, subject: SUBJECT },
+      ]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active', parentOrgId: ORG_ID })]);
+      orgStore.seed([
+        buildOrganisation({ id: ORG_ID, slug: 'o', ownerUserId: ADMIN_ID, status: 'active' }),
+      ]);
+    }
+
+    it('resolves to the coordinator actor with actingAccountId', async () => {
+      seedShared();
+      const r = await resolver.resolve({ subject: SUBJECT, actingAccountId: COORD_ID });
+      expect(r).toEqual({
+        ok: true,
+        value: expect.objectContaining({ userId: COORD_ID, userType: 'coordinator', active: true }),
+      });
+    });
+
+    it('resolves an owner with a coordinator account to the admin without it', async () => {
+      seedShared();
+      const r = await resolver.resolve({ subject: SUBJECT });
+      expect(r.ok && r.value?.userType).toBe('admin');
+      expect(r.ok && r.value?.userId).toBe(ADMIN_ID);
+    });
+
+    it('ACTING_ACCOUNT_INVALID for an account not linked to this login', async () => {
+      seedShared();
+      const r = await resolver.resolve({ subject: SUBJECT, actingAccountId: OTHER_ID });
+      expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+    });
+
+    it('ACTING_ACCOUNT_INVALID for a coordinator-only login', async () => {
+      identity.seed([
+        { userId: COORD_ID, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUBJECT },
+      ]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active', parentOrgId: ORG_ID })]);
+      orgStore.seed([buildOrganisation({ id: ORG_ID, slug: 'o', status: 'active' })]);
+      const r = await resolver.resolve({ subject: SUBJECT, actingAccountId: COORD_ID });
+      expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+    });
+
+    it('ACTING_ACCOUNT_INVALID when a claim and a different header are both sent', async () => {
+      seedShared();
+      const r = await resolver.resolve({
+        aggregatorId: COORD_ID,
+        subject: SUBJECT,
+        actingAccountId: OTHER_ID,
+      });
+      expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+    });
+
+    it('reports UNAVAILABLE when the acting lookup fails', async () => {
+      seedShared();
+      identity.accountsOf = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
+      const r = await resolver.resolve({ subject: SUBJECT, actingAccountId: COORD_ID });
+      expect(r).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
+    });
+  });
 });
