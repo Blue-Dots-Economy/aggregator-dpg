@@ -169,19 +169,6 @@ async function metricsFilter(
 }
 
 /**
- * Converts the validated `?from=&to=` query into Date bounds.
- *
- * @param query - The zod-validated range query from `req.query`.
- * @returns Optional from/to Date bounds.
- */
-function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?: Date } {
-  const out: { from?: Date; to?: Date } = {};
-  if (query.from) out.from = new Date(query.from);
-  if (query.to) out.to = new Date(query.to);
-  return out;
-}
-
-/**
  * The condition that keeps only rows of the requested profile type.
  *
  * A row's type comes from its upload or registration link. With one served
@@ -203,6 +190,19 @@ async function profileTypeCondition(
   const { domainIds } = await getNetworkConfig();
   if (servedDomains(auth.serves, domainIds).length <= 1) return undefined;
   return sql`(${onboarding.batchId} IN (SELECT ${bulkUploads.id} FROM ${bulkUploads} WHERE ${bulkUploads.participantType} = ${domain}) OR ${onboarding.linkId} IN (SELECT ${registrationLinks.id} FROM ${registrationLinks} WHERE ${registrationLinks.domain} = ${domain}))`;
+}
+
+/**
+ * Converts the validated `?from=&to=` query into Date bounds.
+ *
+ * @param query - The zod-validated range query from `req.query`.
+ * @returns Optional from/to Date bounds.
+ */
+function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?: Date } {
+  const out: { from?: Date; to?: Date } = {};
+  if (query.from) out.from = new Date(query.from);
+  if (query.to) out.to = new Date(query.to);
+  return out;
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
