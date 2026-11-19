@@ -682,6 +682,15 @@
     "cap_terms": "Terms",
     "cap_profile": "Profile"
   },
+  "accept_terms": {
+    "title": "Review the updated terms",
+    "intro": "Before you continue, read and accept the current Terms of Service and Privacy Policy.",
+    "agree_label": "I have read and accept the Privacy Policy and Terms of Service.",
+    "log_out": "Log out",
+    "changed": "The terms were updated while you were reading. Please read the new version and accept again.",
+    "failed": "We couldn't record your acceptance. Please log out and sign in again. If this keeps happening, contact support.",
+    "reload": "Reload page"
+  },
   "legal": {
     "privacy_title": "Privacy Policy",
     "terms_title": "Terms of Service",

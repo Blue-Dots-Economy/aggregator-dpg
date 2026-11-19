@@ -276,3 +276,18 @@ describe('<ConsentGate />', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ConsentGate page layout', () => {
+  it('renders the panel in the page flow: no dialog, no backdrop, no close', () => {
+    render(
+      <Wrapper>
+        <ConsentGate open layout="page" docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('consent-gate-backdrop')).not.toBeInTheDocument();
+    expect(screen.getByTestId('consent-gate-page')).toBeInTheDocument();
+    expect(screen.getByText('Terms of Service')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: messages.consent_gate.close })).toBeNull();
+  });
+});

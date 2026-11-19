@@ -46,11 +46,12 @@ export async function ensureTermsAccepted(path: string): Promise<void> {
 }
 
 /**
- * Saves a re-checked status in the session. A failure is logged and does not block the page.
+ * Saves a terms status in the current request's session. A failure is
+ * logged and does not block the caller.
  *
- * @param status - The status just read.
+ * @param status - The status just read or recorded.
  */
-async function storeTermsStatus(status: TermsStatus): Promise<void> {
+export async function storeTermsStatus(status: TermsStatus): Promise<void> {
   try {
     const sid = (await cookies()).get(SESSION_COOKIE)?.value;
     if (!sid) return;
