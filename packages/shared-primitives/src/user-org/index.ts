@@ -190,6 +190,9 @@ export const MeOrgSchema = z.object({
 });
 export type MeOrg = z.infer<typeof MeOrgSchema>;
 
+/** Request header naming the coordinator account an owner acts as. */
+export const ACTING_ACCOUNT_HEADER = 'x-acting-account';
+
 /** `GET /v1/user/read/me`. */
 export const MeResponseSchema = z.object({
   kind: z.enum(['admin', 'coordinator']),
@@ -202,6 +205,11 @@ export const MeResponseSchema = z.object({
    * The API decision, not this list, is the control.
    */
   capabilities: z.array(z.string()).nullable().optional(),
+  /**
+   * The caller's own coordinator account on the same login, when they hold
+   * one and may act as it; `null` or absent otherwise.
+   */
+  own_coordinator_account_id: z.guid().nullable().optional(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 
