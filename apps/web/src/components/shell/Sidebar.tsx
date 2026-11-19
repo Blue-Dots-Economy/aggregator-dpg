@@ -22,7 +22,10 @@ import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
 import { actingLeaveHref, CONSOLE_HOME } from '@/lib/acting';
 
-/** One nav entry's anchor: a `Link`, or a plain `<a>` for a {@link NavItem.fullPage} item. */
+/**
+ * One nav entry's control: a `Link`, a plain `<a>` for a {@link NavItem.fullPage}
+ * item, or a button for a {@link NavItem.onSelect} item.
+ */
 function NavLink({
   item,
   children,
@@ -33,6 +36,21 @@ function NavLink({
   className: string;
   onClick?: () => void;
 }>) {
+  const { onSelect } = item;
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        className={cn(rest.className, 'w-full text-left')}
+        onClick={() => {
+          rest.onClick?.();
+          onSelect();
+        }}
+      >
+        {children}
+      </button>
+    );
+  }
   if (item.fullPage) {
     return (
       <a href={item.to} {...rest}>
@@ -72,6 +90,13 @@ export interface NavItem {
    * changes the session on the way, such as a page outside acting mode.
    */
   fullPage?: boolean;
+  /**
+   * Run this instead of following `to`, rendered as a button; `to` then only
+   * keys the entry. For an entry that calls a route before it navigates.
+   */
+  onSelect?: () => void;
+  /** A message shown under the entry, such as why its action failed. */
+  alert?: string | null;
 }
 
 /** A link shown above the Overview label, such as "Back to console". */
@@ -309,6 +334,17 @@ function SidebarPanel({
                       </span>
                     )}
                   </NavLink>
+                ) : null}
+                {sectionOpen && n.alert ? (
+                  <p
+                    role="alert"
+                    className={cn(
+                      'px-3 pb-1 text-[12px] text-rose-600',
+                      n.section !== undefined && 'ml-5',
+                    )}
+                  >
+                    {n.alert}
+                  </p>
                 ) : null}
               </Fragment>
             );

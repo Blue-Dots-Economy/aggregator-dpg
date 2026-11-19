@@ -57,6 +57,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
         <ConsoleSidebar
           teamHref={canViewCoordinators(me) ? coordinatorsHref(me) : null}
           showProfile={ownProfileOrgId(me) !== null}
+          ownCoordinatorAccountId={me.own_coordinator_account_id ?? null}
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),

@@ -31,6 +31,9 @@ vi.mock('@/lib/console-domains.server', () => ({
   servedDomains: vi.fn(() => []),
 }));
 vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn(async () => []) }));
+vi.mock('@/app/(public)/register/register-server', () => ({
+  loadConsentContent: vi.fn(async () => null),
+}));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => `console.${key}`),
 }));
@@ -299,5 +302,58 @@ describe('console coordinators page — filters', () => {
     const mysuru = screen.getAllByRole('link', { name: 'Mysuru' })[0]!;
     expect(mysuru).toHaveAttribute('href', `/console/orgs/${ORG_M}`);
     expect(screen.queryByText('console.coordinators.registered_as')).toBeNull();
+  });
+});
+
+describe('console coordinators page — adding the owner to My Team', () => {
+  const OWN = '00000000-0000-4000-8000-0000000000c1';
+  const addMyself = () => screen.queryByRole('button', { name: /Add myself/ });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(consoleRead).mockResolvedValue(emptyPage);
+    vi.mocked(networkDomains).mockResolvedValue([{ id: 'seeker', label: 'Seekers' }]);
+  });
+
+  it('offers it to an owner without a coordinator account', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({ orgs: [org({}), org({ id: 'org-2', name: 'Second Org' })] }),
+    });
+    show(await renderPage());
+    expect(addMyself()).toBeInTheDocument();
+  });
+
+  it('does not offer it for the Default organisation alone', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({ orgs: [org({ is_default: true })] }),
+    });
+    show(await renderPage());
+    expect(addMyself()).toBeNull();
+  });
+
+  it('hides it once the account exists and tags only that row "You"', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({ orgs: [org({})], own_coordinator_account_id: OWN }),
+    });
+    const user = (id: string, name: string) => ({
+      id,
+      name: 'Real Org',
+      status: 'active' as const,
+      serves: [],
+      contact: { name, email: `${id}@a.org`, phone: null },
+    });
+    vi.mocked(consoleRead).mockResolvedValue({
+      users: [user(OWN, 'Owner Self'), user('other', 'Someone Else')],
+      next_cursor: null,
+    } as never);
+    show(await renderPage());
+    expect(addMyself()).toBeNull();
+    // The page's translations are stubbed to their keys.
+    const tags = screen.getAllByText('console.org_home.you');
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.closest('tr')).toHaveTextContent('Owner Self');
   });
 });

@@ -738,7 +738,10 @@
       "dashboard": "Dashboard",
       "my_blue_dots": "My Blue Dots",
       "my_team": "My Team",
-      "profile": "Account Details"
+      "profile": "Account Details",
+      "my_onboarding": "My onboarding",
+      "onboard_participants": "Onboard participants",
+      "acting_not_ready": "Setting up your access — try again in a minute."
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -1077,7 +1080,11 @@
       "signed_out": "You've been signed out. Sign in again, then try once more.",
       "forbidden": "You don't have permission to do this.",
       "server": "Something went wrong on our side. Try again in a few minutes.",
-      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state."
+      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state.",
+      "already_coordinator": "You already have a coordinator account.",
+      "org_not_eligible": "You can't add yourself to this [[org]].",
+      "not_org_owner": "Only the [[org]] owner can add themselves.",
+      "owner_phone_required": "Add a phone number to your account first."
     },
     "roles": {
       "title": "Roles",
@@ -1225,7 +1232,18 @@
       "view": "View",
       "view_named": "View {name}",
       "empty": "No [[users]] match.",
-      "partial": "Showing the newest {count}. <link>See all [[users]]</link>"
+      "partial": "Showing the newest {count}. <link>See all [[users]]</link>",
+      "you": "You"
+    },
+    "self_add": {
+      "button": "Add myself to My Team",
+      "title": "Add myself to My Team",
+      "intro": "You get your own coordinator account, so you can onboard participants yourself. You stay the [[org]] owner.",
+      "org": "[[Org]]",
+      "org_placeholder": "Choose one",
+      "serves": "Profile types",
+      "cancel": "Cancel",
+      "submit": "Continue"
     },
     "page_error": {
       "title": "This page couldn't load",

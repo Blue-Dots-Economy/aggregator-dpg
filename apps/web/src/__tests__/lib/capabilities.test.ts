@@ -7,7 +7,9 @@ import {
   canViewCoordinators,
   coordinatorsHref,
   ownProfileOrgId,
+  selfAddOrgs,
 } from '@/lib/capabilities';
+import type { MeOrg, MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 describe('can', () => {
   it('allows everything when access control is off', () => {
@@ -203,5 +205,65 @@ describe('canOnboardOrgsUnder', () => {
 
   it('offers any organisation that takes invites when access control is off', () => {
     expect(canOnboardOrgsUnder({ capabilities: null }, noOnboard)).toBe(true);
+  });
+});
+
+describe('selfAddOrgs', () => {
+  const owned = (id: string, over: Partial<MeOrg> = {}): MeOrg => ({
+    id,
+    name: `Org ${id}`,
+    slug: id,
+    org_type: 'aggregator',
+    role: 'owner',
+    is_default: false,
+    capabilities: ['org.manage'],
+    ...over,
+  });
+  const me = (orgs: MeOrg[], over: Partial<MeResponse> = {}): MeResponse => ({
+    kind: 'admin',
+    user: { id: 'u', contact: { name: null, email: 'o@a.org', phone: null } },
+    orgs,
+    is_network_admin: false,
+    capabilities: ['org.manage'],
+    own_coordinator_account_id: null,
+    ...over,
+  });
+
+  it('offers an owner without a coordinator account their aggregator organisations', () => {
+    expect(selfAddOrgs(me([owned('a'), owned('b')]))).toEqual([
+      { id: 'a', name: 'Org a' },
+      { id: 'b', name: 'Org b' },
+    ]);
+  });
+
+  it('offers nothing once the owner has a coordinator account', () => {
+    const acct = '00000000-0000-4000-8000-0000000000aa';
+    expect(selfAddOrgs(me([owned('a')], { own_coordinator_account_id: acct }))).toEqual([]);
+  });
+
+  it('offers nothing to the network admin or a coordinator', () => {
+    expect(selfAddOrgs(me([owned('a')], { is_network_admin: true }))).toEqual([]);
+    expect(selfAddOrgs(me([owned('a')], { kind: 'coordinator' }))).toEqual([]);
+  });
+
+  it('offers nothing to an owner of the root', () => {
+    const root = owned('root', { org_type: 'network_facilitator' });
+    expect(selfAddOrgs(me([root, owned('a')]))).toEqual([]);
+  });
+
+  it('leaves out the Default organisation, a member organisation and one not managed', () => {
+    const orgs = [
+      owned('dflt', { is_default: true }),
+      owned('member', { role: 'member' }),
+      owned('viewed', { capabilities: ['profiles.view'] }),
+      owned('a'),
+    ];
+    expect(selfAddOrgs(me(orgs))).toEqual([{ id: 'a', name: 'Org a' }]);
+  });
+
+  it('offers every owned organisation when access control is off', () => {
+    expect(selfAddOrgs(me([owned('a', { capabilities: null })], { capabilities: null }))).toEqual([
+      { id: 'a', name: 'Org a' },
+    ]);
   });
 });
