@@ -20,7 +20,8 @@ export type AddressPart =
   | 'postalCode'
   | 'addressCountry';
 
-const ADDRESS_PARTS: readonly AddressPart[] = [
+/** The address parts, in form order; each is the CSV column `address_<part>`. */
+export const ADDRESS_PARTS: readonly AddressPart[] = [
   'streetAddress',
   'addressLocality',
   'addressDistrict',
@@ -29,7 +30,8 @@ const ADDRESS_PARTS: readonly AddressPart[] = [
   'addressCountry',
 ];
 
-const ADDRESS_PREFIX = 'address_';
+/** Prefix of the address columns. */
+export const ADDRESS_PREFIX = 'address_';
 
 /** One org to create, from `orgs.csv`. */
 export interface OrgRow {

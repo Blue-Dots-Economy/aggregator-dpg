@@ -274,6 +274,17 @@ export async function validateOrgUpdate(changes: JsonRecord): Promise<OrgFieldsR
 }
 
 /**
+ * Names the schema's own fields, in schema order: every property but the fixed registration keys.
+ *
+ * Lets the org loader build its CSV template from the same schema the API validates against.
+ *
+ * @throws {Error} If no org-registration schema can be found.
+ */
+export async function orgSchemaFields(): Promise<string[]> {
+  return [...(await compiled()).fields];
+}
+
+/**
  * Names the schema's own fields whose type is `array`.
  *
  * Lets a caller that reads text (the org loader's CSV) turn those cells into lists.
