@@ -44,8 +44,10 @@ function runEntry(
         },
       },
       (err, stdout, stderr) => {
+        let code: number | null = 0;
+        if (err) code = typeof err.code === 'number' ? err.code : null;
         resolve({
-          code: err ? (typeof err.code === 'number' ? err.code : null) : 0,
+          code,
           stdout,
           stderr,
         });

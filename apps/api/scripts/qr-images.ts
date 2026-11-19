@@ -33,7 +33,8 @@ async function main(argv: string[]): Promise<number> {
     const arg = argv[i] ?? '';
     if (arg === '--force') force = true;
     else if ((arg === '--in' || arg === '--out') && argv[i + 1] && !argv[i + 1]?.startsWith('--')) {
-      flags.set(arg, argv[(i += 1)] ?? '');
+      flags.set(arg, argv[i + 1] ?? '');
+      i += 1;
     } else {
       process.stderr.write(`usage error: unexpected ${arg}\n${USAGE}\n`);
       return 2;
@@ -54,12 +55,9 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-main(process.argv.slice(2)).then(
-  (code) => {
-    process.exitCode = code;
-  },
-  (err: unknown) => {
-    process.stderr.write(`FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
-    process.exitCode = 1;
-  },
-);
+try {
+  process.exitCode = await main(process.argv.slice(2));
+} catch (err: unknown) {
+  process.stderr.write(`FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exitCode = 1;
+}

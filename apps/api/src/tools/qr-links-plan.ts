@@ -174,6 +174,80 @@ function voiceBotProblem(
   return QR_PLAN_PROBLEM.CHECK_FAILED;
 }
 
+type AddProblem = (code: QrPlanProblemCode, field?: string) => void;
+
+/** Checks the row's own link name and expiry; returns the parsed expiry. */
+function checkRowInput(row: LinkRow, now: Date, add: AddProblem): Date | null {
+  if (row.linkName !== '' && !LinkSlugSchema.safeParse(row.linkName).success) {
+    add(QR_PLAN_PROBLEM.INVALID_LINK_NAME, 'link_name');
+  }
+  if (row.expiresOn === '') return null;
+  const expiresAt = parseExpiry(row.expiresOn);
+  const expiryProblem = expiryCode(expiresAt, now);
+  if (expiryProblem) add(expiryProblem, 'expires_on');
+  return expiresAt;
+}
+
+/** Flags a coordinator who is not active or has no Signals org. */
+function checkCoordinator(coordinator: Coordinator, add: AddProblem): void {
+  if (coordinator.status !== 'active') {
+    add(QR_PLAN_PROBLEM.COORDINATOR_NOT_ACTIVE, 'coordinator_email');
+  }
+  if (coordinator.signalstackOrgId === null || coordinator.orgSlug === '') {
+    add(QR_PLAN_PROBLEM.NO_SIGNALS_ORG, 'coordinator_email');
+  }
+}
+
+/** The DUPLICATE_ROW problem when an earlier row has this row's key; otherwise records the key. */
+function duplicateProblem(row: LinkRow, email: string, seen: Set<string>): InputProblem | null {
+  // A link name is one slug per coordinator, whatever the profile type.
+  const named = row.linkName !== '';
+  const key = JSON.stringify(
+    named ? ['name', email, row.linkName] : ['type', email, row.profileType],
+  );
+  if (!seen.has(key)) {
+    seen.add(key);
+    return null;
+  }
+  return named
+    ? { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' }
+    : { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW };
+}
+
+/** Logs a failed row check without its contents. */
+function logRowFailure(row: LinkRow, err: unknown): void {
+  logger.error(
+    {
+      operation: 'qrLinks.buildLinksPlan.check',
+      status: 'failure',
+      line: row.line,
+      error_type: err instanceof Error ? err.constructor.name : typeof err,
+      error_code: rowErrorCode(err),
+      reason: err instanceof UpstreamError ? err.details?.['reason'] : undefined,
+    },
+    'qr-links row check failed',
+  );
+}
+
+/** The problem with a row's parsed expiry, if any. */
+function expiryCode(expiresAt: Date | null, now: Date): QrPlanProblemCode | null {
+  if (expiresAt === null) return QR_PLAN_PROBLEM.INVALID_EXPIRY;
+  return expiresAt.getTime() <= now.getTime() ? QR_PLAN_PROBLEM.EXPIRY_IN_PAST : null;
+}
+
+/** The `link_name`s each coordinator's rows give, by lower-cased email; blocked rows are skipped. */
+function claimedNames(rows: LinkRow[], blocked: ReadonlySet<number>): Map<string, Set<string>> {
+  const claimedBy = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.linkName === '' || blocked.has(row.line)) continue;
+    const email = row.coordinatorEmail.trim().toLowerCase();
+    const names = claimedBy.get(email) ?? new Set<string>();
+    names.add(row.linkName);
+    claimedBy.set(email, names);
+  }
+  return claimedBy;
+}
+
 /**
  * Checks one row.
  *
@@ -198,28 +272,14 @@ async function planRow(
     problems.push(field === undefined ? { line: row.line, code } : { line: row.line, code, field });
   };
 
-  if (row.linkName !== '' && !LinkSlugSchema.safeParse(row.linkName).success) {
-    add(QR_PLAN_PROBLEM.INVALID_LINK_NAME, 'link_name');
-  }
-  let expiresAt: Date | null = null;
-  if (row.expiresOn !== '') {
-    expiresAt = parseExpiry(row.expiresOn);
-    if (expiresAt === null) add(QR_PLAN_PROBLEM.INVALID_EXPIRY, 'expires_on');
-    else if (expiresAt.getTime() <= ctx.now.getTime()) {
-      add(QR_PLAN_PROBLEM.EXPIRY_IN_PAST, 'expires_on');
-    }
-  }
+  const expiresAt = checkRowInput(row, ctx.now, add);
 
   const coordinator = await findCoordinator(email, ctx.cache, ctx.bound);
   if (!coordinator) {
     add(QR_PLAN_PROBLEM.UNKNOWN_COORDINATOR, 'coordinator_email');
     return { link: null, problems };
   }
-  if (coordinator.status !== 'active')
-    add(QR_PLAN_PROBLEM.COORDINATOR_NOT_ACTIVE, 'coordinator_email');
-  if (coordinator.signalstackOrgId === null || coordinator.orgSlug === '') {
-    add(QR_PLAN_PROBLEM.NO_SIGNALS_ORG, 'coordinator_email');
-  }
+  checkCoordinator(coordinator, add);
   const domain = row.profileType;
   if (!servedDomains(coordinator.serves, ctx.cfg.domainIds).includes(domain)) {
     add(QR_PLAN_PROBLEM.DOMAIN_NOT_SERVED, 'profile_type');
@@ -237,17 +297,15 @@ async function planRow(
     l.registrationMode === modeKey &&
     l.domain === domain &&
     (l.expiresAt === null || l.expiresAt.getTime() > ctx.now.getTime());
-  let match: RegistrationLink | undefined;
-  if (row.linkName === '') {
-    // A link a named row of this sheet claims is that row's, not this one's.
-    match = all.find((l) => covers(l) && !ctx.claimed.has(l.slug));
-  } else {
-    // A taken slug would get a random suffix on create, and a rerun could not find that link again.
-    match = all.find((l) => l.slug === row.linkName);
-    if (match && !covers(match)) {
-      add(QR_PLAN_PROBLEM.LINK_NAME_TAKEN, 'link_name');
-      return { link: null, problems };
-    }
+  // A link a named row of this sheet claims is that row's, not this one's.
+  // A taken slug would get a random suffix on create, and a rerun could not find that link again.
+  const match =
+    row.linkName === ''
+      ? all.find((l) => covers(l) && !ctx.claimed.has(l.slug))
+      : all.find((l) => l.slug === row.linkName);
+  if (row.linkName !== '' && match && !covers(match)) {
+    add(QR_PLAN_PROBLEM.LINK_NAME_TAKEN, 'link_name');
+    return { link: null, problems };
   }
   return {
     link: {
@@ -308,32 +366,16 @@ export async function buildLinksPlan(input: {
   const { callTimeoutMs } = input;
   const bound: Bound = (promise, what) =>
     callTimeoutMs === undefined ? promise : withTimeout(promise, callTimeoutMs, what);
-  const claimedBy = new Map<string, Set<string>>();
-  for (const row of input.rows) {
-    if (row.linkName === '' || blocked.has(row.line)) continue;
-    const email = row.coordinatorEmail.trim().toLowerCase();
-    const names = claimedBy.get(email) ?? new Set<string>();
-    names.add(row.linkName);
-    claimedBy.set(email, names);
-  }
+  const claimedBy = claimedNames(input.rows, blocked);
 
   for (const row of missingColumn ? [] : input.rows) {
     if (blocked.has(row.line)) continue;
     const email = row.coordinatorEmail.trim().toLowerCase();
-    // A link name is one slug per coordinator, whatever the profile type.
-    const named = row.linkName !== '';
-    const key = JSON.stringify(
-      named ? ['name', email, row.linkName] : ['type', email, row.profileType],
-    );
-    if (seen.has(key)) {
-      problems.push(
-        named
-          ? { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW, field: 'link_name' }
-          : { line: row.line, code: QR_PLAN_PROBLEM.DUPLICATE_ROW },
-      );
+    const duplicate = duplicateProblem(row, email, seen);
+    if (duplicate) {
+      problems.push(duplicate);
       continue;
     }
-    seen.add(key);
     try {
       const planned = await planRow(row, email, modeKey, {
         cfg,
@@ -345,17 +387,7 @@ export async function buildLinksPlan(input: {
       problems.push(...planned.problems);
       if (planned.link) links.push(planned.link);
     } catch (err) {
-      logger.error(
-        {
-          operation: 'qrLinks.buildLinksPlan.check',
-          status: 'failure',
-          line: row.line,
-          error_type: err instanceof Error ? err.constructor.name : typeof err,
-          error_code: rowErrorCode(err),
-          reason: err instanceof UpstreamError ? err.details?.['reason'] : undefined,
-        },
-        'qr-links row check failed',
-      );
+      logRowFailure(row, err);
       problems.push({ line: row.line, code: QR_PLAN_PROBLEM.CHECK_FAILED });
     }
   }

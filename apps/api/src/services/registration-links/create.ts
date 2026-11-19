@@ -181,6 +181,12 @@ export function checkVoiceBotChoice(
   return { ok: true, value: resolved?.key ?? null };
 }
 
+/** The caller's slug on the first attempt, then with a random suffix; a random slug when none. */
+function slugFor(requested: string | undefined, attempt: number): string {
+  if (!requested) return generateSlug();
+  return attempt === 0 ? requested : `${requested}-${randomSuffix()}`;
+}
+
 /**
  * Creates a registration link for a coordinator.
  *
@@ -214,12 +220,7 @@ export async function createRegistrationLink(input: CreateLinkInput): Promise<Cr
 
   const store = getRegistrationLinksStore();
   for (let attempt = 0; attempt < SLUG_RETRIES; attempt++) {
-    let slug: string;
-    if (input.slug) {
-      slug = attempt === 0 ? input.slug : `${input.slug}-${randomSuffix()}`;
-    } else {
-      slug = generateSlug();
-    }
+    const slug = slugFor(input.slug, attempt);
     const result = await store.create({
       aggregatorId: input.userId,
       slug,

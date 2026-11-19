@@ -52,6 +52,20 @@ export interface LinkReportRow {
 type CreateResult =
   { ok: true; slug: string; url: string; voiceBot: string } | { ok: false; code: string };
 
+/** Copies a create result onto its report row; false when the create failed. */
+function recordCreate(report: LinkReportRow, result: Awaited<ReturnType<typeof create>>): boolean {
+  if (!result.ok) {
+    report.outcome = 'failed';
+    report.errorCode = result.code;
+    return false;
+  }
+  report.outcome = 'created';
+  report.slug = result.slug;
+  report.url = result.url;
+  report.voiceBot = result.voiceBot;
+  return true;
+}
+
 /**
  * Applies a plan that has no problems.
  *
@@ -96,18 +110,8 @@ export async function applyLinksPlan(
       report.slug = link.existing.slug;
       report.url = link.existing.url;
       report.voiceBot = link.existing.voiceBotKey ?? '';
-    } else {
-      const result = await create(link, log, opts.callTimeoutMs);
-      if (result.ok) {
-        report.outcome = 'created';
-        report.slug = result.slug;
-        report.url = result.url;
-        report.voiceBot = result.voiceBot;
-      } else {
-        report.outcome = 'failed';
-        report.errorCode = result.code;
-        failedRow = report;
-      }
+    } else if (!recordCreate(report, await create(link, log, opts.callTimeoutMs))) {
+      failedRow = report;
     }
     log.info({
       status: report.outcome === 'failed' ? 'failure' : 'success',

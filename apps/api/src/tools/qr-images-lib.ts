@@ -48,7 +48,11 @@ function freeName(name: string, sheetLine: string, used: ReadonlySet<string>): s
   if (!used.has(name)) return name;
   const stem = `${name.slice(0, -'.png'.length)}-${sheetLine.toLowerCase().replaceAll(/[^a-z0-9-]/g, '-')}`;
   let candidate = `${stem}.png`;
-  for (let n = 2; used.has(candidate); n++) candidate = `${stem}-${n}.png`;
+  let n = 2;
+  while (used.has(candidate)) {
+    candidate = `${stem}-${n}.png`;
+    n += 1;
+  }
   return candidate;
 }
 
@@ -82,7 +86,7 @@ export async function renderQrImages(
       profileType: cells['profile_type'] ?? '',
       slug: unneutralise(cells['slug'] ?? ''),
     });
-    const file = freeName(name, cells['line'] || String(line), used);
+    const file = freeName(name, (cells['line'] ?? '') || String(line), used);
     used.add(file);
     await writeFile(join(outDir, file), await QRCode.toBuffer(url, QR_OPTIONS));
     written += 1;

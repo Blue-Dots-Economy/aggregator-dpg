@@ -167,7 +167,8 @@ async function checkOrApply(command: Command, args: string[], io: QrLinksIo): Pr
   const say = (line: string): void => io.writeStderr(`${line}\n`);
 
   const parsed = parseLinksCsv(await io.readStdin());
-  say(`qr-links ${command}${label ? ` as ${label}` : ''}`);
+  const asLabel = label ? ` as ${label}` : '';
+  say(`qr-links ${command}${asLabel}`);
   say(`  rows: ${parsed.rows.length}`);
   const callTimeoutMs = config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS;
   const plan = await buildLinksPlan({
@@ -175,13 +176,15 @@ async function checkOrApply(command: Command, args: string[], io: QrLinksIo): Pr
     inputProblems: parsed.problems,
     callTimeoutMs,
   });
-  for (const p of plan.problems) say(`${p.line} ${p.code}${p.field ? ` ${p.field}` : ''}`);
+  for (const p of plan.problems) {
+    const field = p.field ? ` ${p.field}` : '';
+    say(`${p.line} ${p.code}${field}`);
+  }
   const existing = plan.links.filter((l) => l.existing !== null).length;
   say(`  links: create=${plan.links.length - existing} already_loaded=${existing}`);
   if (plan.problems.length > 0) {
-    say(
-      `${command === 'check' ? 'CHECK FAILED' : 'REFUSED'} — ${plan.problems.length} problem(s); nothing was written`,
-    );
+    const verdict = command === 'check' ? 'CHECK FAILED' : 'REFUSED';
+    say(`${verdict} — ${plan.problems.length} problem(s); nothing was written`);
     return EXIT.FAILED;
   }
   if (command === 'check') {

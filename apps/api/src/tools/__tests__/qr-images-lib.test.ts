@@ -44,7 +44,10 @@ describe('renderQrImages', () => {
   it('writes only created and already_loaded rows, as PNG files', async () => {
     const result = await renderQrImages(csv, dir);
     expect(result).toEqual({ written: 2, skipped: 2 });
-    expect((await readdir(dir)).sort()).toEqual(['a-seeker-camp-a.png', 'b-seeker-camp-b.png']);
+    expect((await readdir(dir)).sort((a, b) => a.localeCompare(b))).toEqual([
+      'a-seeker-camp-a.png',
+      'b-seeker-camp-b.png',
+    ]);
     const bytes = await readFile(join(dir, 'a-seeker-camp-a.png'));
     expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
   });
@@ -56,7 +59,10 @@ describe('renderQrImages', () => {
       '3,a-b@x.org,seeker,,camp,https://h/r/o/camp2,created,',
     ].join('\n');
     expect(await renderQrImages(clash, dir)).toEqual({ written: 2, skipped: 0 });
-    expect((await readdir(dir)).sort()).toEqual(['a-b-seeker-camp-3.png', 'a-b-seeker-camp.png']);
+    expect((await readdir(dir)).sort((a, b) => a.localeCompare(b))).toEqual([
+      'a-b-seeker-camp-3.png',
+      'a-b-seeker-camp.png',
+    ]);
   });
 
   it('suffixes with the report line column and loops until the name is free', async () => {
@@ -67,7 +73,7 @@ describe('renderQrImages', () => {
       '9,a-b@x.org,seeker,,camp,https://h/r/o/camp2,created,',
     ].join('\n');
     expect(await renderQrImages(clash, dir)).toEqual({ written: 3, skipped: 0 });
-    expect((await readdir(dir)).sort()).toEqual([
+    expect((await readdir(dir)).sort((a, b) => a.localeCompare(b))).toEqual([
       'a-b-seeker-camp-9-2.png',
       'a-b-seeker-camp-9.png',
       'a-b-seeker-camp.png',

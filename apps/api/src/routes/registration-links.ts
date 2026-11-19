@@ -257,11 +257,11 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
           orgSlug: callerOrgSlug,
           servedDomains: servedDomains(auth.serves, networkCfg.domainIds),
           domain: body.domain,
-          ...(body.registration_mode !== undefined
-            ? { registrationMode: body.registration_mode }
-            : {}),
-          ...(body.voice_bot_key !== undefined ? { voiceBotKey: body.voice_bot_key } : {}),
-          ...(body.slug !== undefined ? { slug: body.slug } : {}),
+          ...(body.registration_mode === undefined
+            ? {}
+            : { registrationMode: body.registration_mode }),
+          ...(body.voice_bot_key === undefined ? {} : { voiceBotKey: body.voice_bot_key }),
+          ...(body.slug === undefined ? {} : { slug: body.slug }),
           context: body.context,
           status: body.status,
           expiresAt: body.expires_at,
