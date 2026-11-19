@@ -2,7 +2,7 @@
 
 **Ticket:** aggregator-dpg#1121 (child of bluedots-infra-deployments#146; PRD bluedots-program#33, capability 2)
 **Status:** design, awaiting approval (all architect questions answered 19 Nov 2026)
-**Base:** `origin/feature` @ `011a95c3`. After merge into `feature`, also merged into `hotfix/up-speedrun`.
+**Base:** `origin/develop` @ `a8cf36ff`. PRs target `develop`; after merge, `develop` is synced back to `feature` and merged into `hotfix/up-speedrun`.
 
 ## 1. Intent
 
@@ -164,12 +164,12 @@ No special-casing. The account is an ordinary coordinator in `users.org_id`, so 
 
 ## 7. Delivery
 
-- One branch per block, cut from `feature`, with stacked PRs per `.claude/rules/pull-requests.md`:
+- One branch per block, cut from `develop`, with stacked PRs into `develop` per `.claude/rules/pull-requests.md`:
   1. **api:** schema, migration, identity store, resolver, auth, self-add, roles sync, boot reconcile, `edge.rego` with its tests, `routes.json`, docs.
    - No infra PR: Envoy's gRPC ext_authz already forwards all request headers to OPA.
    - The Helm policy and config copy is a bluedots-automation Task, which must deploy with or before the API.
   2. **web:** session, BFF routes, layouts, sidebar, My Team button and tag.
-- After both merge into `feature`, merge into `hotfix/up-speedrun`. That branch has `coordinator-create.ts`, so expect conflicts around the registration checks; this design doesn't edit them.
+- After both merge into `develop`, sync `develop` back to `feature` and merge into `hotfix/up-speedrun`. That branch has `coordinator-create.ts`, so expect conflicts around the registration checks; this design doesn't edit them.
 - Post decisions 1–5 as a comment on #1121 when this spec is approved.
 - **Done when:** on UAT, an owner adds themselves, switches to "Onboard participants", creates a link, runs an upload and sees the counts; the console works as before; the owner's console token, decoded, has no `aggregator_id`, `decision_made` or `signalstack_org_id`.
 

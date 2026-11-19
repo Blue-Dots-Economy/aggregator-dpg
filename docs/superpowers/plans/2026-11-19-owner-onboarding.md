@@ -16,7 +16,7 @@
 
 ## Global Constraints
 
-- Work on stacked branches cut from `feature`:
+- Work on stacked branches cut from `develop` (`a8cf36ff`). The bottom PR's base is `develop`, and so is its target. After the stack merges, sync `develop` back into `feature` (merge commit). That is a user-confirmed exception for this ticket.
   - `feat/1121-owner-onboarding-api`, holding Tasks 1–7 plus the spec and this plan;
   - `feat/1121-owner-onboarding-web`, holding Tasks 8–10.
 - Use `gh stack` per `.claude/rules/pull-requests.md`. There is no infra PR: Envoy's gRPC ext_authz already forwards every request header to OPA (`infra/envoy/envoy.yaml:95-103`), so `x-acting-account` needs no Envoy change.
@@ -233,7 +233,7 @@
 - [ ] **Step 4:** Run `opa check policy/rbac && opa test policy/rbac -v` and `pnpm --filter @aggregator-dpg/api test -- edge`. Expect PASS.
 - [ ] **Step 5:** Commit `feat(rbac): edge applies acting-account roles only with a matching header (#1121)`.
 - [ ] **Step 6: Open the API PR.**
-  - Run `gh stack init --base feature feat/1121-owner-onboarding-api`, push, and `gh stack submit`. The PR body follows `.github/PULL_REQUEST_TEMPLATE.md` and includes In Plain Terms, "Part 1 of 2", and a release note on the boot re-link of owners who were refused for being coordinators.
+  - Run `gh stack init --base develop feat/1121-owner-onboarding-api`, push, and `gh stack submit`. The PR body follows `.github/PULL_REQUEST_TEMPLATE.md` and includes In Plain Terms, "Part 1 of 2", and a release note on the boot re-link of owners who were refused for being coordinators.
   - **Ask the user before pushing.**
   - Raise the bluedots-automation Task for the Helm policy copy (`helm/aggregator/charts/api/files/opa-authz.rego` and related) with the `creating-bluedots-tickets` skill. It must deploy with or before this API.
 
@@ -241,7 +241,7 @@
 
 **Files:**
 - Modify: `apps/web/src/lib/session/interface.ts:27-47` (`actingAccountId: z.guid().optional()`)
-- Modify: `apps/web/src/lib/upstream-client.ts:65-80`, `apps/web/src/lib/bff-service-proxy.ts` (the user-token path only)
+- Modify: `apps/web/src/lib/upstream-client.ts:65-80`. It is the only BFF path that sends the user's token; `bff-service-proxy.ts`, `invite-read.server.ts` and `invite-activation.ts` use the service token and stay unchanged.
 - Create: `apps/web/src/app/api/auth/acting/route.ts` (`POST`, `DELETE`)
 - Test: `apps/web/src/lib/upstream-client.test.ts`, `apps/web/src/app/api/auth/acting/route.test.ts`
 
@@ -317,7 +317,7 @@
 
 ### After merge (not a code task)
 
-- Ask the user, then open a merge PR from `feature` into `hotfix/up-speedrun` (or cherry-pick both squash commits). Expect conflicts in the registration area (`coordinator-create.ts`); this work doesn't edit those checks.
+- Ask the user, then sync `develop` into `feature` (a merge PR). Then open a merge PR into `hotfix/up-speedrun`, or cherry-pick the squash commits. Expect conflicts in the registration area (`coordinator-create.ts`); this work doesn't edit those checks.
 - UAT check (ticket "Done when"):
   1. An owner adds themselves, opens "Onboard participants", creates a link, runs an upload, downloads the errors file and sees the counts.
   2. The console works as before.
