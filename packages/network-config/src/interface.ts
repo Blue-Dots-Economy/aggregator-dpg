@@ -392,7 +392,10 @@ export const AggregatorYamlSchema = z.object({
       }),
       organisation: OrganisationConfigSchema.prefault({}),
       voice_bots: z.array(VoiceBotSchema).default([]),
-      /** Domain id to the key of the bot that serves it when a link names none. */
+      /**
+       * Domain id to the key of the bot that serves it when a link names none.
+       * Required for every domain served by two or more bots.
+       */
       default_voice_bots: z.record(z.string(), z.string()).optional(),
     })
     .superRefine((cfg, ctx) => {
@@ -414,6 +417,23 @@ export const AggregatorYamlSchema = z.object({
             code: 'custom',
             path: ['default_voice_bots', domain],
             message: `default_voice_bots.${domain} must name a listed voice bot that serves '${domain}'`,
+          });
+        }
+      }
+      // Links store the bot they resolve to at creation; with two or more bots
+      // and no default, a link created without a choice would have none.
+      const servingCount = new Map<string, number>();
+      for (const bot of cfg.voice_bots) {
+        for (const domain of bot.domains) {
+          servingCount.set(domain, (servingCount.get(domain) ?? 0) + 1);
+        }
+      }
+      for (const [domain, count] of servingCount) {
+        if (count > 1 && cfg.default_voice_bots?.[domain] === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['default_voice_bots', domain],
+            message: `default_voice_bots.${domain} is required: ${count} voice_bots serve '${domain}'`,
           });
         }
       }

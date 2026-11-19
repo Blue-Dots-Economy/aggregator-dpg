@@ -260,13 +260,53 @@ describe('POST /v1/links/create — voice_bot_key', () => {
     expect(r.json().error.code).toBe('INVALID_VOICE_BOT');
   });
 
-  it('stores null and resolves the default when no key is sent', async () => {
+  it('stores the default bot key when no key is sent', async () => {
     await boot(buildVoiceBotConfig(undefined, { seeker: 'a' }));
     const r = await create({ domain: 'seeker', registration_mode: 'voice_or_form' });
     expect(r.statusCode).toBe(201);
-    expect(store.creates[0]!.voiceBotKey).toBeNull();
-    expect(r.json().voice_bot_key).toBeNull();
+    expect(store.creates[0]!.voiceBotKey).toBe('a');
+    expect(r.json().voice_bot_key).toBe('a');
     expect(r.json().voice_bot.key).toBe('a');
+  });
+
+  it('stores the only bot key when one bot serves the domain', async () => {
+    await boot(buildVoiceBotConfig([BOT_A, BOT_P]));
+    const r = await create({ domain: 'seeker', registration_mode: 'voice_or_form' });
+    expect(r.statusCode).toBe(201);
+    expect(store.creates[0]!.voiceBotKey).toBe('a');
+    expect(r.json().voice_bot_key).toBe('a');
+  });
+
+  it('keeps the link on its bot when a second bot is added later as the default', async () => {
+    await boot(buildVoiceBotConfig([BOT_A]));
+    const r = await create({ domain: 'seeker', registration_mode: 'voice_or_form' });
+    expect(r.statusCode).toBe(201);
+    const created = store.creates[0]!;
+    expect(created.voiceBotKey).toBe('a');
+    store.rows.push({
+      id: r.json().link_id,
+      aggregatorId: created.aggregatorId,
+      slug: created.slug,
+      domain: created.domain,
+      context: created.context,
+      registrationMode: 'voice_or_form',
+      voiceBotKey: created.voiceBotKey ?? null,
+      qrObjectKey: null,
+      status: 'draft',
+      expiresAt: null,
+      createdBy: created.createdBy,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    _setNetworkConfig(buildVoiceBotConfig([BOT_A, BOT_B], { seeker: 'b' }));
+    const read = await app.inject({
+      method: 'GET',
+      url: `/v1/links/${r.json().link_id}`,
+      headers: { authorization: `Bearer ${AUTH_TOKEN}` },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().voice_bot.key).toBe('a');
+    expect(read.json().voice_bot.phone).toBe(BOT_A.phone);
   });
 
   it('requires a key when several bots serve the domain and none is the default', async () => {

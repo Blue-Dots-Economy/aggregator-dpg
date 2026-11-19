@@ -109,7 +109,8 @@ const CreateLinkBodySchema = z.object({
     .optional(),
   /**
    * Voice bot callers dial for this link. Only for modes that offer voice; omit it
-   * to follow the domain's default bot. Cannot be changed after creation.
+   * to take the domain's default (or only) bot, which is stored on the link.
+   * Cannot be changed after creation.
    */
   voice_bot_key: z
     .string()
@@ -825,7 +826,8 @@ function toVoiceBotResponse(bot: VoiceBot): z.infer<typeof VoiceBotResponseSchem
  * @param modeKey - The resolved registration mode.
  * @param domain - The link's domain.
  * @param cfg - The resolved network config.
- * @returns The key to store: the chosen one, or `null` to follow the domain default.
+ * @returns The key to store: the chosen one, else the domain's default or only bot,
+ *   or `null` only when no bot serves the domain.
  * @throws SCHEMA_VALIDATION when the mode does not offer voice and a key was sent.
  * @throws INVALID_VOICE_BOT when the key is unknown or serves another domain.
  * @throws VOICE_BOT_REQUIRED when several bots serve the domain and none is the default.
@@ -855,12 +857,15 @@ function checkVoiceBotChoice(
     }
     return requested;
   }
-  if (serving.length > 1 && resolveDefaultVoiceBot(domain, cfg) === null) {
+  // Store the bot the link resolves to now, not `null`: a later second bot or a
+  // changed default must not move or drop the voice option on a live link.
+  const resolved = resolveDefaultVoiceBot(domain, cfg);
+  if (serving.length > 1 && resolved === null) {
     throw httpError('VOICE_BOT_REQUIRED', {
       fields: { configured: serving.map((b) => b.key) },
     });
   }
-  return null;
+  return resolved?.key ?? null;
 }
 
 /**
