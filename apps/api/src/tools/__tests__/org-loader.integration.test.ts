@@ -244,7 +244,7 @@ suite('org-loader (Postgres)', () => {
     async () => {
       const { code, rows } = await apply(ORGS, COORDINATORS);
       expect(code).toBe(0);
-      expect(rows.map((r) => r.outcome)).toEqual(Array(5).fill('already_loaded'));
+      expect(rows.map((r) => r.outcome)).toEqual(Array.from({ length: 5 }, () => 'already_loaded'));
       expect(await v1()).toBe(0);
     },
     TIMEOUT_MS,

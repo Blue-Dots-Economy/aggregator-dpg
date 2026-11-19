@@ -116,7 +116,7 @@ function normaliseHeader(raw: string): string {
  * a quoted cell containing a newline shifts later lines (known limitation).
  */
 function parseFile(text: string): ParsedFile {
-  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const body = text.codePointAt(0) === 0xfeff ? text.slice(1) : text;
   const result = Papa.parse<Record<string, string>>(body, {
     header: true,
     delimiter: ',',
@@ -173,6 +173,42 @@ function missingColumns(
     .map((field) => ({ file, line: 1, code: INPUT_PROBLEM.MISSING_COLUMN, field }));
 }
 
+/** REQUIRED problems for a row's empty required cells, skipping columns the header lacks. */
+function requiredProblems(
+  file: InputProblem['file'],
+  line: number,
+  cells: Record<string, string>,
+  columns: Set<string>,
+  required: readonly string[],
+): InputProblem[] {
+  return required
+    .filter((field) => columns.has(field) && cells[field] === undefined)
+    .map((field) => ({ file, line, code: INPUT_PROBLEM.REQUIRED, field }));
+}
+
+/** An `orgs.csv` row from its cells; columns outside `known` go to `extra`. */
+function orgRowOf(line: number, cells: Record<string, string>, known: Set<string>): OrgRow {
+  const address: Partial<Record<AddressPart, string>> = {};
+  for (const part of ADDRESS_PARTS) {
+    const v = cells[ADDRESS_PREFIX + part];
+    if (v !== undefined) address[part] = v;
+  }
+  const extra: Record<string, string> = {};
+  for (const [k, v] of Object.entries(cells)) if (!known.has(k)) extra[k] = v;
+  return {
+    line,
+    name: cell(cells, 'name'),
+    parent: cells['parent'] ?? null,
+    owner: {
+      name: cell(cells, 'owner_name'),
+      email: cell(cells, 'owner_email').toLowerCase(),
+      phone: cell(cells, 'owner_phone'),
+    },
+    extra,
+    address,
+  };
+}
+
 /**
  * Parse `orgs.csv`.
  *
@@ -195,30 +231,8 @@ export function parseOrgsCsv(text: string): {
     ...ADDRESS_PARTS.map((p) => ADDRESS_PREFIX + p),
   ]);
   for (const { line, cells } of records) {
-    for (const field of ORG_REQUIRED) {
-      if (columns.has(field) && cells[field] === undefined) {
-        problems.push({ file: 'orgs', line, code: INPUT_PROBLEM.REQUIRED, field });
-      }
-    }
-    const address: Partial<Record<AddressPart, string>> = {};
-    for (const part of ADDRESS_PARTS) {
-      const v = cells[ADDRESS_PREFIX + part];
-      if (v !== undefined) address[part] = v;
-    }
-    const extra: Record<string, string> = {};
-    for (const [k, v] of Object.entries(cells)) if (!known.has(k)) extra[k] = v;
-    rows.push({
-      line,
-      name: cell(cells, 'name'),
-      parent: cells['parent'] ?? null,
-      owner: {
-        name: cell(cells, 'owner_name'),
-        email: cell(cells, 'owner_email').toLowerCase(),
-        phone: cell(cells, 'owner_phone'),
-      },
-      extra,
-      address,
-    });
+    problems.push(...requiredProblems('orgs', line, cells, columns, ORG_REQUIRED));
+    rows.push(orgRowOf(line, cells, known));
   }
   return { rows, problems, columns: [...columns] };
 }
@@ -237,11 +251,7 @@ export function parseCoordinatorsCsv(text: string): {
   const rows: CoordinatorRow[] = [];
   const known = new Set<string>(COORD_REQUIRED);
   for (const { line, cells } of records) {
-    for (const field of COORD_REQUIRED) {
-      if (columns.has(field) && cells[field] === undefined) {
-        problems.push({ file: 'coordinators', line, code: INPUT_PROBLEM.REQUIRED, field });
-      }
-    }
+    problems.push(...requiredProblems('coordinators', line, cells, columns, COORD_REQUIRED));
     const extra: Record<string, string> = {};
     for (const [k, v] of Object.entries(cells)) if (!known.has(k)) extra[k] = v;
     rows.push({

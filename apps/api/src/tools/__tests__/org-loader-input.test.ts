@@ -53,7 +53,7 @@ describe('parseOrgsCsv', () => {
 
   it('gives identical rows for BOM, CRLF and trailing blank line', () => {
     const plain = parseOrgsCsv(ORGS);
-    const messy = parseOrgsCsv('﻿' + ORGS.replace(/\n/g, '\r\n') + '\r\n\r\n');
+    const messy = parseOrgsCsv('﻿' + ORGS.replaceAll('\n', '\r\n') + '\r\n\r\n');
     expect(messy).toEqual(plain);
   });
 
@@ -108,7 +108,7 @@ describe('parseCoordinatorsCsv', () => {
   });
 
   it('gives identical rows for BOM, CRLF and trailing blank line', () => {
-    const messy = parseCoordinatorsCsv('﻿' + COORDS.replace(/\n/g, '\r\n') + '\r\n\r\n');
+    const messy = parseCoordinatorsCsv('﻿' + COORDS.replaceAll('\n', '\r\n') + '\r\n\r\n');
     expect(messy).toEqual(parseCoordinatorsCsv(COORDS));
   });
 

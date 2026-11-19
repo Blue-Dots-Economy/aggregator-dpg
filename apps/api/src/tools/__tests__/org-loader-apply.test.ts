@@ -28,6 +28,9 @@ vi.hoisted(() => {
 });
 
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
+/** Sorts ids as text; a missing id sorts as ''. */
+const byText = (a: string | null | undefined, b: string | null | undefined): number =>
+  (a ?? '').localeCompare(b ?? '');
 const ROOT = '00000000-0000-4000-8000-000000000001';
 const OPERATOR = 'ops';
 const PROVISIONED = 'provisioned:ops';
@@ -228,7 +231,9 @@ describe('applyLoadPlan: a fresh load', () => {
     expect(owner.enabled).toBe(true);
     expect(owner.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
     expect(idp.rolesOf(owner.id)).toContain(OWNER_ROLE);
-    expect(idp.groupsOf(owner.id).sort()).toEqual([top?.kcGroupId, child?.kcGroupId].sort());
+    expect(idp.groupsOf(owner.id).sort(byText)).toEqual(
+      [top?.kcGroupId, child?.kcGroupId].sort(byText),
+    );
 
     const asha = await coordinatorByEmail('asha@alpha.org');
     const bina = await coordinatorByEmail('bina@alpha.org');
@@ -584,7 +589,11 @@ describe('applyLoadPlan: owner access', () => {
     const lines: string[] = [];
     const captured = pino(
       { level: 'info' },
-      { write: (line: string) => void lines.push(line) },
+      {
+        write: (line: string) => {
+          lines.push(line);
+        },
+      },
     ) as unknown as FastifyBaseLogger;
     const rerun = await applyLoadPlan(p, { operator: OPERATOR, log: captured });
     expect(outcomes(rerun.rows)).toEqual(['org:Top:already_loaded']);
@@ -624,7 +633,11 @@ describe('applyLoadPlan: logs', () => {
     const lines: string[] = [];
     const captured = pino(
       { level: 'info' },
-      { write: (line: string) => void lines.push(line) },
+      {
+        write: (line: string) => {
+          lines.push(line);
+        },
+      },
     ) as unknown as FastifyBaseLogger;
     const rows = treeRows();
     idp.failFor = 'bina@alpha.org';

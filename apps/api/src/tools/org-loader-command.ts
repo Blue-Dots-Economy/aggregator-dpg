@@ -244,9 +244,8 @@ async function plan(input: LoadInput, say: Say): Promise<LoadPlan | null> {
   } catch (err: unknown) {
     if (!(err instanceof UpstreamError)) throw err;
     const operation = err.details?.['operation'];
-    say(
-      `PLAN FAILED: ${err.code}${typeof operation === 'string' ? ` (${operation})` : ''} — nothing was written`,
-    );
+    const where = typeof operation === 'string' ? ` (${operation})` : '';
+    say(`PLAN FAILED: ${err.code}${where} — nothing was written`);
     return null;
   }
 }
@@ -268,7 +267,8 @@ function printProblems(
   say: Say,
 ): void {
   for (const p of problems) {
-    say(`${labels[p.file]}:${p.line} ${p.code}${p.field ? ` ${p.field}` : ''}`);
+    const field = p.field ? ` ${p.field}` : '';
+    say(`${labels[p.file]}:${p.line} ${p.code}${field}`);
   }
 }
 
@@ -290,6 +290,30 @@ function printPlanCounts(p: LoadPlan, say: Say): void {
   say(`  coordinators: ${byAction(p.coordinators.map((c) => c.action))}`);
 }
 
+/**
+ * Reads and checks `apply`'s `--operator` and `--report` flags.
+ *
+ * @throws {UsageError} When the operator is missing or invalid, or the report file already exists.
+ */
+function applyOptions(
+  flags: ReadonlyMap<string, string>,
+  reportToStdout: boolean,
+): { operator: string; reportFile: string } {
+  const operator = flags.get('--operator') ?? '';
+  if (!operator) throw new UsageError('apply needs --operator <name>');
+  try {
+    provisionedBy(operator);
+  } catch (err: unknown) {
+    if (err instanceof ValidationError) throw new UsageError(`--operator: ${err.message}`);
+    throw err;
+  }
+  const reportFile = flags.get('--report') ?? STDIO;
+  if (!reportToStdout && existsSync(reportFile)) {
+    throw new UsageError(`report file ${reportFile} already exists`);
+  }
+  return { operator, reportFile };
+}
+
 /** `check` and `apply`. */
 async function checkOrApply(
   command: 'check' | 'apply',
@@ -303,26 +327,13 @@ async function checkOrApply(
   const reportToStdout = command === 'apply' && (flags.get('--report') ?? STDIO) === STDIO;
   const say: Say = (line) => (reportToStdout ? io.writeStderr : io.writeStdout)(`${line}\n`);
 
-  let operator = '';
-  let reportFile = '';
-  if (command === 'apply') {
-    operator = flags.get('--operator') ?? '';
-    if (!operator) throw new UsageError('apply needs --operator <name>');
-    try {
-      provisionedBy(operator);
-    } catch (err: unknown) {
-      if (err instanceof ValidationError) throw new UsageError(`--operator: ${err.message}`);
-      throw err;
-    }
-    reportFile = flags.get('--report') ?? STDIO;
-    if (!reportToStdout && existsSync(reportFile)) {
-      throw new UsageError(`report file ${reportFile} already exists`);
-    }
-  }
+  const { operator, reportFile } =
+    command === 'apply' ? applyOptions(flags, reportToStdout) : { operator: '', reportFile: '' };
   const input = await loadInput(orgs, coordinators, io);
   const labels = inputLabels(orgs, coordinators);
 
-  say(`org-loader ${command}${operator ? ` as ${provisionedBy(operator)}` : ''}`);
+  const actor = operator ? ` as ${provisionedBy(operator)}` : '';
+  say(`org-loader ${command}${actor}`);
   say(`  rows: orgs=${input.orgs.length} coordinators=${input.coordinators.length}`);
   const p = await plan(input, say);
   if (!p) return EXIT.FAILED;

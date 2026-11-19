@@ -23,8 +23,7 @@ import {
 } from './org-loader-apply-shared.js';
 import type { LoadPlan } from './org-loader-plan-shared.js';
 
-export { APPLY_ERROR };
-export type { RowOutcome };
+export { APPLY_ERROR, type RowOutcome } from './org-loader-apply-shared.js';
 
 /** One row of the operator's report. May hold name and email; never log it. */
 export interface ReportRow extends RowIds {
