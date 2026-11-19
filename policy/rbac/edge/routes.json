@@ -234,6 +234,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/user/consent/status",
+      "access": {
+        "access": "signed_in"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/user/invite/read",
       "access": {
         "access": "service"

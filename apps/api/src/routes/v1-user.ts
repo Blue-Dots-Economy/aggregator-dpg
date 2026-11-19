@@ -2,6 +2,7 @@
  * Console user routes `/v1/user/*` of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET   /v1/user/read/me               the signed-in actor (web routing)
+ *   GET   /v1/user/consent/status        whether the caller still has to accept the current terms
  *   GET   /v1/user/read/:id              one coordinator within reach
  *   POST  /v1/user/search                coordinators within reach, keyset paged
  *   POST  /v1/user/invite                invite coordinators into an org
@@ -9,8 +10,8 @@
  *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
- * Every handler calls `requireActor` first. Only `read/me` admits a
- * coordinator; the rest are for org owners (their orgs) and the network admin
+ * Every handler calls `requireActor` first. Only `read/me` and
+ * `consent/status` admit a coordinator; the rest are for org owners (their orgs) and the network admin
  * (every org). A target out of reach answers 404 (`services/authz/scope.ts`).
  * Single reads are audit-logged.
  */
@@ -77,6 +78,17 @@ import {
 } from '../services/authz/index.js';
 import { getRbacRuntime } from '../services/authz/runtime.js';
 import { getRoleStore } from '../services/role-store/index.js';
+import { getConsentStatus } from '../services/consent-status.js';
+
+/** `GET /v1/user/consent/status` response. No personal data. */
+const ConsentStatusResponseSchema = z.object({
+  outstanding: z.boolean(),
+  audience: z.enum(['aggregator', 'org']),
+  terms_version: z.number().int(),
+  privacy_version: z.number().int(),
+  /** Owned orgs still to accept; empty for a coordinator. */
+  org_ids: z.array(z.string()),
+});
 
 const IdParamsSchema = z.object({ id: z.guid() });
 
@@ -390,6 +402,38 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
     async (req, reply) => {
       const { actor } = await requireActor(req, { allowCoordinator: true });
       return reply.status(200).send(await meOf(req, actor));
+    },
+  );
+
+  app.get(
+    '/v1/user/consent/status',
+    {
+      config: { rbac: { access: 'signed_in' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Whether the signed-in user still has to accept the current terms',
+        description:
+          'A coordinator accepts for itself; an org owner accepts for each org it owns, other than the root and the Default org. `org_ids` lists the owned orgs still to accept.',
+        response: { 200: ConsentStatusResponseSchema, ...errorResponses(401, 403, 500, 503) },
+      },
+    },
+    async (req, reply) => {
+      const { actor } = await requireActor(req, { allowCoordinator: true });
+      const status = await getConsentStatus(actor);
+      if (!status.success) {
+        throw httpError(status.error.code === 'DB_UNAVAILABLE' ? 'DB_UNAVAILABLE' : 'INTERNAL', {
+          cause: status.error,
+          fields: { sub_operation: 'consentStatus.read' },
+        });
+      }
+      const s = status.value;
+      return reply.status(200).send({
+        outstanding: s.outstanding,
+        audience: s.audience,
+        terms_version: s.termsVersion,
+        privacy_version: s.privacyVersion,
+        org_ids: s.outstandingOrgIds,
+      });
     },
   );
 
