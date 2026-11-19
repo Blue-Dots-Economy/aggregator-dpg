@@ -274,6 +274,24 @@ export async function validateOrgUpdate(changes: JsonRecord): Promise<OrgFieldsR
 }
 
 /**
+ * Names the schema's own fields whose type is `array`.
+ *
+ * Lets a caller that reads text (the org loader's CSV) turn those cells into lists.
+ *
+ * @throws {Error} If no org-registration schema can be found.
+ */
+export async function orgArrayFields(): Promise<ReadonlySet<string>> {
+  const c = await compiled();
+  const properties = isRecord(c.schema['properties']) ? c.schema['properties'] : {};
+  return new Set(
+    [...c.fields].filter((key) => {
+      const prop = properties[key];
+      return isRecord(prop) && prop['type'] === 'array';
+    }),
+  );
+}
+
+/**
  * Test-only; clears the compiled schema so the next call recompiles.
  */
 export function _resetOrgSchemaValidator(): void {

@@ -78,11 +78,14 @@ async function resolveCoordinatorOrg(
   ref: PlannedCoordinator['orgRef'];
   displayName: string;
   orgId: string | null;
+  /** The org's row in the file has a problem. */
+  blocked: boolean;
 } | null> {
   const key = nameKey(row.org);
   const inFile = ctx.fileOrgs.get(key);
   if (inFile) {
     return {
+      blocked: ctx.problems.isBlocked('orgs', inFile.line),
       ref: { kind: 'planned', name: inFile.name },
       displayName: inFile.name,
       orgId: ctx.planned.get(key)?.existingOrgId ?? null,
@@ -98,6 +101,7 @@ async function resolveCoordinatorOrg(
     return null;
   }
   return {
+    blocked: false,
     ref: { kind: 'existing', orgId: existing.id },
     displayName: existing.displayName,
     orgId: existing.id,
@@ -167,6 +171,10 @@ export async function planCoordinator(
   const base = { row, orgRef: org.ref, body, contact: checked.contact, domains: checked.domains };
   const existing = await checkCoordinatorContact(row, phoneE164, org.orgId, problems);
   if (existing === false) return null;
+  if (org.blocked) {
+    problems.coordinator(row.line, PLAN_PROBLEM.ORG_BLOCKED, 'org');
+    return null;
+  }
   if (existing === null) return { ...base, action: 'create' };
   return {
     ...base,

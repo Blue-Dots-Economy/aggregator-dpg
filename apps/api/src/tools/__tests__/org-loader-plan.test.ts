@@ -9,6 +9,7 @@ import {
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../../services/idp-admin/index.js';
 import { _setNetworkConfig } from '../../services/network-config.js';
+import { _resetOrgSchemaValidator } from '../../services/org-schema-validator.js';
 import type { CoordinatorRow, InputProblem, OrgRow } from '../org-loader-input.js';
 import { INPUT_PROBLEM } from '../org-loader-input.js';
 import { PLAN_PROBLEM, buildLoadPlan, type LoadPlan } from '../org-loader-plan.js';
@@ -143,12 +144,29 @@ describe('buildLoadPlan: ordering and forms', () => {
     expect(plan.orgs).toHaveLength(2);
   });
 
+  it('links a new owner shared by two rows: first new, later planned', async () => {
+    const child = orgRow({ name: 'Child', parent: 'Top' });
+    const top = orgRow({ name: 'Top' });
+    const plan = await buildLoadPlan({ orgs: [child, top], coordinators: [] });
+    expect(plan.problems).toEqual([]);
+    expect(plan.orgs.map((o) => [o.row.name, o.ownerRef])).toEqual([
+      ['Top', { kind: 'new' }],
+      ['Child', { kind: 'planned', line: top.line }],
+    ]);
+  });
+
   it('passes input problems through and does not plan those rows', async () => {
     const broken = orgRow({
       name: 'Parent',
       owner: { name: '', email: 'p@x.org', phone: '9876500009' },
     });
     const child = orgRow({ name: 'Child', parent: 'Parent' });
+    const grandchild = orgRow({ name: 'Grandchild', parent: 'Child' });
+    const other = orgRow({
+      name: 'Other',
+      owner: { name: 'Olga', email: 'olga@x.org', phone: '9876500010' },
+    });
+    const coord = coordRow({ org: 'Parent' });
     const inputProblem: InputProblem = {
       file: 'orgs',
       line: broken.line,
@@ -156,12 +174,17 @@ describe('buildLoadPlan: ordering and forms', () => {
       field: 'owner_name',
     };
     const plan = await buildLoadPlan({
-      orgs: [broken, child],
-      coordinators: [coordRow({ org: 'Parent' })],
+      orgs: [grandchild, broken, child, other],
+      coordinators: [coord],
       inputProblems: [inputProblem],
     });
-    expect(plan.problems).toEqual([inputProblem]);
-    expect(plan.orgs.map((o) => o.row.name)).toEqual(['Child']);
+    expect(plan.problems).toEqual([
+      inputProblem,
+      { file: 'orgs', line: child.line, code: PLAN_PROBLEM.PARENT_BLOCKED, field: 'parent' },
+      { file: 'orgs', line: grandchild.line, code: PLAN_PROBLEM.PARENT_BLOCKED, field: 'parent' },
+      { file: 'coordinators', line: coord.line, code: PLAN_PROBLEM.ORG_BLOCKED, field: 'org' },
+    ]);
+    expect(plan.orgs.map((o) => o.row.name)).toEqual(['Other']);
   });
 });
 
@@ -242,7 +265,7 @@ describe('buildLoadPlan: parents', () => {
     expect(plan.orgs[0]?.parentRef).toEqual({ kind: 'existing', orgId: 'p-1' });
   });
 
-  it('PARENT_CYCLE on every row of the cycle, not on rows below it', async () => {
+  it('PARENT_CYCLE on every row of the cycle, PARENT_BLOCKED below it', async () => {
     const a = orgRow({ name: 'A', parent: 'B' });
     const b = orgRow({
       name: 'B',
@@ -263,7 +286,7 @@ describe('buildLoadPlan: parents', () => {
     expect(codesAt(plan, 'orgs', a.line)).toEqual([PLAN_PROBLEM.PARENT_CYCLE]);
     expect(codesAt(plan, 'orgs', b.line)).toEqual([PLAN_PROBLEM.PARENT_CYCLE]);
     expect(codesAt(plan, 'orgs', self.line)).toEqual([PLAN_PROBLEM.PARENT_CYCLE]);
-    expect(codesAt(plan, 'orgs', c.line)).toEqual([]);
+    expect(codesAt(plan, 'orgs', c.line)).toEqual([PLAN_PROBLEM.PARENT_BLOCKED]);
     expect(plan.orgs).toEqual([]);
   });
 
@@ -354,7 +377,7 @@ describe('buildLoadPlan: against existing data', () => {
     expect(plan.orgs[0]).toMatchObject({
       action: 'resume',
       existingOrgId: 'o-1',
-      existingOwnerKcSub: kcSub,
+      ownerRef: { kind: 'existing', kcSub },
     });
   });
 
@@ -378,7 +401,10 @@ describe('buildLoadPlan: against existing data', () => {
     const { kcSub } = await seedOwnerOrg();
     const plan = await buildLoadPlan({ orgs: [orgRow()], coordinators: [] });
     expect(plan.problems).toEqual([]);
-    expect(plan.orgs[0]).toMatchObject({ action: 'create', existingOwnerKcSub: kcSub });
+    expect(plan.orgs[0]).toMatchObject({
+      action: 'create',
+      ownerRef: { kind: 'existing', kcSub },
+    });
   });
 
   it('OWNER_LOGIN_MISSING when the existing owner has no Keycloak user', async () => {
@@ -517,6 +543,49 @@ describe('buildLoadPlan: against existing data', () => {
         field: 'profile_types',
       },
       { file: 'coordinators', line: d.line, code: PLAN_PROBLEM.INVALID_PHONE, field: 'phone' },
+    ]);
+  });
+});
+
+describe('buildLoadPlan: array-typed org fields (blue_dot/up-gzb schema)', () => {
+  const upGzbExtra = { organisation_type: 'educational', management_type: 'private' };
+
+  beforeEach(() => {
+    vi.stubEnv('AGGREGATOR_NETWORK', 'blue_dot');
+    vi.stubEnv('AGGREGATOR_BRAND', 'up-gzb');
+    _resetOrgSchemaValidator();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    _resetOrgSchemaValidator();
+  });
+
+  it('splits a required array cell on ";"', async () => {
+    const row = orgRow({ extra: { ...upGzbExtra, aggregator_type: ' seeker ; provider;' } });
+    const plan = await buildLoadPlan({ orgs: [row], coordinators: [] });
+    expect(plan.problems).toEqual([]);
+    expect(plan.orgs[0]?.form['aggregator_type']).toEqual(['seeker', 'provider']);
+    expect(plan.orgs[0]?.schemaValues['aggregator_type']).toEqual(['seeker', 'provider']);
+  });
+
+  it('refuses an empty or missing required array cell', async () => {
+    const blank = orgRow({ name: 'A', extra: { ...upGzbExtra, aggregator_type: ' ; ' } });
+    const missing = orgRow({ name: 'B', extra: upGzbExtra });
+    const plan = await buildLoadPlan({ orgs: [blank, missing], coordinators: [] });
+    expect(plan.problems).toEqual([
+      {
+        file: 'orgs',
+        line: blank.line,
+        code: PLAN_PROBLEM.SCHEMA_VALIDATION,
+        field: 'aggregator_type',
+      },
+      {
+        file: 'orgs',
+        line: missing.line,
+        code: PLAN_PROBLEM.SCHEMA_VALIDATION,
+        field: 'aggregator_type',
+      },
     ]);
   });
 });

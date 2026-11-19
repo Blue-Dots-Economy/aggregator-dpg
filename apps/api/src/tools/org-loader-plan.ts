@@ -14,6 +14,7 @@ import { treeRules } from '../services/known-as.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { isProvisioned } from '../services/provisioned.js';
+import { orgArrayFields } from '../services/org-schema-validator.js';
 import {
   checkOrgForm,
   findOwnerContactClash,
@@ -134,11 +135,15 @@ export async function buildLoadPlan(input: {
     if (row) problems.org(row.line, PLAN_PROBLEM.TREE_LIMIT, limit);
   }
 
-  const orgs = order.flatMap((key) => {
-    const p = candidates.get(key);
-    return p && !problems.isBlocked('orgs', p.row.line) ? [p] : [];
-  });
-  for (const p of orgs) ctx.planned.set(nameKey(p.row.name), p);
+  reportBlockedChildren(ctx);
+
+  const orgs = linkNewOwners(
+    order.flatMap((key) => {
+      const p = candidates.get(key);
+      return p && !problems.isBlocked('orgs', p.row.line) ? [p] : [];
+    }),
+  );
+  for (const [key, p] of candidates) ctx.planned.set(key, p);
 
   const coordinators: PlannedCoordinator[] = [];
   for (const row of input.coordinators) {
@@ -229,10 +234,70 @@ async function resolveParent(row: OrgRow, ctx: PlanContext): Promise<ResolvedPar
   return null;
 }
 
-/** The org form for a row: its extra fields, then the fixed parts. */
-function orgFormOf(row: OrgRow, phoneE164: string): OrgForm {
+/**
+ * Reports PARENT_BLOCKED on every org row below a file row that has a problem, at any depth.
+ */
+function reportBlockedChildren(ctx: PlanContext): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of ctx.fileOrgs.values()) {
+      if (row.parent === null || ctx.problems.isBlocked('orgs', row.line)) continue;
+      const parent = ctx.fileOrgs.get(nameKey(row.parent));
+      if (parent && ctx.problems.isBlocked('orgs', parent.line)) {
+        ctx.problems.org(row.line, PLAN_PROBLEM.PARENT_BLOCKED, 'parent');
+        changed = true;
+      }
+    }
+  }
+}
+
+/**
+ * Links rows that share a new owner: the first in apply order keeps `new`, later ones point at its line.
+ *
+ * @param orgs - The planned orgs, in apply order.
+ * @returns The same orgs with `ownerRef` linked.
+ */
+function linkNewOwners(orgs: PlannedOrg[]): PlannedOrg[] {
+  const firstLine = new Map<string, number>();
+  return orgs.map((p) => {
+    if (p.ownerRef.kind !== 'new') return p;
+    const line = firstLine.get(p.row.owner.email);
+    if (line === undefined) {
+      firstLine.set(p.row.owner.email, p.row.line);
+      return p;
+    }
+    return { ...p, ownerRef: { kind: 'planned', line } };
+  });
+}
+
+/**
+ * Turns the cells of array-typed schema fields into lists: split on `;`, trimmed, empties dropped.
+ *
+ * @param extra - The row's extra cells.
+ * @param arrayFields - The schema's array-typed fields.
+ */
+function coerceExtras(
+  extra: Readonly<Record<string, string>>,
+  arrayFields: ReadonlySet<string>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(extra).map(([key, value]) => [
+      key,
+      arrayFields.has(key)
+        ? value
+            .split(';')
+            .map((v) => v.trim())
+            .filter((v) => v !== '')
+        : value,
+    ]),
+  );
+}
+
+/** The org form for a row: its extra fields (already coerced), then the fixed parts. */
+function orgFormOf(row: OrgRow, extra: Record<string, unknown>, phoneE164: string): OrgForm {
   return {
-    ...row.extra,
+    ...extra,
     display_name: row.name,
     owner: { name: row.owner.name, email: row.owner.email, phone: phoneE164 },
     ...(Object.keys(row.address).length > 0 ? { address: row.address } : {}),
@@ -259,9 +324,10 @@ async function planOrg(
     problems.org(row.line, PLAN_PROBLEM.INVALID_PHONE, 'owner_phone');
     return null;
   }
-  const form = orgFormOf(row, phoneE164);
+  let form: OrgForm;
   let schemaValues: Record<string, unknown>;
   try {
+    form = orgFormOf(row, coerceExtras(row.extra, await orgArrayFields()), phoneE164);
     const checked = await checkOrgForm(form);
     if (!checked.ok) {
       if (checked.error.code === 'INVALID_PHONE') {
@@ -304,7 +370,9 @@ async function planOrg(
         ...base,
         action,
         existingOrgId: existing.id,
-        ...(existing.ownerKcSub ? { existingOwnerKcSub: existing.ownerKcSub } : {}),
+        ownerRef: existing.ownerKcSub
+          ? { kind: 'existing', kcSub: existing.ownerKcSub }
+          : { kind: 'new' },
       },
       existingOrgId: existing.id,
       existingDepth: existing.depth,
@@ -317,7 +385,7 @@ async function planOrg(
     org: {
       ...base,
       action: 'create',
-      ...(owner.kcSub ? { existingOwnerKcSub: owner.kcSub } : {}),
+      ownerRef: owner.kcSub ? { kind: 'existing', kcSub: owner.kcSub } : { kind: 'new' },
     },
     existingDepth: 0,
   };

@@ -34,6 +34,10 @@ export const PLAN_PROBLEM = {
   COORDINATOR_EXISTS_ELSEWHERE: 'COORDINATOR_EXISTS_ELSEWHERE',
   SCHEMA_VALIDATION: 'SCHEMA_VALIDATION',
   INVALID_PHONE: 'INVALID_PHONE',
+  /** The org's parent row in the file has a problem, so this org cannot be loaded. */
+  PARENT_BLOCKED: 'PARENT_BLOCKED',
+  /** The coordinator's org row in the file has a problem, so the coordinator cannot be loaded. */
+  ORG_BLOCKED: 'ORG_BLOCKED',
   /** A form check threw (for example an unreadable schema). */
   CHECK_FAILED: 'CHECK_FAILED',
 } as const;
@@ -53,8 +57,13 @@ export interface PlannedOrg {
   /** `planned` names another org of the plan, which comes earlier in `orgs`. */
   parentRef:
     { kind: 'root' } | { kind: 'existing'; orgId: string } | { kind: 'planned'; name: string };
-  /** The owner's Keycloak user to reuse; absent when apply creates one. */
-  existingOwnerKcSub?: string;
+  /**
+   * The owner's Keycloak user. `existing`: reuse that user. `new`: apply creates
+   * the user, once. `planned`: the owner is the `new` owner of the org row at
+   * `line`, earlier in `orgs`; apply reuses the user it created there.
+   */
+  ownerRef:
+    { kind: 'existing'; kcSub: string } | { kind: 'new' } | { kind: 'planned'; line: number };
   form: OrgForm;
   schemaValues: Record<string, unknown>;
   phoneE164: string;
@@ -201,7 +210,7 @@ export interface PlanContext {
   root: Organisation;
   /** File orgs by name key: the first row with that name. */
   fileOrgs: Map<string, OrgRow>;
-  /** Planned orgs by name key, filled once org checks have run. */
+  /** Orgs that passed their own checks, by name key; filled once org checks have run. */
   planned: Map<string, PlannedOrg>;
 }
 
