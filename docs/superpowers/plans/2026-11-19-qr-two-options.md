@@ -113,7 +113,7 @@
   - `voice_or_form` + `'a'` on seeker → 201, response `voice_bot_key: 'a'`, `voice_bot.phone` = a's phone
   - `voice_or_form` + `'zzz'` → 400 `INVALID_VOICE_BOT`, `fields.configured` = `['a','b']`
   - `voice_or_form` + `'p'` on seeker → 400 `INVALID_VOICE_BOT`
-  - `voice_or_form`, no key, `default_voice_bots.seeker = 'a'` → 201, stored `null`, response `voice_bot.key = 'a'`
+  - `voice_or_form`, no key, `default_voice_bots.seeker = 'a'` → 201, stored `'a'`, response `voice_bot.key = 'a'`
   - `voice_or_form`, no key, two seeker bots, no default → 400 `VOICE_BOT_REQUIRED`
   - `voice_or_form`, no key, `voice_bots: []` → 201, `voice_bot: null`
   - `PATCH /v1/links/:id` with `voice_bot_key` → 400 (unknown key), unchanged behaviour
@@ -207,7 +207,7 @@
 **Interfaces:**
 
 - Consumes: `listVoiceBots`, `cfg.registration_modes[key].offers` (already passed through by the `{ ...mode }` spread in `apps/api/src/routes/aggregator-config.ts:194-201`; add `offers` to the web's config Zod schema if it strips unknown keys).
-- Produces: `VoiceBotPicker({ domain, value, onChange }: { domain: string; value: string | null; onChange: (key: string | null) => void })`. `null` = "follow the default" (sent as no `voice_bot_key`).
+- Produces: `VoiceBotPicker({ domain, value, onChange }: { domain: string; value: string | null; onChange: (key: string | null) => void })`. `null` = nothing picked yet (sent as no `voice_bot_key`; the API stores the default's key). A pick, the default included, reports its key.
 
 - [ ] **Step 1: Failing tests:**
   - default mode is `voice_or_form` when declared, else `form` (existing fallback)

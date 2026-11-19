@@ -71,7 +71,7 @@ aggregator:
 
 - `VoiceBotSchema`: `key`, `display_name`, `phone`, `languages: string[] (min 1)`, `domains: string[] (min 1)`, `description?`. `voice_bots` defaults to `[]`; `default_voice_bots` is an optional `record<domain, key>`.
 - A bot serves only the domains it lists; today each UP bot serves one. Every rule below (default, picker, create check, fallback) considers only bots whose `domains` include the link's domain.
-- Load-time checks (refine on the root schema, so a bad config fails at boot): keys unique; each `default_voice_bots` entry names a listed bot that serves that domain; `phone` passes the shared `normalisePhone`. Once the network resolves, a bot `domains` entry or `default_voice_bots` key that is not a network domain id fails boot, like an unknown domain elsewhere in config.
+- Load-time checks (refine on the root schema, so a bad config fails at boot): keys unique; each `default_voice_bots` entry names a listed bot that serves that domain; every domain served by two or more bots has a `default_voice_bots` entry; `phone` passes the shared `normalisePhone`. Once the network resolves, a bot `domains` entry or `default_voice_bots` key that is not a network domain id fails boot, like an unknown domain elsewhere in config.
 - `RegistrationModeSchema` gains optional `offers: ('voice' | 'form')[]` (min 1, unique). Absent means today's behaviour, so `voice` and `form` entries need no edit. `submission_shape` stays and describes the `form` path of a mode that offers it.
 - **Effective default bot for a domain** (one shared helper, `resolveDefaultVoiceBot(domain, cfg)`): `default_voice_bots[domain]` if set; else the only bot serving that domain when exactly one does; else none.
 - Config is read once at startup. A number change is a config edit plus the instance's normal rollout/restart; URLs and QRs do not change.
@@ -92,11 +92,11 @@ Body gains optional `voice_bot_key` (snake_case regex). After the existing mode 
 | no                 | no                                                           | stored `null`                                                                          |
 | yes                | a configured key serving the link's domain                   | stored                                                                                 |
 | yes                | an unknown key, or one that does not serve the link's domain | 400 `INVALID_VOICE_BOT`, `fields.configured` lists the keys serving that domain        |
-| yes                | no, the domain has an effective default                      | stored `null`; the link follows the default                                            |
-| yes                | no, several bots serve the domain and none is its default    | 400 `VOICE_BOT_REQUIRED`                                                               |
+| yes                | no, the domain has an effective default                      | the default bot's key is stored                                                        |
+| yes                | no, several bots serve the domain and none is its default    | 400 `VOICE_BOT_REQUIRED` (unreachable once loaded: config load rejects this)           |
 | yes                | no, no bot serves the domain                                 | stored `null`; the link offers Register only until a default bot exists for the domain |
 
-A stored key means the coordinator chose that bot; `null` means "the instance default for the link's domain". So a link created before any bot is configured (the UP preload ships `voice_bots: []` first) starts offering voice as soon as a default bot is added, with the same URL and QR. A chosen key does not move when `default_voice_bots` changes; only a removed bot falls back (§5).
+Whenever a bot resolves for the domain at creation, its key is stored, so a later `default_voice_bots` change or an added bot never moves or drops the voice option on a live link; only a removed bot falls back (§5). `null` is stored only when no bot serves the domain and means "the instance default for the link's domain": a link created before any bot is configured (the UP preload ships `voice_bots: []` first) starts offering voice as soon as a bot is added, with the same URL and QR.
 
 Link responses (`LinkResponseSchema`, `:149`, built at `:709`) add `voice_bot_key` and, when it resolves, `voice_bot: { key, display_name, phone, languages, description }` so the coordinator's link list and QR card can show which bot a link uses.
 
@@ -137,7 +137,7 @@ Logs: `operation: 'public.voiceRequest'`, `link_id`, `voice_bot_key`, `existing`
 ### 7. Coordinator UI (`apps/web`, `RegistrationLinksSection.tsx`)
 
 - The mode picker lists `voice_or_form` with its label. When it is enabled it is the default selection.
-- When the chosen mode offers voice: a bot picker fed by `GET /v1/links/voice-bots`, each option showing display name, number, languages and description. Preselected to the effective default (sent as no key, so the link follows the default); shown as read-only text when exactly one bot; a note "No voice bot yet — the link offers Register / sign in until one is configured" when none.
+- When the chosen mode offers voice: a bot picker fed by `GET /v1/links/voice-bots`, each option showing display name, number, languages and description. Preselected to the effective default (sent as no key; the API stores the default's key), and any picked bot is sent by key; shown as read-only text when exactly one bot; a note "No voice bot yet — the link offers Register / sign in until one is configured" when none.
 - The link list / QR card shows the bot's display name and number for links that have one.
 
 ### 8. Public page (`apps/web/src/app/[org]/[slug]/`)

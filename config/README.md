@@ -229,9 +229,13 @@ default_voice_bots: # optional: domain id -> bot key
   seeker: example_bot
 ```
 
-Which bot a link shows, per domain: `default_voice_bots[domain]` if set, else the
-only bot serving that domain, else none. A `default_voice_bots` entry must name
-a listed bot that serves that domain, and bot keys must be unique.
+Which bot a new link gets, per domain: the one the coordinator picks, else
+`default_voice_bots[domain]` if set, else the only bot serving that domain, else
+none. The bot is stored on the link at creation, so a later default change or an
+added bot does not move live links. A `default_voice_bots` entry must name a
+listed bot that serves that domain, every domain served by two or more bots
+needs a `default_voice_bots` entry, and bot keys must be unique; config load
+fails otherwise.
 
 Config is read at startup, so changing a number or adding a bot needs a config
 rollout. To make newly created links two-option only, set

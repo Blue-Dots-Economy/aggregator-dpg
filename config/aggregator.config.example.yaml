@@ -139,6 +139,7 @@ aggregator:
   voice_bots: []
   # Per-domain default when a link names no bot: domain id -> bot key.
   # Without an entry, the only bot serving that domain is used, else none.
+  # Required for every domain that two or more bots serve (load fails otherwise).
   # default_voice_bots:
   #   seeker: example_bot
 
