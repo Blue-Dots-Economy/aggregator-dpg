@@ -373,23 +373,20 @@ export const onboardingService = {
   },
 };
 
-/** Sends the file as the api's upload instructions say, or to `upload_url` on older api builds. */
+/**
+ * Sends the file as the api's upload instructions say, or to `upload_url` on older api builds.
+ *
+ * A form POST the browser cannot send (storage without POST in its CORS rules
+ * blocks it) is retried once as the signed PUT in `upload_url`. The file size
+ * was already checked against `max_bytes`, and `/start` checks it again.
+ *
+ * @throws {HttpError} With a `STORAGE_UPLOAD_*` code if storage refuses or cannot be reached.
+ */
 async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
-  let res: Response;
-  try {
-    res = await sendFile(file, created);
-  } catch {
-    throw new HttpError(0);
-  }
-  if (!res.ok) throw storageUploadError(res.status);
-}
-
-/** Sends the file with the method the api's upload reply names. */
-async function sendFile(file: File, created: BulkUploadCreateResponse): Promise<Response> {
   const { upload } = created;
   let res: Response;
   if (!upload) {
-    res = await fetch(created.upload_url, {
+    res = await sendToStorage(created.upload_url, {
       method: 'PUT',
       body: file,
       headers: { 'Content-Type': created.content_type },
@@ -398,11 +395,49 @@ async function sendFile(file: File, created: BulkUploadCreateResponse): Promise<
     const form = new FormData();
     for (const [name, value] of Object.entries(upload.form_fields)) form.append(name, value);
     form.append('file', file);
-    res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+    try {
+      res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+    } catch (err) {
+      console.warn('[bulk-upload] form upload to storage failed; retrying as a signed PUT', {
+        error: describeError(err),
+      });
+      res = await sendToStorage(created.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': created.content_type },
+      });
+    }
   } else {
-    res = await fetch(upload.url, { method: 'PUT', body: file, headers: upload.headers });
+    res = await sendToStorage(upload.url, { method: 'PUT', body: file, headers: upload.headers });
   }
-  return res;
+  if (!res.ok) throw storageUploadError(res.status);
+}
+
+/**
+ * Sends one request to storage.
+ *
+ * The api answered just before this call, so a request that never gets a
+ * response is a storage problem (CORS, network path to storage), not a lost
+ * connection, and is reported as one.
+ *
+ * @throws {HttpError} `STORAGE_UPLOAD_FAILED` if no response arrives.
+ */
+async function sendToStorage(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    console.error('[bulk-upload] upload to storage failed', {
+      method: init.method,
+      error: describeError(err),
+    });
+    throw new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
+  }
+}
+
+/** The name and message of a thrown value, for a log line; never the request or file. */
+function describeError(err: unknown): { name: string; message: string } {
+  if (err instanceof Error) return { name: err.name, message: err.message };
+  return { name: typeof err, message: String(err) };
 }
 
 /**
