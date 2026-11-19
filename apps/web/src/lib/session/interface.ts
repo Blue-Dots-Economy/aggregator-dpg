@@ -39,6 +39,11 @@ export const SessionDataSchema = z.object({
   /** Console actor cache; absent until the console reads it. */
   consoleActor: CachedActorSchema.optional().catch(undefined),
   /**
+   * Whether the user still has to accept the current terms, read at login.
+   * Absent on sessions created before it existed; treat absent as `unknown`.
+   */
+  termsStatus: z.enum(['ok', 'outstanding', 'unknown']).optional().catch(undefined),
+  /**
    * Keycloak's session id (`sid` in the ID token). Keycloak's back-channel
    * logout names this session. Optional: sessions created before it existed,
    * and an ID token without `sid`, have none.
