@@ -5,7 +5,7 @@
  *
  *   node dist/tools/org-loader.js template --kind orgs|coordinators
  *   node dist/tools/org-loader.js check --orgs - < orgs.csv
- *   node dist/tools/org-loader.js apply --orgs - --operator <name> --report - < orgs.csv > report.csv
+ *   node dist/tools/org-loader.js apply --orgs - --operator <name> < orgs.csv > report.csv
  *
  * The commands live in `org-loader-command.ts`. This entry sends log lines to
  * stderr before the API config loads, so stdout carries only the tool's output.
@@ -27,7 +27,8 @@ function isEntry(): boolean {
 
 if (isEntry()) {
   // Read by the API config at import, so it is set before the commands load.
-  process.env.LOG_DESTINATION ??= 'stderr';
+  // Always stderr: the pod's env may say `stdout`, which would mix log lines into the report.
+  process.env.LOG_DESTINATION = 'stderr';
   const { run } = await import('./org-loader-command.js');
   process.exitCode = await run(process.argv.slice(2));
 }

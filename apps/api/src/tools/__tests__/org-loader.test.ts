@@ -228,6 +228,19 @@ describe('org-loader check', () => {
   });
 });
 
+describe('org-loader check: columns', () => {
+  it('fails on a misspelt org column, naming the header', async () => {
+    const orgs = await file('orgs.csv', [
+      `${ORGS_HEADER},webiste`,
+      'Top,,Ravi Kumar,9876500001,ravi@alpha.org,https://alpha.org',
+    ]);
+    const r = await cli(['check', '--orgs', orgs]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain(`${orgs}:1 UNKNOWN_COLUMN webiste`);
+    expect(r.stdout).toContain('CHECK FAILED');
+  });
+});
+
 describe('org-loader apply', () => {
   it('refuses with exit 1 on any problem and applies nothing', async () => {
     const orgs = await file('orgs.csv', [
@@ -349,7 +362,7 @@ describe('org-loader template', () => {
     }
     expect(coords.slice(0, 5)).toEqual(COORDS_HEADER.split(','));
     expect(coords).toContain('sub_org_name');
-    for (const fixed of ['consent', 'contact', 'type', 'locations']) {
+    for (const fixed of ['consent', 'contact', 'type', 'locations', 'url']) {
       expect(coords).not.toContain(fixed);
     }
   });
@@ -401,14 +414,14 @@ describe('org-loader stdin and stdout', () => {
     expect(await orgCount()).toBe(0);
   });
 
-  it('writes the default report into the temp directory', async () => {
+  it('writes the report to stdout when --report is not given', async () => {
     const files = await treeFiles();
     const r = await cli(['apply', '--orgs', files.orgs, '--operator', 'ops']);
     expect(r.code).toBe(0);
-    const reported = /report: (\S+)/.exec(r.stdout)?.[1] ?? '';
-    expect(path.dirname(reported)).toBe(os.tmpdir());
-    expect(path.basename(reported)).toMatch(/^org-loader-report-[0-9TZ-]+\.csv$/);
-    expect((await readFile(reported, 'utf8')).split('\n')[0]).toBe(REPORT_COLUMNS.join(','));
-    await rm(reported);
+    const lines = r.stdout.trim().split('\n');
+    expect(lines[0]).toBe(REPORT_COLUMNS.join(','));
+    expect(lines).toHaveLength(3);
+    expect(r.stderr).toContain('report: stdout');
+    expect(r.stderr).toContain('APPLY COMPLETE');
   });
 });

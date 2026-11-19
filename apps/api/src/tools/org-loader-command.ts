@@ -8,16 +8,15 @@
  *   apply  (--orgs <file|-> | --coordinators <file|->)... --operator <name> [--report <file|->]
  *
  * `-` reads an input file from stdin (one input per run) or writes the report
- * to stdout. With `--report -`, stdout carries only the report CSV and every
- * other line goes to stderr. `template` prints one header line to stdout.
+ * to stdout. The report goes to stdout unless `--report <file>` names a new
+ * file (for a local run). When it goes to stdout, stdout carries only the
+ * report CSV and every other line goes to stderr. `template` prints one header line to stdout.
  * Output is counts, problem codes, field names and ids; names, emails and
  * phones appear only in the report. Exit codes: 0 ok, 1 refused or failed, 2 usage.
  */
 
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { UpstreamError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../config.js';
 import { closeDb } from '../db/client.js';
@@ -31,6 +30,7 @@ import { applyLoadPlan, type ReportRow } from './org-loader-apply.js';
 import {
   ADDRESS_PARTS,
   ADDRESS_PREFIX,
+  ORG_FIXED_COLUMNS,
   parseCoordinatorsCsv,
   parseOrgsCsv,
   type CoordinatorRow,
@@ -45,7 +45,7 @@ const USAGE =
   'usage: org-loader template --kind orgs|coordinators\n' +
   '       org-loader check [--orgs <file|->] [--coordinators <file|->]\n' +
   '       org-loader apply [--orgs <file|->] [--coordinators <file|->] --operator <name> [--report <file|->]\n' +
-  '  - reads an input from stdin (one per run) or writes the report to stdout';
+  '  - reads an input from stdin (one per run); the report goes to stdout unless --report names a file';
 
 /** Exit codes: ok, refused or failed, usage. */
 const EXIT = { OK: 0, FAILED: 1, USAGE: 2 } as const;
@@ -62,15 +62,16 @@ const COMMAND_FLAGS = {
 
 type Command = keyof typeof COMMAND_FLAGS;
 
-/** Fixed columns of `orgs.csv`, before the schema's own fields. */
-const ORG_FIXED_COLUMNS = ['name', 'parent', 'owner_name', 'owner_phone', 'owner_email'];
-
 /** Fixed columns of `coordinators.csv`, before the schema's own fields. */
 const COORDINATOR_FIXED_COLUMNS = ['org', 'name', 'phone', 'email', 'profile_types'];
 
-/** Coordinator schema keys the loader fills itself (from the fixed columns) or never sends. */
+/**
+ * Coordinator schema keys the loader fills itself (from the fixed columns) or never sends.
+ * `url` belongs to the org: the accept route refuses it and the plan reports ORG_DETAILS_READ_ONLY.
+ */
 const COORDINATOR_FORM_KEYS: ReadonlySet<string> = new Set([
   'name',
+  'url',
   'type',
   'contact',
   'locations',
@@ -112,6 +113,8 @@ export interface LoaderIo {
 /** Input for the plan, read from the files given. */
 interface LoadInput {
   orgs: OrgRow[];
+  /** The `orgs.csv` header columns; empty without an orgs file. */
+  orgColumns: string[];
   coordinators: CoordinatorRow[];
   inputProblems: InputProblem[];
 }
@@ -194,12 +197,6 @@ export function reportCsv(rows: ReportRow[]): string {
   return `${lines.join('\n')}\n`;
 }
 
-/** The default report path, in the temp directory; `:` and `.` become `-` so `kubectl cp` takes it. */
-function defaultReportPath(): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return path.join(os.tmpdir(), `org-loader-report-${stamp}.csv`);
-}
-
 /** Reads one input: a file, or stdin for `-`. */
 async function readInput(source: string, io: LoaderIo): Promise<string> {
   if (source === STDIO) return io.readStdin();
@@ -221,10 +218,11 @@ async function loadInput(
   if (orgs === STDIO && coordinators === STDIO) {
     throw new UsageError('only one input can be read from stdin; run orgs and coordinators apart');
   }
-  const input: LoadInput = { orgs: [], coordinators: [], inputProblems: [] };
+  const input: LoadInput = { orgs: [], orgColumns: [], coordinators: [], inputProblems: [] };
   if (orgs) {
     const parsed = parseOrgsCsv(await readInput(orgs, io));
     input.orgs = parsed.rows;
+    input.orgColumns = parsed.columns;
     input.inputProblems.push(...parsed.problems);
   }
   if (coordinators) {
@@ -301,7 +299,8 @@ async function checkOrApply(
   const flags = parseFlags(args, COMMAND_FLAGS[command]);
   const orgs = flags.get('--orgs');
   const coordinators = flags.get('--coordinators');
-  const reportToStdout = command === 'apply' && flags.get('--report') === STDIO;
+  // The report defaults to stdout: a file written in the pod would be lost with it.
+  const reportToStdout = command === 'apply' && (flags.get('--report') ?? STDIO) === STDIO;
   const say: Say = (line) => (reportToStdout ? io.writeStderr : io.writeStdout)(`${line}\n`);
 
   let operator = '';
@@ -315,7 +314,7 @@ async function checkOrApply(
       if (err instanceof ValidationError) throw new UsageError(`--operator: ${err.message}`);
       throw err;
     }
-    reportFile = flags.get('--report') ?? defaultReportPath();
+    reportFile = flags.get('--report') ?? STDIO;
     if (!reportToStdout && existsSync(reportFile)) {
       throw new UsageError(`report file ${reportFile} already exists`);
     }
