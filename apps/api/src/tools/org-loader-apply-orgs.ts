@@ -64,7 +64,17 @@ async function restampInvitedOwner(org: Organisation, ctx: ApplyContext): Promis
   if (org.status !== 'active' || !isProvisioned(org.createdBy) || !sub) return;
   const idp = getIdpAdmin();
   const user = await idp.findById(sub);
-  if (!user.ok || !user.value) return;
+  if (!user.ok) {
+    ctx.log.warn({
+      operation: 'orgLoader.apply.restampInvitedOwner',
+      sub_operation: 'idp.findById',
+      status: 'failure',
+      org_id: org.id,
+      code: user.error.code,
+    });
+    return;
+  }
+  if (!user.value) return;
   if (!user.value.attributes?.[KC_ATTR.DECISION_MADE]?.includes('invited')) return;
   const access = await grantOwnerAccess(org, ctx.log);
   if (access.status === 'granted') await stampOwnerApproved(org.id, sub, ctx);

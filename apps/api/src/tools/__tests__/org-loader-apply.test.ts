@@ -570,6 +570,42 @@ describe('applyLoadPlan: owner access', () => {
     expect((await kcUser(sub)).attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
   });
 
+  it('logs a warning and keeps the row already_loaded when the owner lookup fails', async () => {
+    const rows = treeRows(0);
+    const only = { orgs: rows.orgs.slice(0, 1), coordinators: [] };
+    await apply(only);
+    const top = await orgByName('Top');
+    if (!top) throw new Error('not loaded');
+    const p = await plan(only);
+    idp.findById = async () => ({
+      ok: false as const,
+      error: { code: 'IDP_UNAVAILABLE' as const, message: 'down' },
+    });
+    const lines: string[] = [];
+    const captured = pino(
+      { level: 'info' },
+      { write: (line: string) => void lines.push(line) },
+    ) as unknown as FastifyBaseLogger;
+    const rerun = await applyLoadPlan(p, { operator: OPERATOR, log: captured });
+    expect(outcomes(rerun.rows)).toEqual(['org:Top:already_loaded']);
+    const warn = lines
+      .map((l): unknown => JSON.parse(l))
+      .find(
+        (l) =>
+          typeof l === 'object' &&
+          l !== null &&
+          'operation' in l &&
+          l.operation === 'orgLoader.apply.restampInvitedOwner',
+      );
+    expect(warn).toMatchObject({
+      level: 40,
+      status: 'failure',
+      org_id: top.id,
+      code: 'IDP_UNAVAILABLE',
+    });
+    expect(JSON.stringify(warn)).not.toContain(OWNER_EMAIL);
+  });
+
   it('leaves an owner of a self-registered org alone on the already_loaded path', async () => {
     const rows = treeRows(0);
     await apply({ orgs: rows.orgs.slice(0, 1), coordinators: [] });
