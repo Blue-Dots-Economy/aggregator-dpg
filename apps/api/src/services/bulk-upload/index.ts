@@ -1,8 +1,13 @@
 /**
  * The create and start steps of a bulk upload, shared by the bulk-upload
- * routes and the operator command (`tools/bulk-upload.ts`). Errors are thrown
- * as `HttpError`s so the routes answer exactly as before. Belongs to
+ * routes and the operator command (`tools/bulk-upload.ts`). Belongs to
  * `@aggregator-dpg/api`.
+ *
+ * These functions throw `HttpError` instead of returning a `Result`, an
+ * exception to the service convention: they hold the routes' own code
+ * unchanged, so the routes keep their responses. Both callers map
+ * `HttpError`: the routes through the app's error handler, the command to its
+ * `REFUSED:` and `FAILED:` lines.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
