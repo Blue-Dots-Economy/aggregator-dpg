@@ -9,7 +9,7 @@
  */
 
 import Papa from 'papaparse';
-import type { PlanProblemCode } from './org-loader-plan.js';
+import type { PlanProblemCode } from './org-loader-plan-shared.js';
 
 /** Keys of the org form's address block. */
 export type AddressPart =
