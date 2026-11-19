@@ -39,9 +39,15 @@ function notAllowed(): NextResponse {
   return errorResponse(403, 'ACTING_NOT_ALLOWED', 'Request refused');
 }
 
-/** True when the token's `roles` claim holds an acting entry for the account. */
+/**
+ * True when the token's `roles` claim holds an acting entry for the account.
+ * A token with no `roles` claim at all passes: RBAC is off, so the edge,
+ * which needs the entry, is off too. The API still checks the account.
+ */
 function tokenCanActAs(accessToken: string, accountId: string): boolean {
-  const roles = decodeJwtClaims(accessToken)?.['roles'];
+  const claims = decodeJwtClaims(accessToken);
+  if (claims && !('roles' in claims)) return true;
+  const roles = claims?.['roles'];
   const prefix = `${ACTING_ROLE_PREFIX}${accountId}:`;
   return Array.isArray(roles) && roles.some((r) => typeof r === 'string' && r.startsWith(prefix));
 }

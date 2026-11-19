@@ -64,10 +64,14 @@ function seed(overrides: Parameters<typeof buildSessionData>[0] = {}): void {
   ]);
 }
 
-function seedRefresh(roles: string[]): void {
+/** Seeds the refreshed token; `null` leaves the `roles` claim out (RBAC off). */
+function seedRefresh(roles: string[] | null): void {
   idp.seedRefresh('rt-1', {
     ok: true,
-    value: buildTokenSet({ accessToken: jwt({ roles }), refreshToken: 'rt-2' }),
+    value: buildTokenSet({
+      accessToken: jwt(roles === null ? {} : { roles }),
+      refreshToken: 'rt-2',
+    }),
   });
 }
 
@@ -172,6 +176,23 @@ describe('POST /api/auth/acting', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: { code: 'ACTING_NOT_READY' } });
     expect((await stored()).actingAccountId).toBeUndefined();
+  });
+
+  it('answers 409 ACTING_NOT_READY when the roles claim is empty', async () => {
+    seed();
+    stubMe(me(ACCOUNT_ID));
+    seedRefresh([]);
+    const res = await POST(post({ accountId: ACCOUNT_ID }));
+    expect(res.status).toBe(409);
+  });
+
+  it('starts acting without the tag check when the token has no roles claim (RBAC off)', async () => {
+    seed();
+    stubMe(me(ACCOUNT_ID));
+    seedRefresh(null);
+    const res = await POST(post({ accountId: ACCOUNT_ID }));
+    expect(res.status).toBe(200);
+    expect((await stored()).actingAccountId).toBe(ACCOUNT_ID);
   });
 
   it('answers 401 when the token refresh fails', async () => {
