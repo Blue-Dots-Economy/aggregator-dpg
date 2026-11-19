@@ -3,6 +3,7 @@
  *
  *   GET   /v1/user/read/me               the signed-in actor (web routing)
  *   GET   /v1/user/consent/status        whether the caller still has to accept the current terms
+ *   POST  /v1/user/consent               record the caller's acceptance of the current terms
  *   GET   /v1/user/read/:id              one coordinator within reach
  *   POST  /v1/user/search                coordinators within reach, keyset paged
  *   POST  /v1/user/invite                invite coordinators into an org
@@ -10,8 +11,8 @@
  *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
- * Every handler calls `requireActor` first. Only `read/me` and
- * `consent/status` admit a coordinator; the rest are for org owners (their orgs) and the network admin
+ * Every handler calls `requireActor` first. Only `read/me`, `consent/status`
+ * and `consent` admit a coordinator; the rest are for org owners (their orgs) and the network admin
  * (every org). A target out of reach answers 404 (`services/authz/scope.ts`).
  * Single reads are audit-logged.
  */
@@ -79,6 +80,7 @@ import {
 import { getRbacRuntime } from '../services/authz/runtime.js';
 import { getRoleStore } from '../services/role-store/index.js';
 import { getConsentStatus } from '../services/consent-status.js';
+import { acceptCurrentTerms } from '../services/consent-accept.js';
 
 /** `GET /v1/user/consent/status` response. No personal data. */
 const ConsentStatusResponseSchema = z.object({
@@ -88,6 +90,17 @@ const ConsentStatusResponseSchema = z.object({
   privacy_version: z.number().int(),
   /** Owned orgs still to accept; empty for a coordinator. */
   org_ids: z.array(z.string()),
+});
+
+/** `POST /v1/user/consent` body: the versions the caller was shown. */
+const ConsentAcceptRequestSchema = z.object({
+  terms_version: z.number().int().min(1),
+  privacy_version: z.number().int().min(1),
+});
+
+/** `POST /v1/user/consent` response: the number of acceptances recorded. */
+const ConsentAcceptResponseSchema = z.object({
+  recorded: z.number().int().min(0),
 });
 
 const IdParamsSchema = z.object({ id: z.guid() });
@@ -434,6 +447,39 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         privacy_version: s.privacyVersion,
         org_ids: s.outstandingOrgIds,
       });
+    },
+  );
+
+  app.post(
+    '/v1/user/consent',
+    {
+      config: { rbac: { access: 'signed_in' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Record that the signed-in user accepted the current terms',
+        description:
+          'Records an acceptance of the shown terms and privacy versions for the caller (a coordinator) or for each org it owns that has not accepted yet, all or nothing. `recorded` is 0 when nothing was outstanding. Versions that are no longer current answer 409 `CONSENT_VERSION_CHANGED` and record nothing.',
+        body: ConsentAcceptRequestSchema,
+        response: {
+          200: ConsentAcceptResponseSchema,
+          ...errorResponses(400, 401, 403, 409, 500, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const { actor } = await requireActor(req, { allowCoordinator: true });
+      const result = await acceptCurrentTerms(actor, {
+        termsVersion: req.body.terms_version,
+        privacyVersion: req.body.privacy_version,
+      });
+      if (!result.success) {
+        const code = result.error.code;
+        throw httpError(
+          code === 'CONSENT_VERSION_CHANGED' || code === 'DB_UNAVAILABLE' ? code : 'INTERNAL',
+          { cause: result.error, fields: { sub_operation: 'consentAccept.record' } },
+        );
+      }
+      return reply.status(200).send({ recorded: result.value.recorded });
     },
   );
 

@@ -66,6 +66,7 @@ exports[`declared route table > declares every route of the app 1`] = `
   "POST /v1/roles/delete/:key": "network.administer (strict)",
   "POST /v1/support": "signed_in",
   "POST /v1/user/activate": "public",
+  "POST /v1/user/consent": "signed_in",
   "POST /v1/user/invite": "org.manage",
   "POST /v1/user/invite/accept": "service",
   "POST /v1/user/invite/search": "org.manage",
