@@ -20,6 +20,7 @@ import { validateOrgRegistration } from '../org-schema-validator.js';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 import { getNetworkConfig } from '../network-config.js';
 import { treeRules } from '../known-as.js';
+import { treeRefusalError, type TreeRefusalCode } from '../org-tree-refusal.js';
 
 /** Attempts at a fresh random-suffixed slug when one collides. */
 const ORG_SLUG_RETRIES = 3;
@@ -85,11 +86,7 @@ export type OrgCreateErrorCode =
   | 'CONSENT_WRITE_FAILED'
   | 'IDP_UNAVAILABLE'
   | 'DB_UNAVAILABLE'
-  | 'CONFLICT'
-  | 'ORG_PARENT_CYCLE'
-  | 'ORG_DEPTH_LIMIT'
-  | 'ORG_CHILD_LIMIT'
-  | 'ORG_TOTAL_LIMIT';
+  | TreeRefusalCode;
 
 /** A refused or failed org creation. */
 export interface OrgCreateError {
@@ -273,7 +270,8 @@ function orgStoreFailure(
   form: OrgForm,
   input: { phoneE164: string; parentId: string | undefined; slug: string },
 ): OrgCreateError {
-  const limitFields = { fields: { parent_id: input.parentId ?? null } };
+  const refusal = treeRefusalError(error, { parent_id: input.parentId ?? null });
+  if (refusal) return refusal;
   switch (error.code) {
     case 'DUPLICATE_NAME':
       return { code: 'ORG_NAME_TAKEN', fields: { display_name: form.display_name } };
@@ -295,32 +293,6 @@ function orgStoreFailure(
         detail: 'Consent is required.',
         fields: { consent: 'required' },
       };
-    case 'NOT_MOVABLE':
-      return {
-        code: 'CONFLICT',
-        detail: 'This organisation cannot be moved.',
-        fields: { reason: 'not_movable' },
-      };
-    case 'ORG_BUSY':
-      return {
-        code: 'CONFLICT',
-        detail: 'The organisation is being changed. Try again.',
-        fields: { reason: 'busy' },
-      };
-    case 'INVALID_PARENT':
-      return {
-        code: 'SCHEMA_VALIDATION',
-        detail: 'The parent must be the network or an active organisation.',
-        fields: { parent_id: 'invalid' },
-      };
-    case 'PARENT_CYCLE':
-      return { code: 'ORG_PARENT_CYCLE' };
-    case 'DEPTH_LIMIT':
-      return { code: 'ORG_DEPTH_LIMIT', ...limitFields };
-    case 'CHILD_LIMIT':
-      return { code: 'ORG_CHILD_LIMIT', ...limitFields };
-    case 'TOTAL_LIMIT':
-      return { code: 'ORG_TOTAL_LIMIT' };
     default:
       return {
         code: 'DB_UNAVAILABLE',

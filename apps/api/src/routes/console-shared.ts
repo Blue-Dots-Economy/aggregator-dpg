@@ -19,6 +19,7 @@ import type { CoordinatorCursor } from '../services/user-store/interface.js';
 import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
 import { checkConsoleWriteRate } from '../services/console-rate.js';
+import { treeRefusalError } from '../services/org-tree-refusal.js';
 import { renderOrgAdminAction, renderOrgKnownAs } from '../services/email-templates/index.js';
 
 /** The console's landing URL, used in owner notices. */
@@ -285,32 +286,8 @@ export async function notifyOwnerOfParentAction(
  * @throws {HttpError} CONFLICT, SCHEMA_VALIDATION, ORG_PARENT_CYCLE, ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT.
  */
 export function throwTreeRefusal(e: OrgStoreError, fields?: Record<string, unknown>): void {
-  const limitFields = fields ? { fields } : {};
-  switch (e.code) {
-    case 'NOT_MOVABLE':
-      throw httpError('CONFLICT', {
-        detail: 'This organisation cannot be moved.',
-        fields: { reason: 'not_movable' },
-      });
-    case 'ORG_BUSY':
-      throw httpError('CONFLICT', {
-        detail: 'The organisation is being changed. Try again.',
-        fields: { reason: 'busy' },
-      });
-    case 'INVALID_PARENT':
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'The parent must be the network or an active organisation.',
-        fields: { parent_id: 'invalid' },
-      });
-    case 'PARENT_CYCLE':
-      throw httpError('ORG_PARENT_CYCLE');
-    case 'DEPTH_LIMIT':
-      throw httpError('ORG_DEPTH_LIMIT', limitFields);
-    case 'CHILD_LIMIT':
-      throw httpError('ORG_CHILD_LIMIT', limitFields);
-    case 'TOTAL_LIMIT':
-      throw httpError('ORG_TOTAL_LIMIT');
-    default:
-      return;
-  }
+  const refusal = treeRefusalError(e, fields);
+  if (!refusal) return;
+  const { code, ...options } = refusal;
+  throw httpError(code, options);
 }

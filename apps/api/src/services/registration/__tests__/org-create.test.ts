@@ -115,4 +115,29 @@ describe('createOrgWithOwner', () => {
     const group = await idp.findGroupByName('org-enable-india');
     expect(group.ok && group.value).toBeNull();
   });
+
+  it('keeps an existing owner user when the stamp fails, and removes the org and group', async () => {
+    const existing = await idp.createUser({ email: OWNER_EMAIL });
+    if (!existing.ok) throw new Error('seed kc user');
+    orgStore.update = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'stamp failed' },
+    });
+    const { schemaValues, phoneE164 } = await checked();
+    const r = await createOrgWithOwner({
+      form,
+      schemaValues,
+      phoneE164,
+      createdBy: 'provisioned:ops',
+      existingOwnerKcSub: existing.value.id,
+      log,
+    });
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+    const kept = await idp.findById(existing.value.id);
+    expect(kept.ok && kept.value?.id).toBe(existing.value.id);
+    const found = await orgStore.findBySlug('enable-india');
+    expect(found.ok && found.value).toBeNull();
+    const group = await idp.findGroupByName('org-enable-india');
+    expect(group.ok && group.value).toBeNull();
+  });
 });
