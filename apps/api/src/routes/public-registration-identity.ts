@@ -45,6 +45,22 @@ export function checkAccountOnlyBody(
   identity: IdentitySelectors,
   opts: { requirePhone: boolean; allowEmail: boolean },
 ): void {
+  rejectUnknownKeys(rawBody, identity, opts.allowEmail);
+  // Require name and a contact; otherwise the writer would answer 502.
+  if (opts.requirePhone) checkNameAndPhone(rawBody, identity);
+  else checkNameAndContact(rawBody, identity);
+}
+
+/**
+ * Rejects any body key other than consent, birth year and the identity fields.
+ *
+ * @throws {HttpError} `REGISTRATION_MODE_MISMATCH` naming the first other key.
+ */
+function rejectUnknownKeys(
+  rawBody: Record<string, unknown>,
+  identity: IdentitySelectors,
+  allowEmail: boolean,
+): void {
   const allowed = new Set<string>([
     'consent_terms',
     'consent_privacy',
@@ -52,7 +68,7 @@ export function checkAccountOnlyBody(
     // guardian-gated domains.
     'age',
     'year_of_birth',
-    ...[identity.name, identity.phone, opts.allowEmail ? identity.email : undefined].filter(
+    ...[identity.name, identity.phone, allowEmail ? identity.email : undefined].filter(
       (k): k is string => typeof k === 'string' && k.length > 0,
     ),
   ]);
@@ -64,32 +80,41 @@ export function checkAccountOnlyBody(
       });
     }
   }
-  // Require name and a contact; otherwise the writer would answer 502.
+}
+
+/**
+ * Requires a name and a phone, the contact a voice request calls.
+ *
+ * @throws {HttpError} `SCHEMA_VALIDATION` listing the missing fields.
+ */
+function checkNameAndPhone(rawBody: Record<string, unknown>, identity: IdentitySelectors): void {
   const hasName = Boolean(readString(rawBody, identity.name));
   const hasPhone = Boolean(readString(rawBody, identity.phone));
-  if (opts.requirePhone) {
-    if (!hasName || !hasPhone) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'A voice request requires name and phone.',
-        fields: {
-          missing: [...(!hasName ? [identity.name] : []), ...(!hasPhone ? [identity.phone] : [])],
-        },
-      });
-    }
-    return;
-  }
-  const hasEmail = Boolean(readString(rawBody, identity.email));
-  if (!hasName || (!hasPhone && !hasEmail)) {
-    throw httpError('SCHEMA_VALIDATION', {
-      detail: 'account_only requires name and at least one of phone or email',
-      fields: {
-        missing: [
-          ...(!hasName ? [identity.name] : []),
-          ...(!hasPhone && !hasEmail ? ['phone_or_email'] : []),
-        ],
-      },
-    });
-  }
+  if (hasName && hasPhone) return;
+  throw httpError('SCHEMA_VALIDATION', {
+    detail: 'A voice request requires name and phone.',
+    fields: {
+      missing: [...(hasName ? [] : [identity.name]), ...(hasPhone ? [] : [identity.phone])],
+    },
+  });
+}
+
+/**
+ * Requires a name and at least one of phone or email.
+ *
+ * @throws {HttpError} `SCHEMA_VALIDATION` listing the missing fields.
+ */
+function checkNameAndContact(rawBody: Record<string, unknown>, identity: IdentitySelectors): void {
+  const hasName = Boolean(readString(rawBody, identity.name));
+  const hasContact =
+    Boolean(readString(rawBody, identity.phone)) || Boolean(readString(rawBody, identity.email));
+  if (hasName && hasContact) return;
+  throw httpError('SCHEMA_VALIDATION', {
+    detail: 'account_only requires name and at least one of phone or email',
+    fields: {
+      missing: [...(hasName ? [] : [identity.name]), ...(hasContact ? [] : ['phone_or_email'])],
+    },
+  });
 }
 
 /** Consent and age to send to Signals for one registrant. */
@@ -119,43 +144,69 @@ export function resolveConsentAndAge(
   body: Record<string, unknown>,
   opts: { consentRequired: boolean; withItem: boolean },
 ): ConsentAndAge {
-  const termsOk = body['consent_terms'] === true;
-  const privacyOk = body['consent_privacy'] === true;
-  const profileConsentOk = body['consent_profile'] === true;
-  delete body['consent_terms'];
-  delete body['consent_privacy'];
-  delete body['consent_profile'];
-
-  // Only this top-level birth year (or `age` from older clients) triggers the
-  // minor rule, not a profile `age` field.
-  const yobRaw = body['year_of_birth'];
-  delete body['year_of_birth'];
-  const yob = coerceNum(yobRaw);
-  const derivedAge = yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
+  const consents = takeConsents(body);
+  const derivedAge = takeAge(body);
 
   const isMinor = derivedAge !== undefined && derivedAge <= MINOR_MAX_AGE;
-  if (opts.consentRequired && !isMinor) {
-    const missingConsent: string[] = [];
-    if (!termsOk) missingConsent.push('user_terms');
-    if (!privacyOk) missingConsent.push('user_privacy');
-    if (opts.withItem && !profileConsentOk) missingConsent.push('profile_creation');
-    if (missingConsent.length > 0) {
-      throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
-    }
-  }
   const age = isMinor ? undefined : derivedAge;
+  const ageField = age === undefined ? {} : { age };
   if (!opts.consentRequired || isMinor) {
-    return { isMinor, ...(age !== undefined ? { age } : {}) };
+    return { isMinor, ...ageField };
+  }
+  const missingConsent = missingConsents(consents, opts.withItem);
+  if (missingConsent.length > 0) {
+    throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
   }
   return {
     isMinor,
-    ...(age !== undefined ? { age } : {}),
+    ...ageField,
     compliance: [
       { key: 'user_terms', value: true },
       { key: 'user_privacy', value: true },
       ...(opts.withItem ? [{ key: 'profile_creation', value: true }] : []),
     ],
   };
+}
+
+/** Which consent checkboxes the registrant ticked. */
+interface GivenConsents {
+  terms: boolean;
+  privacy: boolean;
+  profile: boolean;
+}
+
+/** Reads the `consent_*` booleans and deletes them from the body. */
+function takeConsents(body: Record<string, unknown>): GivenConsents {
+  const consents = {
+    terms: body['consent_terms'] === true,
+    privacy: body['consent_privacy'] === true,
+    profile: body['consent_profile'] === true,
+  };
+  delete body['consent_terms'];
+  delete body['consent_privacy'];
+  delete body['consent_profile'];
+  return consents;
+}
+
+/**
+ * Reads the registrant's age from the top-level `year_of_birth` (deleted from
+ * the body) or, failing that, `age` from older clients.
+ *
+ * Only these top-level keys trigger the minor rule, not a profile `age` field.
+ */
+function takeAge(body: Record<string, unknown>): number | undefined {
+  const yob = coerceNum(body['year_of_birth']);
+  delete body['year_of_birth'];
+  return yob === undefined ? coerceNum(body['age']) : new Date().getUTCFullYear() - yob;
+}
+
+/** Compliance keys an adult has not consented to; `profile_creation` counts only with an item. */
+function missingConsents(consents: GivenConsents, withItem: boolean): string[] {
+  const missing: string[] = [];
+  if (!consents.terms) missing.push('user_terms');
+  if (!consents.privacy) missing.push('user_privacy');
+  if (withItem && !consents.profile) missing.push('profile_creation');
+  return missing;
 }
 
 /**

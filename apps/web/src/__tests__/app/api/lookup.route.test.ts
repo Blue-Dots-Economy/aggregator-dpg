@@ -60,7 +60,7 @@ describe('GET /api/[org]/[slug]/lookup', () => {
 
     const req = new Request(
       'http://localhost/api/acme/winter25/lookup?email=new%40x.com&network=blue_dot&domain=seeker',
-      { headers: { 'x-request-id': 'req-test-123', 'x-forwarded-for': '10.0.0.5' } },
+      { headers: { 'x-request-id': 'req-test-123', 'x-forwarded-for': '198.51.100.66, 10.0.0.5' } },
     );
     const res = await GET(req as never, {
       params: Promise.resolve({ org: 'acme', slug: 'winter25' }),

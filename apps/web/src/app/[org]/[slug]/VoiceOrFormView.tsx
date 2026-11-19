@@ -120,6 +120,77 @@ export function VoiceOrFormView({ voiceBot, ...props }: VoiceOrFormViewProps): J
   const voiceIdentity = { name: identity?.name, phone: identity?.phone };
 
   /**
+   * Moves to the result screen, or shows an error when the body is not the expected shape.
+   *
+   * @param body - The parsed 200 body.
+   * @param path - The request path, for the log line.
+   */
+  const handleVoiceSuccess = (body: unknown, path: string): void => {
+    const parsed = VoiceRequestResponseSchema.safeParse(body);
+    if (!parsed.success) {
+      console.error('[public-registration] unexpected response shape', {
+        url: path,
+        issues: body === null ? [] : summariseIssues(parsed.error.issues),
+      });
+      setSubmit({
+        status: 'error',
+        title: t('error_submission_title'),
+        detail: tRequest('generic'),
+      });
+      return;
+    }
+    setSubmit({ status: 'idle' });
+    setScreen({ kind: 'done', existing: parsed.data.existing, bot: parsed.data.voice_bot });
+  };
+
+  /**
+   * Handles a rejected voice request: back to the first screen when the bot is
+   * gone, a field error for a bad phone, else the error banner.
+   *
+   * @param status - HTTP status.
+   * @param body - The parsed error body, or null.
+   */
+  const handleVoiceRejection = (status: number, body: unknown): void => {
+    const error = readErrorEnvelope(body);
+    if (status === 409 && error.code === 'VOICE_BOT_UNAVAILABLE') {
+      setVoiceUnavailable(true);
+      setSubmit({ status: 'idle' });
+      setScreen({ kind: 'choose' });
+      return;
+    }
+    if (error.code === 'INVALID_PHONE' && identity?.phone) {
+      setServerErrors({ [identity.phone]: t('error_phone_invalid') });
+      setSubmit({ status: 'idle' });
+      return;
+    }
+    setSubmit({
+      status: 'error',
+      title: t('error_submission_title'),
+      detail: errorText(status, error),
+    });
+  };
+
+  /**
+   * Shows the error banner for a request that failed before a response arrived.
+   *
+   * @param err - What `fetch` or the handling threw.
+   */
+  const handleVoiceFailure = (err: unknown): void => {
+    // `fetch` rejects with a TypeError when the request never reached the server.
+    const network = err instanceof TypeError;
+    if (!network) {
+      console.error('[public-registration] voice request handling failed', {
+        error_type: err instanceof Error ? err.name : typeof err,
+      });
+    }
+    setSubmit({
+      status: 'error',
+      title: t('error_submission_title'),
+      detail: tRequest(network ? 'network' : 'generic'),
+    });
+  };
+
+  /**
    * Posts the voice request and moves to the result, the first screen (bot
    * gone) or an error.
    *
@@ -132,64 +203,20 @@ export function VoiceOrFormView({ voiceBot, ...props }: VoiceOrFormViewProps): J
   ): Promise<void> => {
     setSubmit({ status: 'submitting' });
     const path = `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/voice-request`;
+    const consent = showConsent
+      ? { consent_terms: consentGiven, consent_privacy: consentGiven }
+      : {};
     try {
       const res = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...payload,
-          ...(showConsent ? { consent_terms: consentGiven, consent_privacy: consentGiven } : {}),
-        }),
+        body: JSON.stringify({ ...payload, ...consent }),
       });
       const body: unknown = await res.json().catch(() => null);
-      if (res.ok) {
-        const parsed = VoiceRequestResponseSchema.safeParse(body);
-        if (!parsed.success) {
-          console.error('[public-registration] unexpected response shape', {
-            url: path,
-            issues: body === null ? [] : summariseIssues(parsed.error.issues),
-          });
-          setSubmit({
-            status: 'error',
-            title: t('error_submission_title'),
-            detail: tRequest('generic'),
-          });
-          return;
-        }
-        setSubmit({ status: 'idle' });
-        setScreen({ kind: 'done', existing: parsed.data.existing, bot: parsed.data.voice_bot });
-        return;
-      }
-      const error = readErrorEnvelope(body);
-      if (res.status === 409 && error.code === 'VOICE_BOT_UNAVAILABLE') {
-        setVoiceUnavailable(true);
-        setSubmit({ status: 'idle' });
-        setScreen({ kind: 'choose' });
-        return;
-      }
-      if (error.code === 'INVALID_PHONE' && identity?.phone) {
-        setServerErrors({ [identity.phone]: t('error_phone_invalid') });
-        setSubmit({ status: 'idle' });
-        return;
-      }
-      setSubmit({
-        status: 'error',
-        title: t('error_submission_title'),
-        detail: errorText(res.status, error),
-      });
+      if (res.ok) handleVoiceSuccess(body, path);
+      else handleVoiceRejection(res.status, body);
     } catch (err) {
-      // `fetch` rejects with a TypeError when the request never reached the server.
-      const network = err instanceof TypeError;
-      if (!network) {
-        console.error('[public-registration] voice request handling failed', {
-          error_type: err instanceof Error ? err.name : typeof err,
-        });
-      }
-      setSubmit({
-        status: 'error',
-        title: t('error_submission_title'),
-        detail: tRequest(network ? 'network' : 'generic'),
-      });
+      handleVoiceFailure(err);
     }
   };
 
@@ -343,12 +370,9 @@ export function VoiceOrFormView({ voiceBot, ...props }: VoiceOrFormViewProps): J
           {t('voice_chooser_subtitle')}
         </p>
         {voiceUnavailable ? (
-          <div
-            role="status"
-            className="mt-4 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-          >
+          <output className="mt-4 block rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
             {t('voice_unavailable')}
-          </div>
+          </output>
         ) : null}
         <div className="mt-5 flex flex-col gap-3">
           {offerVoice ? (

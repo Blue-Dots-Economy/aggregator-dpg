@@ -38,7 +38,7 @@ export function needsVoiceBotChoice(
 }
 
 /** One bot's name, number, languages and description. */
-function BotDetails({ bot }: { bot: VoiceBotOption }) {
+function BotDetails({ bot }: Readonly<{ bot: VoiceBotOption }>) {
   const locale = useLocale();
   return (
     <span className="flex min-w-0 flex-col">
@@ -64,7 +64,7 @@ export function VoiceBotPicker({
   value,
   onChange,
   showChoiceRequired = false,
-}: VoiceBotPickerProps) {
+}: Readonly<VoiceBotPickerProps>) {
   const t = useTranslations('onboarding.create_link');
   const bots = useVoiceBots(domain);
 

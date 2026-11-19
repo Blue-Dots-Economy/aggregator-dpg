@@ -233,6 +233,7 @@ describe('<VoiceOrFormView /> voice flow', () => {
         'The voice assistant is not available right now. Please register with the form.',
       ),
     ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('The voice assistant is not available');
     expect(screen.getByTestId('voice-chooser')).toBeInTheDocument();
     expect(voiceButton()).toBeNull();
     expect(formButton()).toBeInTheDocument();

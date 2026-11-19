@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
+import type { JSX } from 'react';
+import type { z } from 'zod';
 import { resolveSchemaRoot } from '@/lib/config-paths';
 import { parseJsonObject, readJsonSchema } from '@/lib/json-object';
 import { logger } from '@/lib/logger';
@@ -26,18 +28,22 @@ interface PageProps {
   params: Promise<{ org: string; slug: string }>;
 }
 
-/**
- * Public anonymous registration page for a registration link.
- *
- * `org` is the aggregator's `org_slug` and `slug` is the link slug. Resolves the
- * link through the public API, loads the optional UI schema, and renders the
- * client view: the two-option view when the link offers voice and has a bot,
- * else the registration form view.
- */
-export default async function PublicRegistrationPage({ params }: PageProps) {
-  const { org, slug } = await params;
+/** The resolved link, or the error page to render instead. */
+type ResolveOutcome = { ok: true; link: ResolvedLink } | { ok: false; page: JSX.Element };
 
-  // 1. Resolve link metadata via the public API.
+/** A registration link as the public API resolves it. */
+type ResolvedLink = z.infer<typeof ResolveResponseSchema>;
+
+/**
+ * Resolves a registration link through the public API.
+ *
+ * Calls `notFound()` when the API answers 404.
+ *
+ * @param org - The aggregator's `org_slug`.
+ * @param slug - The link slug.
+ * @returns The checked link, or an error page for an unreachable API or a bad response.
+ */
+async function resolveLink(org: string, slug: string): Promise<ResolveOutcome> {
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
   // Only the fetch is inside the try. `notFound()` throws, so it must be
   // called outside the try or the catch would swallow it.
@@ -48,32 +54,41 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       { cache: 'no-store' },
     );
   } catch (err) {
-    return (
-      <ErrorShell
-        title="Cannot reach registration service"
-        message={err instanceof Error ? err.message : 'Network error.'}
-      />
-    );
+    return {
+      ok: false,
+      page: (
+        <ErrorShell
+          title="Cannot reach registration service"
+          message={err instanceof Error ? err.message : 'Network error.'}
+        />
+      ),
+    };
   }
   if (res.status === 404) notFound();
   if (!res.ok) {
-    return (
-      <ErrorShell
-        title="Link unavailable"
-        message={`The registration link is not currently active (HTTP ${res.status}).`}
-      />
-    );
+    return {
+      ok: false,
+      page: (
+        <ErrorShell
+          title="Link unavailable"
+          message={`The registration link is not currently active (HTTP ${res.status}).`}
+        />
+      ),
+    };
   }
   let body: unknown;
   try {
     body = await res.json();
   } catch (err) {
-    return (
-      <ErrorShell
-        title="Cannot reach registration service"
-        message={err instanceof Error ? err.message : 'Malformed response.'}
-      />
-    );
+    return {
+      ok: false,
+      page: (
+        <ErrorShell
+          title="Cannot reach registration service"
+          message={err instanceof Error ? err.message : 'Malformed response.'}
+        />
+      ),
+    };
   }
   const parsedLink = ResolveResponseSchema.safeParse(body);
   if (!parsedLink.success) {
@@ -83,41 +98,66 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       error: 'unexpected response shape',
       issues: summariseIssues(parsedLink.error.issues),
     });
-    return <ErrorShell title="Link unavailable" message="Malformed response." />;
+    return {
+      ok: false,
+      page: <ErrorShell title="Link unavailable" message="Malformed response." />,
+    };
   }
-  const resolved = parsedLink.data;
+  return { ok: true, link: parsedLink.data };
+}
+
+/**
+ * Reads the optional UI schema for a domain from config/<network>/schemas/participant/.
+ *
+ * @param domain - The link's domain, already checked against the safe-name pattern.
+ * @returns The UI schema, or `{}` when the file is missing or not a JSON object.
+ */
+async function loadUiSchema(domain: string): Promise<Record<string, unknown>> {
+  try {
+    return parseJsonObject(
+      await readFile(resolveParticipantSchemaPath(`${domain}.v1.ui.json`), 'utf8'),
+    );
+  } catch {
+    // UI schema is optional.
+    return {};
+  }
+}
+
+/**
+ * Public anonymous registration page for a registration link.
+ *
+ * `org` is the aggregator's `org_slug` and `slug` is the link slug. Resolves the
+ * link through the public API, loads the optional UI schema, and renders the
+ * client view: the two-option view when the link offers voice and has a bot,
+ * else the registration form view.
+ */
+export default async function PublicRegistrationPage({ params }: Readonly<PageProps>) {
+  const { org, slug } = await params;
+
+  // 1. Resolve link metadata via the public API.
+  const outcome = await resolveLink(org, slug);
+  if (!outcome.ok) return outcome.page;
+  const resolved = outcome.link;
 
   // 2. The schema comes in the resolve response. It must be an object unless
   // the link is `account_only`, where `null` is valid.
   const submissionShape = resolved.submission_shape ?? 'account_and_profile';
-  const hintKey = resolved.public_hint_i18n_key ?? null;
+  const accountOnly = submissionShape === 'account_only';
   const linkSchema = readJsonSchema(resolved.schema);
-  if (submissionShape !== 'account_only') {
-    if (!linkSchema) {
-      return (
-        <ErrorShell
-          title="Form unavailable"
-          message={`Registration schema for "${resolved.domain}" is missing.`}
-        />
-      );
-    }
+  if (!accountOnly && !linkSchema) {
+    return (
+      <ErrorShell
+        title="Form unavailable"
+        message={`Registration schema for "${resolved.domain}" is missing.`}
+      />
+    );
   }
   if (!/^[a-z0-9_-]+$/i.test(resolved.domain)) {
     notFound();
   }
-  // The view ignores `schema` for account_only links.
+  // The view ignores `schema` and the UI schema for account_only links.
   const schema = linkSchema ?? EMPTY_SCHEMA;
-  // Optional UI schema from config/<network>/schemas/participant/. Not read
-  // for account_only links.
-  let uiSchema: Record<string, unknown> = {};
-  if (submissionShape !== 'account_only') {
-    const uiFile = `${resolved.domain}.v1.ui.json`;
-    try {
-      uiSchema = parseJsonObject(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8'));
-    } catch {
-      // UI schema is optional.
-    }
-  }
+  const uiSchema = accountOnly ? {} : await loadUiSchema(resolved.domain);
 
   // Participant Terms/Privacy content for the consent modal, read from config.
   const participantConsent = await loadParticipantConsent();
@@ -132,7 +172,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
     uiSchema,
     identity: resolved.identity,
     submissionShape,
-    publicHintI18nKey: hintKey,
+    publicHintI18nKey: resolved.public_hint_i18n_key ?? null,
     registrationMode: resolved.registration_mode ?? null,
     consentContent: participantConsent,
   };
@@ -158,7 +198,7 @@ function resolveParticipantSchemaPath(file: string): string {
   return candidates[0]!;
 }
 
-function ErrorShell({ title, message }: { title: string; message: string }) {
+function ErrorShell({ title, message }: Readonly<{ title: string; message: string }>) {
   return (
     <div className="min-h-screen flex items-center justify-center px-6 bg-[#FBFCFE]">
       <div className="max-w-md text-center">
