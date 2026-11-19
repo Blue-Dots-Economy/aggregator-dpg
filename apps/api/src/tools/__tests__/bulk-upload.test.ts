@@ -268,7 +268,7 @@ describe('bulk-upload command', () => {
   });
 
   describe('a new upload', () => {
-    it('uploads as the coordinator with the portal attestation and prints why rows failed', async () => {
+    it('uploads as the coordinator with the portal attestation and points to the errors report', async () => {
       expect(await run(args(), io())).toBe(0);
 
       const upload = store.rows.get(UPLOAD_1);
@@ -279,20 +279,13 @@ describe('bulk-upload command', () => {
       const [record] = ledger.list();
       expect(record?.subjectId).toBe(COORD);
       expect(record?.source).toBe(`bulk_upload:${UPLOAD_1}:v2`);
-      expect(lines.slice(0, 5)).toEqual([
+      expect(lines).toEqual([
         `upload ${UPLOAD_1} created`,
         `upload ${UPLOAD_1} started`,
         'status: completed',
         'rows: 2 total, 1 passed, 1 failed, 0 skipped',
-        'failed rows:',
+        `errors report: --upload-id ${UPLOAD_1} --errors-csv > errors.csv`,
       ]);
-      expect(lines[5]).toMatch(/^ {2}name\s+category\s+reason\s+what to do$/);
-      expect(lines[6]).toMatch(
-        /Chaitra\s+validation\s+languageSpoken\.0: must be one of: Kannada, Hindi\s+Check the values/,
-      );
-      expect(lines.at(-1)).toBe(
-        `errors report (all columns): --upload-id ${UPLOAD_1} --errors-csv`,
-      );
     });
 
     it('reads the CSV from stdin and finds the coordinator by email', async () => {

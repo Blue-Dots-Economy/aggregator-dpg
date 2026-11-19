@@ -28,7 +28,7 @@ kubectl -n "$NS" exec -i "$API" -c api -- \
   < seekers.csv
 ```
 
-The command checks the coordinator, the file size and the header before it creates anything. It then starts the upload and waits for processing (up to an hour), printing each status change and, when rows failed, why:
+The command checks the coordinator, the file size and the header before it creates anything. It then starts the upload and waits for processing (up to an hour), printing each status change and, when rows failed, how to fetch the errors report:
 
 ```
 upload 3f6c…e1 created
@@ -36,13 +36,10 @@ upload 3f6c…e1 started
   row_processing…
 status: completed
 rows: 120 total, 117 passed, 3 failed, 0 skipped
-failed rows:
-  name           category    reason                                          what to do
-  Chaitra Shetty validation  languageSpoken.0: must be one of: Assamese, …   Check the values in …
-errors report (all columns): --upload-id 3f6c…e1 --errors-csv
+errors report: --upload-id 3f6c…e1 --errors-csv > errors.csv
 ```
 
-Note the upload id; it is printed as soon as the upload is created, so it is there even if a later step fails. The table shows at most 50 rows; the errors report has them all. Exit code 0 means the upload completed; 1 means it was refused, failed, or is still processing; 2 means the arguments were wrong.
+Note the upload id; it is printed as soon as the upload is created, so it is there even if a later step fails. Exit code 0 means the upload completed; 1 means it was refused, failed, or is still processing; 2 means the arguments were wrong.
 
 ### Rate limit
 

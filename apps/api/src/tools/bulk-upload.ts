@@ -64,18 +64,9 @@ const POLL_TIMEOUT_MS = 60 * 60 * 1000;
 /** Upper bound on any single storage, database or queue call, so a hung call cannot stall the run. */
 const CALL_TIMEOUT_MS = 30_000;
 
-/** Failed rows printed in the table; the full list is in `--errors-csv`. */
-const MAX_TABLE_ROWS = 50;
-
-/** Widest a table cell is printed before it is cut short. */
-const MAX_CELL_WIDTH = 70;
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TERMINAL: ReadonlySet<BulkUploadStatus> = new Set(['completed', 'failed', 'file_failed']);
-
-/** Columns the worker appends to each row of errors.csv. */
-const ERROR_COLUMNS = ['error_category', 'error_reason', 'what_to_do'];
 
 /** A refusal. Printed as `REFUSED: …` with exit code 1. */
 class Refusal extends Error {}
@@ -107,15 +98,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** Collects a stream into one buffer. */
-async function readAll(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-  }
-  return Buffer.concat(chunks);
 }
 
 /** Reads the CSV from a path, or from stdin for `-`, refusing more than the upload limit. */
@@ -238,52 +220,7 @@ async function waitForResult(
   }
 }
 
-/** Shortens a cell to the table width. */
-function cell(value: string): string {
-  const flat = value.replace(/\s+/g, ' ').trim();
-  return flat.length > MAX_CELL_WIDTH ? `${flat.slice(0, MAX_CELL_WIDTH - 1)}…` : flat;
-}
-
-/** Prints why each row failed: the row's first column and the worker's error columns. */
-async function printFailedRows(upload: BulkUpload, key: string, io: CommandIo): Promise<void> {
-  const stream = await withTimeout(
-    getObjectStorage().openReadStream({ area: 'bulk-uploads', key }),
-    io.callTimeoutMs,
-    'errors report read',
-  );
-  if (!stream.success) throw stream.error;
-  if (!stream.value) {
-    io.out('errors report: no longer available');
-    return;
-  }
-  const text = (
-    await withTimeout(readAll(stream.value), io.callTimeoutMs, 'errors report read')
-  ).toString('utf8');
-  const parsed = Papa.parse<Record<string, string>>(text, {
-    header: true,
-    skipEmptyLines: 'greedy',
-  });
-  const firstColumn = parsed.meta.fields?.[0] ?? '';
-  const rows = parsed.data.map((r) => [
-    cell(r[firstColumn] ?? ''),
-    ...ERROR_COLUMNS.map((c) => cell(r[c] ?? '')),
-  ]);
-  const header = [firstColumn, 'category', 'reason', 'what to do'];
-  const shown = rows.slice(0, MAX_TABLE_ROWS);
-  const widths = header.map((h, i) => Math.max(h.length, ...shown.map((r) => r[i]?.length ?? 0)));
-  const line = (cells: string[]) =>
-    cells
-      .map((c, i) => c.padEnd(widths[i] ?? 0))
-      .join('  ')
-      .trimEnd();
-  io.out('failed rows:');
-  io.out(`  ${line(header)}`);
-  for (const r of shown) io.out(`  ${line(r)}`);
-  if (rows.length > shown.length) io.out(`  … and ${rows.length - shown.length} more`);
-  io.out(`errors report (all columns): --upload-id ${upload.id} --errors-csv`);
-}
-
-/** Prints the final status, counts and failed rows; exit code 0 only for `completed`. */
+/** Prints the final status and counts; exit code 0 only for `completed`. */
 async function report(upload: BulkUpload, io: CommandIo): Promise<number> {
   io.out(`status: ${upload.status}${upload.statusReason ? ` (${upload.statusReason})` : ''}`);
   if (upload.status !== 'completed') return 1;
@@ -295,7 +232,9 @@ async function report(upload: BulkUpload, io: CommandIo): Promise<number> {
   io.out(
     `rows: ${counts.totalRows ?? '?'} total, ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped`,
   );
-  if (upload.errorsCsvStorageKey) await printFailedRows(upload, upload.errorsCsvStorageKey, io);
+  if (upload.errorsCsvStorageKey) {
+    io.out(`errors report: --upload-id ${upload.id} --errors-csv > errors.csv`);
+  }
   return 0;
 }
 
