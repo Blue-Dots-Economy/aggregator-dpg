@@ -78,6 +78,7 @@ Do not run the upload again unless it ended `failed` or `file_failed`; a second 
 | `REFUSED: coordinator … has no Signals org`             | The coordinator's approval did not finish; every row would fail.        |
 | `REFUSED: DOMAIN_NOT_SERVED: …`                         | Wrong `--type`, or the coordinator does not serve it.                   |
 | `REFUSED: missing columns: …` / `unknown columns: …`    | The CSV header does not match the template; nothing was created.        |
+| `REFUSED: the file is not valid UTF-8`                  | Save the CSV as UTF-8 and run it again; nothing was created.            |
 | `REFUSED: rate limited; retry in Ns`                    | Wait, or use `--skip-rate-limit` for the initial load.                  |
 | `FAILED: … timed out after 30000 ms`                    | A storage, database or queue call hung; check the upload id it printed. |
 | `status: file_failed (…)`                               | The worker rejected the whole file; nothing was processed.              |

@@ -349,6 +349,31 @@ describe('bulk-upload command', () => {
       expect(store.rows.size).toBe(0);
     });
 
+    it.each([
+      ['a ";" delimiter', 'name;phone;age\nAsha;9000000001;24\n', /^REFUSED: missing columns: /],
+      [
+        'invalid UTF-8',
+        Buffer.concat([
+          Buffer.from('name,phone,age\nAsha,'),
+          Buffer.from([0xc3, 0x28]),
+          Buffer.from(',24\n'),
+        ]),
+        /^REFUSED: the file is not valid UTF-8$/,
+      ],
+    ])('refuses %s, as the worker does', async (_name, body, message) => {
+      expect(await run(args(), io(stdinOf(body)))).toBe(1);
+      expect(lines).toEqual([expect.stringMatching(message)]);
+      expect(store.rows.size).toBe(0);
+    });
+
+    it.each([
+      ['header cells with spaces around them', ' name , phone ,age\nAsha,9000000001,24\n'],
+      ['blank lines before the header', '\n \n\r\nname,phone,age\nAsha,9000000001,24\n'],
+      ['a byte-order mark', '﻿name,phone,age\nAsha,9000000001,24\n'],
+    ])('accepts %s, as the worker does', async (_name, body) => {
+      expect(await run(args(), io(stdinOf(body)))).toBe(0);
+    });
+
     it('refuses an empty or oversized file', async () => {
       expect(await run(args(), io(Readable.from([])))).toBe(1);
       const big = Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1, 'a');

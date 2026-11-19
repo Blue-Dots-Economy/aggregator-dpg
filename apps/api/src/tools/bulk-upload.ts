@@ -28,7 +28,12 @@ import {
   initObjectStorage,
   type ObjectRef,
 } from '@aggregator-dpg/object-storage';
-import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import {
+  bulkHeaderColumns,
+  checkBulkHeader,
+  CSV_FIELD_DELIMITER,
+  normaliseHeaderCells,
+} from '@aggregator-dpg/shared-primitives/bulk-columns';
 import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../config.js';
 import { HttpError } from '../errors/http-error.js';
@@ -136,16 +141,39 @@ async function keycloakSubject(coordinatorId: string, io: CommandIo): Promise<st
   return subject.value;
 }
 
-/** The header cells of the CSV's first line, without a byte-order mark. */
+/**
+ * The CSV's header cells, read as the worker reads them: strict UTF-8 with a
+ * byte-order mark dropped, `,` as the delimiter, the first non-empty record,
+ * each cell trimmed.
+ *
+ * @throws {Refusal} When the file is not valid UTF-8.
+ */
 function headerCells(body: Buffer): string[] {
-  const text = body.toString('utf8').replace(/^﻿/, '');
-  const parsed = Papa.parse<string[]>(text, { preview: 1, skipEmptyLines: 'greedy' });
-  return parsed.data[0] ?? [];
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(body);
+  } catch {
+    throw new Refusal('the file is not valid UTF-8');
+  }
+  let first: unknown[] = [];
+  // `preview` counts skipped blank lines, so stop at the first kept record instead.
+  Papa.parse<unknown[]>(text, {
+    header: false,
+    skipEmptyLines: 'greedy',
+    delimiter: CSV_FIELD_DELIMITER,
+    step: (row, parser) => {
+      first = row.data;
+      parser.abort();
+    },
+  });
+  return normaliseHeaderCells(first);
 }
 
 /**
  * Refuses a header the worker would reject: a required column missing, or a
  * column the participant schema does not declare.
+ *
+ * @throws {Refusal} When the header or its encoding would fail the file.
  */
 async function requireValidHeader(type: string, body: Buffer, io: CommandIo): Promise<void> {
   const loaded = await withTimeout(
@@ -154,22 +182,8 @@ async function requireValidHeader(type: string, body: Buffer, io: CommandIo): Pr
     'schema load',
   );
   if (!loaded.success) throw new Error(`participant schema unavailable: ${loaded.error.message}`);
-  const schema = loaded.value;
-  const requiredList = schema['required'];
-  const required = Array.isArray(requiredList)
-    ? requiredList.filter((x): x is string => typeof x === 'string')
-    : [];
-  const props = schema['properties'];
-  const allowed = new Set([
-    ...(props && typeof props === 'object' ? Object.keys(props) : []),
-    ...WELL_KNOWN_COLUMNS,
-  ]);
-  const headers = headerCells(body);
-  const present = new Set(headers);
-  const missing = required.filter((f) => !present.has(f));
-  if (missing.length > 0) throw new Refusal(`missing columns: ${missing.join(', ')}`);
-  const unknown = headers.filter((h) => !allowed.has(h));
-  if (unknown.length > 0) throw new Refusal(`unknown columns: ${unknown.join(', ')}`);
+  const problem = checkBulkHeader(headerCells(body), bulkHeaderColumns(loaded.value));
+  if (problem) throw new Refusal(`${problem.kind} columns: ${problem.columns.join(', ')}`);
 }
 
 /** Reads one upload row. */
