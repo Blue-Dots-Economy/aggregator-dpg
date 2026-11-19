@@ -11,7 +11,6 @@
  * `aggregator_id` claim.
  */
 
-import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -20,15 +19,21 @@ import { requireApproved, type AuthContext } from '../services/auth/access-token
 import { throwIfActingError } from '../services/auth/acting.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { requireServedDomain } from './served-domains-shared.js';
+import { servedDomains } from '../services/user-store/serves.js';
+import {
+  buildPublicUrl,
+  createRegistrationLink,
+  randomSuffix,
+  SLUG_RETRIES,
+} from '../services/registration-links/create.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { httpError } from '../errors/http-error.js';
+import { unwrapOrThrow } from '../errors/unwrap.js';
 import { errorResponses } from '../errors/openapi.js';
-import { config, enabledRegistrationModes } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import {
   botsForDomain,
@@ -36,7 +41,7 @@ import {
   resolveDefaultVoiceBot,
   resolveVoiceBot,
 } from '../services/voice-bots/index.js';
-import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
+import type { VoiceBot } from '@aggregator-dpg/network-config/interface';
 
 type LinkMetrics = {
   total: number;
@@ -143,8 +148,6 @@ const UpdateLinkBodySchema = z
   })
   .strict();
 
-const SLUG_RETRIES = 5;
-
 const ListQuerySchema = z.object({
   status: z.enum(['draft', 'live', 'retired']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -245,85 +248,9 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
       // Validated by the route schema; `expires_at` is a Date or null.
       const body = req.body;
       const networkCfg = await getNetworkConfig();
-      if (!networkCfg.domainIds.includes(body.domain)) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${body.domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-          fields: { domain: 'invalid' },
-        });
-      }
-      await requireServedDomain(auth, body.domain);
-
-      const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
-      // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
-      // enough. When unset, every declared mode is enabled.
-      const enabledModes = enabledRegistrationModes(declaredModes);
-      // No mode given: use `form` if enabled, else the first enabled mode. That can
-      // be `voice` (account-only) when `form` is withheld. The response returns the mode used.
-      const modeKey =
-        body.registration_mode ??
-        (enabledModes.includes('form') ? 'form' : enabledModes[0]) ??
-        'form';
-      if (!enabledModes.includes(modeKey)) {
-        throw httpError('INVALID_REGISTRATION_MODE', {
-          detail: declaredModes.includes(modeKey)
-            ? `registration_mode '${modeKey}' is not enabled for this deployment`
-            : `registration_mode '${modeKey}' is not declared for this network`,
-          fields: { declared: declaredModes, enabled: enabledModes },
-        });
-      }
-      const voiceBotKey = checkVoiceBotChoice(body.voice_bot_key, modeKey, body.domain, networkCfg);
-      const store = getRegistrationLinksStore();
-
-      // Try the caller's slug first and add a short random suffix on collision.
-      // Without one, use a random stem.
-      let created;
-      let slug = '';
-      for (let attempt = 0; attempt < SLUG_RETRIES; attempt++) {
-        if (body.slug) {
-          slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
-        } else {
-          slug = generateSlug();
-        }
-        const result = await store.create({
-          aggregatorId: auth.aggregatorId,
-          slug,
-          domain: body.domain,
-          context: body.context,
-          status: body.status,
-          registrationMode: modeKey,
-          voiceBotKey,
-          expiresAt: body.expires_at,
-          createdBy: auth.userId,
-        });
-        if (result.ok) {
-          created = result.value;
-          break;
-        }
-        if (result.error.code !== 'SLUG_COLLISION') {
-          log.error({
-            status: 'failure',
-            sub: 'store.create',
-            error: result.error.code,
-            latency_ms: Date.now() - start,
-          });
-          throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-        }
-        log.warn({ status: 'retry', reason: 'slug_collision', attempt, slug });
-      }
-      if (!created) {
-        log.error({
-          status: 'failure',
-          reason: 'slug_retries_exhausted',
-          latency_ms: Date.now() - start,
-        });
-        throw httpError('DUPLICATE_SLUG', {
-          detail: 'Could not allocate a unique slug for the link. Please retry.',
-        });
-      }
 
       // Coordinator org_slug for the URL path.
-      const userStore = getUserStore();
-      const aggLookup = await userStore.findById(auth.aggregatorId);
+      const aggLookup = await getUserStore().findById(auth.aggregatorId);
       if (!aggLookup.ok || !aggLookup.value) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(
@@ -333,9 +260,28 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
       }
       const callerOrgSlug = aggLookup.value.orgSlug;
 
+      const { link: created, publicUrl } = unwrapOrThrow(
+        await createRegistrationLink({
+          userId: auth.aggregatorId,
+          orgSlug: callerOrgSlug,
+          servedDomains: servedDomains(auth.serves, networkCfg.domainIds),
+          domain: body.domain,
+          ...(body.registration_mode !== undefined
+            ? { registrationMode: body.registration_mode }
+            : {}),
+          ...(body.voice_bot_key !== undefined ? { voiceBotKey: body.voice_bot_key } : {}),
+          ...(body.slug !== undefined ? { slug: body.slug } : {}),
+          context: body.context,
+          status: body.status,
+          expiresAt: body.expires_at,
+          createdBy: auth.userId,
+          log,
+        }),
+      );
+
       // The public URL exists only once the link is live; a draft slug can still
       // change. The QR is generated client-side from the URL.
-      if (created.status === 'draft') {
+      if (publicUrl === null) {
         log.info({
           status: 'success',
           latency_ms: Date.now() - start,
@@ -346,9 +292,6 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
         });
         return reply.code(201).send(await buildResponse(created, callerOrgSlug));
       }
-
-      // status === 'live': activate at create.
-      const publicUrl = buildPublicUrl(callerOrgSlug, slug);
 
       log.info({
         status: 'success',
@@ -818,78 +761,6 @@ function toVoiceBotResponse(bot: VoiceBot): z.infer<typeof VoiceBotResponseSchem
     languages: bot.languages,
     ...(bot.description !== undefined ? { description: bot.description } : {}),
   };
-}
-
-/**
- * Validates the coordinator's voice-bot choice against the mode and domain.
- *
- * @param requested - `voice_bot_key` from the create body, if any.
- * @param modeKey - The resolved registration mode.
- * @param domain - The link's domain.
- * @param cfg - The resolved network config.
- * @returns The key to store: the chosen one, else the domain's default or only bot,
- *   or `null` only when no bot serves the domain.
- * @throws SCHEMA_VALIDATION when the mode does not offer voice and a key was sent.
- * @throws INVALID_VOICE_BOT when the key is unknown or serves another domain.
- * @throws VOICE_BOT_REQUIRED when several bots serve the domain and none is the default.
- */
-function checkVoiceBotChoice(
-  requested: string | undefined,
-  modeKey: string,
-  domain: string,
-  cfg: ResolvedNetworkConfig,
-): string | null {
-  if (!modeOffersVoice(modeKey, cfg)) {
-    if (requested !== undefined) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `voice_bot_key is not allowed for registration_mode '${modeKey}'`,
-        fields: { voice_bot_key: 'not allowed for this mode' },
-      });
-    }
-    return null;
-  }
-  const serving = botsForDomain(domain, cfg);
-  if (requested !== undefined) {
-    if (!serving.some((b) => b.key === requested)) {
-      throw httpError('INVALID_VOICE_BOT', {
-        detail: `voice_bot_key '${requested}' does not serve domain '${domain}'`,
-        fields: { configured: serving.map((b) => b.key) },
-      });
-    }
-    return requested;
-  }
-  // Store the bot the link resolves to now, not `null`: a later second bot or a
-  // changed default must not move or drop the voice option on a live link.
-  const resolved = resolveDefaultVoiceBot(domain, cfg);
-  if (serving.length > 1 && resolved === null) {
-    throw httpError('VOICE_BOT_REQUIRED', {
-      fields: { configured: serving.map((b) => b.key) },
-    });
-  }
-  return resolved?.key ?? null;
-}
-
-/**
- * Generates the short hex suffix added to a slug on a collision.
- */
-function randomSuffix(bytes = 2): string {
-  return randomBytes(bytes).toString('hex');
-}
-
-/**
- * Generates a random URL-safe slug (16 hex chars). The route still retries on
- * a unique-violation.
- */
-function generateSlug(): string {
-  return randomBytes(8).toString('hex');
-}
-
-/**
- * Builds the public URL for a link: `${base}/<org_slug>/<slug>`.
- */
-function buildPublicUrl(orgSlug: string, slug: string): string {
-  const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
-  return `${base}/${orgSlug}/${slug}`;
 }
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
