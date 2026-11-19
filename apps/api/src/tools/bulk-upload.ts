@@ -12,7 +12,8 @@
  * The CSV is read from stdin; `--file` takes only `-`. The second form waits for an upload and
  * prints its result, or with `--errors-csv` writes its errors report to stdout.
  * Messages and logs go to stderr. The operator is recorded in the logs only.
- * Exit codes: 0 ok, 1 refused or failed, 2 usage.
+ * Exit codes: 0 completed with no failed rows, 1 refused, failed or still
+ * processing, 2 usage, 3 completed with failed rows (or no row counts).
  */
 
 import './log-to-stderr.js';
@@ -56,10 +57,15 @@ import { getUserStore, type Coordinator } from '../services/user-store/index.js'
 const USAGE = [
   'usage: bulk-upload --coordinator <email or user id> --type <profile type> --file - --operator <name> [--skip-rate-limit] < file.csv',
   '       bulk-upload --coordinator <email or user id> --upload-id <id> [--errors-csv]',
+  'exit codes: 0 completed, 1 refused or failed or still processing, 2 usage,',
+  '            3 completed with failed rows (or no row counts)',
 ].join('\n');
 
 /** How often the upload status is read while waiting. */
 const POLL_INTERVAL_MS = 5_000;
+
+/** Exit code of a completed upload with failed rows or no recorded counts. */
+const EXIT_ROWS_FAILED = 3;
 
 /** A user id or upload id; any other `--coordinator` value is looked up as an email. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -239,7 +245,10 @@ async function waitForResult(
   }
 }
 
-/** Prints the final status and counts; exit code 0 only for `completed`. */
+/**
+ * Prints the final status and counts. Exit code 0 for a clean `completed`,
+ * {@link EXIT_ROWS_FAILED} when rows failed or no counts were recorded, else 1.
+ */
 async function report(upload: BulkUpload, io: CommandIo): Promise<number> {
   io.out(`status: ${upload.status}${upload.statusReason ? ` (${upload.statusReason})` : ''}`);
   if (upload.status !== 'completed') return 1;
@@ -253,6 +262,14 @@ async function report(upload: BulkUpload, io: CommandIo): Promise<number> {
   );
   if (upload.errorsCsvStorageKey) {
     io.out(`errors report: --upload-id ${upload.id} --errors-csv > errors.csv`);
+  }
+  if (counts.totalRows === null) {
+    io.out('WARNING: no row counts were recorded for this upload');
+    return EXIT_ROWS_FAILED;
+  }
+  if (counts.failed > 0) {
+    io.out(`WARNING: ${counts.failed} ${counts.failed === 1 ? 'row' : 'rows'} failed`);
+    return EXIT_ROWS_FAILED;
   }
   return 0;
 }

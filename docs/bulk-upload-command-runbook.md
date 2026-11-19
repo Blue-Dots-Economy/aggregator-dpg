@@ -37,9 +37,17 @@ upload 3f6c…e1 started
 status: completed
 rows: 120 total, 117 passed, 3 failed, 0 skipped
 errors report: --upload-id 3f6c…e1 --errors-csv > errors.csv
+WARNING: 3 rows failed
 ```
 
-Note the upload id; it is printed as soon as the upload is created, so it is there even if a later step fails. Exit code 0 means the upload completed; 1 means it was refused, failed, or is still processing; 2 means the arguments were wrong.
+Note the upload id; it is printed as soon as the upload is created, so it is there even if a later step fails. Exit codes:
+
+| Code | Meaning                                                                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 0    | The upload completed and no row failed.                                                                                       |
+| 1    | Refused, failed, or still processing.                                                                                         |
+| 2    | The arguments were wrong.                                                                                                     |
+| 3    | The upload completed with failed rows (or no row counts were recorded); it prints a `WARNING:` line. Fetch the errors report. |
 
 ### Rate limit
 

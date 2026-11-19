@@ -155,7 +155,7 @@ describe('bulk-upload command', () => {
     csvChunks = [];
     csvOut = new PassThrough();
     csvOut.on('data', (c: Buffer) => csvChunks.push(c));
-    counts = { totalRows: 2, passed: 1, failed: 1, skipped: 0 };
+    counts = { totalRows: 2, passed: 2, failed: 0, skipped: 0 };
     _setCountsLoader(async () => counts);
 
     loadConsentConfigMock.mockReset().mockResolvedValue({
@@ -223,7 +223,7 @@ describe('bulk-upload command', () => {
   });
 
   describe('a new upload', () => {
-    it('uploads as the coordinator with the portal attestation and points to the errors report', async () => {
+    it('uploads as the coordinator with the portal attestation', async () => {
       expect(await run(args(), io())).toBe(0);
 
       const upload = store.get(UPLOAD_1);
@@ -238,9 +238,25 @@ describe('bulk-upload command', () => {
         `upload ${UPLOAD_1} created`,
         `upload ${UPLOAD_1} started`,
         'status: completed',
-        'rows: 2 total, 1 passed, 1 failed, 0 skipped',
+        'rows: 2 total, 2 passed, 0 failed, 0 skipped',
         `errors report: --upload-id ${UPLOAD_1} --errors-csv > errors.csv`,
       ]);
+    });
+
+    it('answers 3 with a warning and points to the errors report when rows failed', async () => {
+      counts = { totalRows: 2, passed: 1, failed: 1, skipped: 0 };
+      expect(await run(args(), io())).toBe(3);
+      expect(lines.slice(-3)).toEqual([
+        'rows: 2 total, 1 passed, 1 failed, 0 skipped',
+        `errors report: --upload-id ${UPLOAD_1} --errors-csv > errors.csv`,
+        'WARNING: 1 row failed',
+      ]);
+    });
+
+    it('answers 3 with a warning when the completed upload has no counts', async () => {
+      counts = { totalRows: null, passed: 0, failed: 0, skipped: 0 };
+      expect(await run(args(), io())).toBe(3);
+      expect(lines.at(-1)).toBe('WARNING: no row counts were recorded for this upload');
     });
 
     it('finds the coordinator by email', async () => {
@@ -503,6 +519,7 @@ describe('bulk-upload command', () => {
       expect(await run(argv, io())).toBe(2);
       expect(lines[0]).toContain(message);
       expect(lines[1]).toMatch(/^usage: /);
+      expect(lines.join('\n')).toContain('3 completed with failed rows');
     });
 
     it.each(['seekers.csv', '/etc/passwd', './-'])('answers 2 for --file %j', async (file) => {
