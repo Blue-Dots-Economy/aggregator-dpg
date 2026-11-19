@@ -135,6 +135,7 @@ function makeRow(overrides: Partial<Organisation> = {}): Organisation {
     createdAt,
     updatedAt: createdAt,
     updatedBy: null,
+    createdBy: 'self',
     rejectedAt: null,
     isDefault: false,
     locations: [],
@@ -384,6 +385,22 @@ describe('PostgresOrganisationStore.findById / findBySlug / findByOwnerEmail', (
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('findById reads who created the org', async () => {
+    const db = makeFakeDb(() => [makeRow({ id: 'org-1', createdBy: 'provisioned:ops' })]);
+    _setDbClients(null, db as never);
+    const store = new PostgresOrganisationStore();
+    const result = await store.findById('org-1');
+    expect(result.ok && result.value?.createdBy).toBe('provisioned:ops');
+  });
+
+  it('findById reads a row with no recorded creator as self', async () => {
+    const db = makeFakeDb(() => [{ ...makeRow({ id: 'org-1' }), createdBy: null }]);
+    _setDbClients(null, db as never);
+    const store = new PostgresOrganisationStore();
+    const result = await store.findById('org-1');
+    expect(result.ok && result.value?.createdBy).toBe('self');
   });
 
   it('findBySlug returns the mapped row when found', async () => {

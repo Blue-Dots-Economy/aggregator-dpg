@@ -852,6 +852,7 @@ function toDomain(row: JoinedRow): Organisation {
     createdAt: o.createdAt,
     updatedAt: o.updatedAt,
     updatedBy: o.updatedBy,
+    createdBy: o.createdBy ?? 'self',
     rejectedAt: o.rejectedAt,
     isDefault,
     locations: o.locations,

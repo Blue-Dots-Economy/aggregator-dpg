@@ -56,6 +56,11 @@ export interface Organisation {
    * link) or `'self'`; `null` when unknown.
    */
   updatedBy: string | null;
+  /**
+   * Who created the org: `'self'`, or `provisioned:<operator>` for an operator-provisioned
+   * org (see `isProvisioned`). Rows with no recorded creator read as `'self'`.
+   */
+  createdBy: string;
   /** Write-once rejection time; drives the cooling window. */
   rejectedAt: Date | null;
   /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
