@@ -9,6 +9,7 @@
  */
 
 import Papa from 'papaparse';
+import type { PlanProblemCode } from './org-loader-plan.js';
 
 /** Keys of the org form's address block. */
 export type AddressPart =
@@ -56,7 +57,7 @@ export interface CoordinatorRow {
 export interface InputProblem {
   file: 'orgs' | 'coordinators';
   line: number;
-  code: InputProblemCode;
+  code: InputProblemCode | PlanProblemCode;
   field?: string;
 }
 
