@@ -617,7 +617,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       config: { rbac: { access: 'public' } },
       schema: {
         tags: ['public-registration'],
-        summary: 'Request a call with the voice bot of a public link',
+        summary: 'Get the voice-bot number of a public link, creating the account if new',
         description:
           "Public endpoint behind the 'talk to the voice bot' option of a two-option link. Checks the phone with signalstack first: a new phone gets an account (no profile) under the link's aggregator; an existing one, whoever owns it, is left untouched. Returns the bot's number either way (200, never 409 for an existing account). 409 when the link offers no voice option or no bot resolves; 429 when the per-link rate limit, shared with the form submit, trips.",
         params: LinkParamsSchema,

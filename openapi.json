@@ -19706,7 +19706,7 @@
     },
     "/public/v1/aggregators/{orgSlug}/voice-requests/{slug}": {
       "post": {
-        "summary": "Request a call with the voice bot of a public link",
+        "summary": "Get the voice-bot number of a public link, creating the account if new",
         "tags": [
           "public-registration"
         ],
