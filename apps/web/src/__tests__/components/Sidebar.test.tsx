@@ -482,6 +482,18 @@ describe("<Sidebar /> acting as the owner's own coordinator account", () => {
     expect(screen.getAllByText('Coordinator · Acme Jobs').length).toBeGreaterThan(0);
   });
 
+  it('offers no campaign entry point (the API refuses campaign routes while acting)', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    const hrefs = within(aside)
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.length).toBeGreaterThan(0);
+    expect(hrefs.filter((h) => /campaign/i.test(h))).toEqual([]);
+    expect(within(aside).queryByText(/campaign/i)).toBeNull();
+  });
+
   it('shows no Back to console for a plain coordinator', () => {
     render(<Sidebar />);
     expect(screen.queryByRole('link', { name: /Back to console/ })).toBeNull();
