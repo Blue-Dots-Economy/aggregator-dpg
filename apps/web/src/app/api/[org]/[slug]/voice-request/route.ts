@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
+import { forwardedForHeader } from '@/lib/client-ip';
 
 export const runtime = 'nodejs';
 
@@ -92,11 +93,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   // Forward the client IP and user-agent so the API rate-limits per caller.
-  // An existing `x-forwarded-for` chain is kept as-is.
-  const incomingXff = req.headers.get('x-forwarded-for');
-  const clientIp =
-    (incomingXff?.split(',')[0]?.trim() ?? '') || ((req as { ip?: string }).ip ?? '');
-  const forwardedFor = incomingXff && incomingXff.length > 0 ? incomingXff : clientIp;
+  // Only the IP the trusted proxy saw is sent, never the caller's own chain.
+  const forwardedFor = forwardedForHeader(req.headers);
   const userAgent = req.headers.get('user-agent') ?? '';
 
   let upstream: Response;
@@ -108,7 +106,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
         headers: {
           'Content-Type': 'application/json',
           [REQUEST_ID_HEADER]: reqId,
-          ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
+          ...forwardedFor,
           ...(userAgent ? { 'user-agent': userAgent } : {}),
         },
         body: JSON.stringify(body),

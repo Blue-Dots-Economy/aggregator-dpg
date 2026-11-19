@@ -42,7 +42,7 @@ describe('POST /api/[org]/[slug]/submit', () => {
       headers: {
         'content-type': 'application/json',
         'x-request-id': 'req-abc',
-        'x-forwarded-for': '10.0.0.9',
+        'x-forwarded-for': '198.51.100.66, 10.0.0.9',
         'user-agent': 'vitest',
       },
       body: JSON.stringify({ name: 'Jane' }),
