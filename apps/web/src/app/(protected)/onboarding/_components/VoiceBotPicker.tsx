@@ -9,9 +9,9 @@ import type { ListVoiceBotsResponse, VoiceBotOption } from '@/services/onboardin
 export interface VoiceBotPickerProps {
   /** Domain the link is for; the bot list is fetched per domain. */
   domain: string;
-  /** The chosen bot key, or `null` to follow the instance default. */
+  /** The chosen bot key, or `null` when none is picked (the API then stores the default). */
   value: string | null;
-  /** Called with the picked key, or `null` when the default bot is picked. */
+  /** Called with the picked bot's key, including when it is the default. */
   onChange: (key: string | null) => void;
   /** Shows the "choose a voice bot" message; set by the form after a blocked submit. */
   showChoiceRequired?: boolean;
@@ -56,8 +56,8 @@ function BotDetails({ bot }: { bot: VoiceBotOption }) {
  * Voice bot choice for a link that offers voice.
  *
  * Several bots show as radio rows with the instance default preselected; one
- * bot shows as read-only text; none shows a note. Picking the default reports
- * `null`, so the link keeps following the default.
+ * bot shows as read-only text; none shows a note. Picking any bot, the default
+ * included, reports its key, so the link stays on that bot if the default changes.
  */
 export function VoiceBotPicker({
   domain,
@@ -97,7 +97,7 @@ export function VoiceBotPicker({
                 name={`voice-bot-${domain}`}
                 className="mt-1 shrink-0"
                 checked={selected === bot.key}
-                onChange={() => onChange(bot.key === defaultKey ? null : bot.key)}
+                onChange={() => onChange(bot.key)}
               />
               <BotDetails bot={bot} />
             </label>

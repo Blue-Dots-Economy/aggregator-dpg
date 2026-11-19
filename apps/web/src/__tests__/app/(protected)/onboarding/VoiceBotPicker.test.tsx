@@ -102,7 +102,7 @@ describe('<VoiceBotPicker />', () => {
     expect(screen.queryByText('Choose a voice bot for this link.')).not.toBeInTheDocument();
   });
 
-  it('reports a non-default pick by key and the default pick as null', async () => {
+  it('reports a non-default pick by its key', async () => {
     const user = userEvent.setup();
     listVoiceBots.mockResolvedValue({
       voice_bots: [BOT_HI, BOT_KN],
@@ -113,7 +113,7 @@ describe('<VoiceBotPicker />', () => {
     expect(onChange).toHaveBeenCalledWith('up-hi');
   });
 
-  it('reports null when the default is picked after another bot', async () => {
+  it('reports the default bot by its key, not null, when picked after another bot', async () => {
     const user = userEvent.setup();
     listVoiceBots.mockResolvedValue({
       voice_bots: [BOT_HI, BOT_KN],
@@ -121,7 +121,8 @@ describe('<VoiceBotPicker />', () => {
     });
     const onChange = renderPicker({ value: 'up-hi' });
     await user.click(await screen.findByRole('radio', { name: /UP Kannada Bot/ }));
-    expect(onChange).toHaveBeenCalledWith(null);
+    expect(onChange).toHaveBeenCalledWith('ka-kn');
+    expect(onChange).not.toHaveBeenCalledWith(null);
   });
 
   it('shows the chosen bot as selected', async () => {

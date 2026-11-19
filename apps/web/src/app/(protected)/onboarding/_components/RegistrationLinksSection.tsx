@@ -53,7 +53,7 @@ interface CreateLinkFormState {
    * Set at create time and cannot change. Empty until the config loads.
    */
   registration_mode: string;
-  /** Chosen voice bot key, or `null` to follow the instance default. Only sent when the mode offers voice. */
+  /** Chosen voice bot key, or `null` to let the API store the default bot. Only sent when the mode offers voice. */
   voice_bot_key: string | null;
   /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
   tags: string;
