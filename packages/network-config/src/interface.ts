@@ -412,7 +412,7 @@ export const AggregatorYamlSchema = z.object({
       }
       for (const [domain, key] of Object.entries(cfg.default_voice_bots ?? {})) {
         const bot = cfg.voice_bots.find((b) => b.key === key);
-        if (!bot || !bot.domains.includes(domain)) {
+        if (!bot?.domains.includes(domain)) {
           ctx.addIssue({
             code: 'custom',
             path: ['default_voice_bots', domain],
