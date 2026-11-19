@@ -267,6 +267,64 @@ async function manageScope(
   return manageableOrgIds(req, actor, await rootOrgId(), purpose);
 }
 
+/** Rejects a `serves` list that names a domain the network does not have. */
+function assertKnownDomains(serves: string[], domainIds: string[]): void {
+  const unknown = serves.filter((d) => !domainIds.includes(d));
+  if (unknown.length > 0) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'serves lists a domain this network does not have.',
+      fields: { field: 'serves', unknown },
+    });
+  }
+}
+
+/**
+ * Pushes a coordinator's domains to its Signals organisation, or null when no
+ * Signals writer is configured.
+ */
+function buildPushDomains(
+  row: { id: string; name: string; orgSlug: string },
+  requestId: string,
+  log: FastifyBaseLogger,
+): ((domains: string[]) => Promise<boolean>) | null {
+  const signalstack = getSignalStackWriter();
+  if (!signalstack) return null;
+  return async (domains) => {
+    const upsert = await signalstack.upsertAggregator({
+      external_id: row.id,
+      name: row.name,
+      slug: row.orgSlug,
+      domains,
+      requestId,
+    });
+    if (!upsert.success) {
+      log.error({
+        status: 'failure',
+        sub_operation: 'signalstack.upsertAggregator',
+        code: upsert.error.code,
+      });
+    }
+    return upsert.success;
+  };
+}
+
+function logLogoutFailure(log: FastifyBaseLogger, code: string): void {
+  log.warn({ status: 'failure', sub_operation: 'idp.logoutSessions', code });
+}
+
+/** Tells the owning org's owner that an admin changed a user's domains. */
+async function notifyOwnerOfDomainChange(
+  actor: Parameters<typeof notifyOwnerOfAdminAction>[0],
+  parentOrgId: string | null | undefined,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (!parentOrgId) return;
+  const org = await getOrganisationStore().findById(parentOrgId);
+  if (org.ok && org.value) {
+    await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", log);
+  }
+}
+
 /**
  * Loads a coordinator the actor may manage (in reach, and `org.manage` in its
  * organisation) or, for `view`, read; else 404 so ids cannot be probed.
@@ -796,13 +854,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
 
       const networkCfg = await getNetworkConfig();
       const serves = [...new Set(body.serves)];
-      const unknown = serves.filter((d) => !networkCfg.domainIds.includes(d));
-      if (unknown.length > 0) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'serves lists a domain this network does not have.',
-          fields: { field: 'serves', unknown },
-        });
-      }
+      assertKnownDomains(serves, networkCfg.domainIds);
       const log = req.log.child({
         operation: 'console.user.update',
         actor_id: actor.userId,
@@ -818,26 +870,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       // An approved coordinator's Signals org carries its domains. If a later
       // step fails, Keycloak and Signals are put back, so every side stays
       // unchanged.
-      const signalstack = getSignalStackWriter();
-      const pushDomains = signalstack
-        ? async (domains: string[]): Promise<boolean> => {
-            const upsert = await signalstack.upsertAggregator({
-              external_id: row.id,
-              name: row.name,
-              slug: row.orgSlug,
-              domains,
-              requestId: req.id,
-            });
-            if (!upsert.success) {
-              log.error({
-                status: 'failure',
-                sub_operation: 'signalstack.upsertAggregator',
-                code: upsert.error.code,
-              });
-            }
-            return upsert.success;
-          }
-        : null;
+      const pushDomains = buildPushDomains(row, req.id, log);
       // What Keycloak and Signals are put back to: the stored types still in
       // the network, the same value the profile-types sync writes.
       const previous = servedDomains(row.serves, networkCfg.domainIds);
@@ -857,13 +890,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       }
       // End the coordinator's sessions so its next login carries the new types.
       const logout = kcUserId === null ? null : await getIdpAdmin().logoutSessions(kcUserId);
-      if (logout && !logout.ok) {
-        log.warn({
-          status: 'failure',
-          sub_operation: 'idp.logoutSessions',
-          code: logout.error.code,
-        });
-      }
+      if (logout && !logout.ok) logLogoutFailure(log, logout.error.code);
       // Approved meanwhile with the old domains: push again. Saving again
       // repeats the push.
       if (
@@ -883,12 +910,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         shared_login: kcUserId === null,
       });
 
-      if (row.parentOrgId) {
-        const org = await getOrganisationStore().findById(row.parentOrgId);
-        if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", req.log);
-        }
-      }
+      await notifyOwnerOfDomainChange(actor, row.parentOrgId, req.log);
       return reply.status(200).send(
         toWireUser(updated.value, {
           masked: !(await showsContact(req, actor, row.parentOrgId ?? null)),
