@@ -9,7 +9,8 @@
  * A role with a day limit is assigned for a chosen number of days. A role that
  * reveals personal data, and every removal, asks for confirmation first. An
  * additional role whose permissions the base role already grants shows as held,
- * with no expiry and no assign or remove action.
+ * with no expiry and no assign or remove action. The "every change is recorded"
+ * note shows only when some role on the panel can be assigned or removed.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -106,6 +107,10 @@ export function RolesPanel({
   const basePermissions = new Set(base.flatMap((b) => roleOf(b.role_key)?.permissions ?? []));
   const coveredByBase = (role: Role | undefined) =>
     !!role && role.permissions.length > 0 && role.permissions.every((p) => basePermissions.has(p));
+
+  // A row offers an action only for a role the caller may assign or remove here
+  // that the base role does not already cover; with none, nothing can change.
+  const changeable = shown.some((key) => assignable.has(key) && !coveredByBase(roleOf(key)));
 
   const daysFor = (key: string): number | null => {
     const max = roleOf(key)?.max_days ?? null;
@@ -284,13 +289,19 @@ export function RolesPanel({
           );
         })}
       </ul>
-      <div className="mx-[22px] mt-1 mb-[18px] flex flex-col gap-2 border-t border-(--bd-border-soft) pt-3 text-[12.5px] text-ink-500">
-        <span className="inline-flex items-center gap-2">
-          <Clock size={14} aria-hidden="true" />
-          {t('roles.recorded')}
-        </span>
-        {note ? <output className="text-[13px] text-ink-700">{note}</output> : null}
-      </div>
+      {changeable || note ? (
+        <div className="mx-[22px] mt-1 mb-[18px] flex flex-col gap-2 border-t border-(--bd-border-soft) pt-3 text-[12.5px] text-ink-500">
+          {changeable ? (
+            <span className="inline-flex items-center gap-2">
+              <Clock size={14} aria-hidden="true" />
+              {t('roles.recorded')}
+            </span>
+          ) : null}
+          {note ? <output className="text-[13px] text-ink-700">{note}</output> : null}
+        </div>
+      ) : (
+        <div className="pb-[18px]" />
+      )}
       <ConfirmDialog
         open={dialog !== null}
         title={dialog?.title ?? ''}

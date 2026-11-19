@@ -101,6 +101,13 @@ describe('<RolesPanel />', () => {
     expect(options.map((o) => o.textContent)).toEqual(['30 days', '60 days', '90 days']);
     fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
     expect(screen.getAllByRole('button', { name: messages.console.roles.assign })).toHaveLength(2);
+    expect(screen.getByText(messages.console.roles.recorded)).toBeInTheDocument();
+  });
+
+  it('shows no "every change is recorded" note when no role can be changed', () => {
+    renderIt({ ...initial(), assignable: [] });
+    expect(screen.getByTestId('role-base-coordinator')).toBeInTheDocument();
+    expect(screen.queryByText(messages.console.roles.recorded)).toBeNull();
   });
 
   it('renders nothing when the user has no role here', () => {
@@ -201,6 +208,7 @@ describe('<RolesPanel />', () => {
     expect(screen.queryByRole('button', { name: messages.console.roles.assign })).toBeNull();
     expect(screen.queryByRole('button', { name: messages.console.roles.revoke })).toBeNull();
     expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByText(messages.console.roles.recorded)).toBeNull();
   });
 
   it('revokes a live role the base role does not cover', async () => {
@@ -248,5 +256,14 @@ describe('<RolesPanel />', () => {
       messages.console.roles.no_expiry,
     );
     expect(screen.queryByRole('button', { name: messages.console.roles.revoke })).toBeNull();
+    expect(screen.queryByText(messages.console.roles.recorded)).toBeNull();
+  });
+
+  it('keeps the note when a live role can be removed', () => {
+    renderIt({
+      ...initial([live('region_viewer', null)]),
+      assignable: [{ role_key: 'region_viewer', org_id: orgId }],
+    });
+    expect(screen.getByText(messages.console.roles.recorded)).toBeInTheDocument();
   });
 });
