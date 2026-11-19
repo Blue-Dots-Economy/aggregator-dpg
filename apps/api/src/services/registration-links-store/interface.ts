@@ -23,6 +23,8 @@ export interface RegistrationLink {
   context: Record<string, unknown>;
   /** See {@link RegistrationLinkRegistrationMode}. */
   registrationMode: RegistrationLinkRegistrationMode;
+  /** Voice bot key chosen at create; immutable afterwards. `null` when the link has none. */
+  voiceBotKey: string | null;
   /**
    * Read only, for older rows; the QR is generated client-side. Do not add a write path.
    */
@@ -42,6 +44,8 @@ export interface CreateRegistrationLinkInput {
   status?: RegistrationLinkStatus;
   /** Defaults to the network's `form` mode when omitted. */
   registrationMode?: RegistrationLinkRegistrationMode;
+  /** Voice bot key; omitted is stored as `null`. */
+  voiceBotKey?: string | null;
   expiresAt?: Date | null;
   createdBy: string;
 }

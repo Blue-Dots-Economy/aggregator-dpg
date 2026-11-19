@@ -538,6 +538,8 @@ export const registrationLinks = pgTable(
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
+    // Voice bot key (a `voice_bots` config key) chosen at create. Immutable after create.
+    voiceBotKey: text('voice_bot_key'),
     // Not written. QR codes are generated client-side. Kept for reading old rows.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
