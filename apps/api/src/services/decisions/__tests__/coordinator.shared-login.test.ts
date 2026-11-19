@@ -20,7 +20,6 @@ import { approveCoordinator } from '../coordinator.js';
 const ID = '11111111-1111-4111-8111-111111111111';
 const ADMIN = '22222222-2222-4222-8222-222222222222';
 const ORG = '33333333-3333-4333-8333-333333333333';
-const SUB = 'kc-owner-sub';
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
 
 /** Every Keycloak user write a coordinator path could make. */
@@ -36,8 +35,14 @@ describe('approveCoordinator on a shared login', () => {
   let store: UserStoreFake;
   let idp: IdpAdminFake;
   let signals: SignalStackWriterFake;
+  /** The owner's Keycloak user, shared by both accounts. */
+  let SUB: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    idp = new IdpAdminFake();
+    const owner = await idp.createUser({ email: 'owner@example.org' });
+    if (!owner.ok) throw new Error('fake createUser failed');
+    SUB = owner.value.id;
     store = new UserStoreFake();
     store.seed([
       buildCoordinator({
@@ -56,7 +61,6 @@ describe('approveCoordinator on a shared login', () => {
       { userId: ADMIN, userType: 'admin', provider: IDP_PROVIDER, subject: SUB },
       { userId: ID, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUB },
     ]);
-    idp = new IdpAdminFake();
     signals = new SignalStackWriterFake();
     _setUserStore(store);
     _setOrganisationStore(orgs);
@@ -118,6 +122,25 @@ describe('approveCoordinator on a shared login', () => {
       for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     },
   );
+
+  it('provisions Keycloak as before for a legacy login whose user carries aggregator_id', async () => {
+    await idp.setAttributes(SUB, { aggregator_id: ID });
+    const enable = vi.spyOn(idp, 'enableUser');
+    const decision = vi.spyOn(idp, 'setUserDecision');
+
+    expect(await approve()).toEqual({ kind: 'approved' });
+
+    expect(enable).toHaveBeenCalledWith(SUB);
+    expect(decision).toHaveBeenCalledWith(SUB, 'approved');
+  });
+
+  it('answers unavailable when Keycloak cannot be read for the shared-login check', async () => {
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const spies = spyWrites();
+
+    expect(await approve()).toEqual({ kind: 'unavailable', dependency: 'idp' });
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
 
   it('answers unavailable when the identity store fails', async () => {
     const identities = new IdentityStoreFake();

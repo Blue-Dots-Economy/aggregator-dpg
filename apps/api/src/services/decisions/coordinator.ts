@@ -6,8 +6,9 @@
  * Keycloak before its compare-and-set; if that loses, the Keycloak user is
  * disabled and stamped `rejected` again.
  *
- * A shared login (the coordinator's login also holds an admin account, made by
- * the owner self-add) is never written in Keycloak here: the row's `status`
+ * A shared login (the coordinator's login also holds an admin account and its
+ * Keycloak user has no `aggregator_id`, as the owner self-add leaves it) is
+ * never written in Keycloak here: the row's `status`
  * and `signalstack_org_id` are the only record of that account.
  */
 
@@ -18,6 +19,7 @@ import { getOrganisationStore } from '../organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../idp-admin/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { getIdentityStore } from '../identity-store/index.js';
+import { isSharedLogin } from '../auth/shared-login.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { servedDomains } from '../user-store/serves.js';
@@ -105,11 +107,13 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
   const store = getUserStore();
   const idp = getIdpAdmin();
 
-  // A login that also holds an admin account is the owner's: no Keycloak write
-  // below may touch it.
+  // An owner's shared login (an admin account, no `aggregator_id`): no
+  // Keycloak write below may touch it.
   const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, kcUserId);
   if (!accounts.ok) return { kind: 'unavailable', dependency: 'db' };
-  const sharedLogin = accounts.value.admin !== null;
+  const shared = await isSharedLogin(kcUserId, accounts.value);
+  if (!shared.ok) return { kind: 'unavailable', dependency: 'idp' };
+  const sharedLogin = shared.value;
 
   // The coordinator's org must still be active.
   if (aggregator.parentOrgId) {

@@ -10,6 +10,16 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 
 **Acting account (`x-acting-account`).** An org owner whose login also holds its own coordinator account may send `x-acting-account: <coordinator users.id>` with its owner token. Only `requireApproved`, `authenticateAllowingActing` (used by `GET /v1/aggregators/profile/me` alone, which must also show a pending account) and the actor resolver accept it; `authenticate` alone does not, so the profile PATCH, which writes the login's Keycloak attributes, refuses it. `services/auth/acting.ts` checks that the account is the coordinator linked to this login, that the login also holds an owner account, and that the coordinator and its org are active, else `403 ACTING_ACCOUNT_INVALID` (`503 ACTING_UNAVAILABLE` on a store failure). The route permission is still the edge's: the token's `roles` claim carries the coordinator account's roles as `acting:<id>:<roleKey>` entries (`ACTING_ROLE_PREFIX`, `@aggregator-dpg/rbac`), which the edge applies only with a matching header and then instead of the owner's roles (`docs/rbac/rbac-edge-enforcement.md` §3.2). Any other reader of the `roles` claim must ignore `acting:` entries.
 
+**Shared login = an admin account and no `aggregator_id`.** A login is an owner's shared login only when an admin account is linked to its Keycloak user **and** that user carries no `aggregator_id` (`services/auth/shared-login.ts`; the self-add never writes it). Token roles (`token-roles.ts`), coordinator approval (`decisions/coordinator.ts`) and the console's Keycloak writes (`coordinatorLoginForWrite`) all use that check. A person registered as both an owner and a coordinator before self-add, whose Keycloak user carries the coordinator's `aggregator_id`, keeps the old behaviour: each account's roles are written separately and coordinator Keycloak writes are made. Before deploying, count the people who hold both account types, read-only (before deploy, every one of them is such a legacy case):
+
+```sql
+SELECT count(*) AS contacts_with_both_types
+FROM (SELECT contact_id FROM users GROUP BY contact_id
+      HAVING count(DISTINCT user_type) = 2) AS both_types;
+```
+
+**Open question (product / architect): a former owner keeps acting access.** The acting check (`acting.ts`) asks whether the login holds _an_ owner account, not whether it still owns the coordinator's org. After an ownership transfer, a former owner whose admin account remains keeps acting as its own coordinator account in the old org (its edge roles are that coordinator's, not an owner's). This is the current behaviour and is not changed here.
+
 ## Registration status has no documented state machine — here it is
 
 `AggregatorStatus = 'pending' | 'active' | 'inactive' | 'retired'` (`packages/db-schema/src/schema-types.ts:17`) is a bare type union in code with no transition diagram anywhere. In practice:

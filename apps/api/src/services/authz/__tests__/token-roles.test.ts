@@ -38,8 +38,14 @@ function fakeDeps(actor: ActorResult, over: Partial<TokenRolesDeps> = {}) {
   const dirty: string[] = [];
   const deps: TokenRolesDeps = {
     actorOf: async () => actor,
-    loginAccountsOf: async () => ({ ok: true, value: { admin: null, coordinator: null } }),
-    accountsOfLogin: async () => ({ ok: true, value: { admin: null, coordinator: null } }),
+    loginAccountsOf: async () => ({
+      ok: true,
+      value: { admin: null, coordinator: null, shared: false },
+    }),
+    accountsOfLogin: async () => ({
+      ok: true,
+      value: { admin: null, coordinator: null, shared: false },
+    }),
     idpUserOf: async () => ({ ok: true, value: 'kc-1' }),
     writeRoles: async (idp, roles) => {
       writes.push({ idp, roles });
@@ -219,7 +225,10 @@ describe('syncTokenRoles on a shared login', () => {
       { ok: true, value: null },
       {
         actorOf: async (id) => ({ ok: true, value: actors[id] ?? null }),
-        loginAccountsOf: async () => ({ ok: true, value: { admin: ADMIN, coordinator: COORD } }),
+        loginAccountsOf: async () => ({
+          ok: true,
+          value: { admin: ADMIN, coordinator: COORD, shared: true },
+        }),
         idpUserOf: async (id) => {
           idpLookups.push(id);
           return { ok: true, value: 'kc-shared' };
@@ -308,10 +317,29 @@ describe('syncTokenRoles on a shared login', () => {
 
   it('a coordinator not on a shared login behaves as before', async () => {
     const { deps, writes, locks } = sharedDeps();
-    deps.loginAccountsOf = async () => ({ ok: true, value: { admin: null, coordinator: COORD } });
+    deps.loginAccountsOf = async () => ({
+      ok: true,
+      value: { admin: null, coordinator: COORD, shared: false },
+    });
     expect(await syncTokenRoles(COORD, 'test', deps)).toBe('synced');
     expect(writes).toEqual([{ idp: 'kc-shared', roles: ['coordinator'] }]);
     expect(locks).toEqual([COORD]);
+  });
+
+  it('a legacy login holding both accounts (its Keycloak user carries aggregator_id) is not shared', async () => {
+    const { deps, writes, locks } = sharedDeps();
+    deps.loginAccountsOf = async () => ({
+      ok: true,
+      value: { admin: ADMIN, coordinator: COORD, shared: false },
+    });
+    expect(await syncTokenRoles(COORD, 'test', deps)).toBe('synced');
+    expect(writes).toEqual([{ idp: 'kc-shared', roles: ['coordinator'] }]);
+    expect(locks).toEqual([COORD]);
+    writes.length = 0;
+    locks.length = 0;
+    expect(await syncTokenRoles(ADMIN, 'test', deps)).toBe('synced');
+    expect(writes).toEqual([{ idp: 'kc-shared', roles: ['org_admin'] }]);
+    expect(locks).toEqual([ADMIN]);
   });
 });
 
@@ -323,7 +351,10 @@ describe('syncTokenRoles for a coordinator outside a shared login', () => {
       {
         // The coordinator has no recorded login; the user found for it is shared.
         idpUserOf: async () => ({ ok: true, value: 'kc-shared' }),
-        accountsOfLogin: async () => ({ ok: true, value: { admin: 'a1', coordinator: null } }),
+        accountsOfLogin: async () => ({
+          ok: true,
+          value: { admin: 'a1', coordinator: null, shared: true },
+        }),
       },
     );
     expect(await syncTokenRoles('c1', 'test', deps)).toBe('no_login');
@@ -355,7 +386,7 @@ describe('syncTokenRoles for a coordinator outside a shared login', () => {
       {
         accountsOfLogin: async () => {
           checked = true;
-          return { ok: true, value: { admin: 'a1', coordinator: null } };
+          return { ok: true, value: { admin: 'a1', coordinator: null, shared: true } };
         },
       },
     );
@@ -401,26 +432,51 @@ describe('the default dependencies', () => {
     expect(res).toEqual({ ok: true, value: null });
   });
 
-  it("lists a login's admin and coordinator accounts", async () => {
+  /** A Keycloak user holding an admin and a coordinator account. */
+  async function twoAccountLogin(aggregatorId?: string) {
+    const idp = new IdpAdminFake();
+    _setIdpAdmin(idp);
+    const subject = await kcUser(idp, aggregatorId);
     const store = new IdentityStoreFake();
     store.seed([
-      buildIdentity({ userId: 'a1', subject: 'kc-s' }),
-      buildIdentity({ userId: 'c1', userType: 'coordinator', subject: 'kc-s' }),
+      buildIdentity({ userId: 'a1', subject }),
+      buildIdentity({ userId: 'c1', userType: 'coordinator', subject }),
     ]);
     _setIdentityStore(store);
+    return { idp, subject };
+  }
+
+  it("lists a self-added owner's login as shared", async () => {
+    await twoAccountLogin();
     const deps = defaultTokenRolesDeps();
-    const shared = { ok: true, value: { admin: 'a1', coordinator: 'c1' } };
+    const shared = { ok: true, value: { admin: 'a1', coordinator: 'c1', shared: true } };
     expect(await deps.loginAccountsOf('c1')).toEqual(shared);
     expect(await deps.loginAccountsOf('a1')).toEqual(shared);
   });
 
+  it('does not list a login whose Keycloak user carries aggregator_id as shared', async () => {
+    const { subject } = await twoAccountLogin('c1');
+    const deps = defaultTokenRolesDeps();
+    const legacy = { ok: true, value: { admin: 'a1', coordinator: 'c1', shared: false } };
+    expect(await deps.loginAccountsOf('c1')).toEqual(legacy);
+    expect(await deps.accountsOfLogin(subject)).toEqual(legacy);
+  });
+
+  it('fails when Keycloak cannot be read for the shared-login check', async () => {
+    const { idp } = await twoAccountLogin();
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const res = await defaultTokenRolesDeps().loginAccountsOf('c1');
+    expect(res).toMatchObject({ ok: false, error: { code: 'IDP_UNAVAILABLE' } });
+  });
+
   it("lists the accounts on a Keycloak user's login", async () => {
+    _setIdpAdmin(new IdpAdminFake());
     const store = new IdentityStoreFake();
     store.seed([buildIdentity({ userId: 'a1', subject: 'kc-s' })]);
     _setIdentityStore(store);
     expect(await defaultTokenRolesDeps().accountsOfLogin('kc-s')).toEqual({
       ok: true,
-      value: { admin: 'a1', coordinator: null },
+      value: { admin: 'a1', coordinator: null, shared: true },
     });
   });
 
@@ -428,7 +484,7 @@ describe('the default dependencies', () => {
     _setIdentityStore(new IdentityStoreFake());
     expect(await defaultTokenRolesDeps().loginAccountsOf('c9')).toEqual({
       ok: true,
-      value: { admin: null, coordinator: null },
+      value: { admin: null, coordinator: null, shared: false },
     });
   });
 

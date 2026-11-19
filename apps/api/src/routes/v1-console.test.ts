@@ -773,6 +773,25 @@ describe('console routes /v1/user, /v1/org', () => {
         expect.objectContaining({ external_id: added.id, domains: ['seeker', 'provider'] }),
       );
     });
+
+    it("writes Keycloak for a legacy coordinator on the owner's login whose user carries aggregator_id", async () => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      coordinators.seed([{ ...coordinator(C4, ORG_A, 'active', 4), serves: ['provider'] }]);
+      const kc = await idp.createUser({
+        email: 'legacy@x.org',
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 },
+      });
+      if (!kc.ok) throw new Error('seed');
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+      // The owner's login is that Keycloak user: it carries the coordinator's pointer.
+      vi.spyOn(idp, 'findById').mockResolvedValue({ ok: true, value: kc.value });
+      _setSignalStackWriter(new SignalStackWriterFake());
+
+      const res = await patch(`/v1/user/metadata/update/${C4}`, 'a', { serves: ['seeker'] });
+
+      expect(res.statusCode).toBe(200);
+      expect((await kcUserOf(C4)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['seeker']);
+    });
   });
 
   describe('POST /v1/user/invite (Default org)', () => {

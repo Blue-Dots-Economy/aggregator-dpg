@@ -67,6 +67,7 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 import { getIdentityStore } from '../services/identity-store/index.js';
+import { isSharedLogin } from '../services/auth/shared-login.js';
 import { resolveActingAccount } from '../services/auth/acting.js';
 import { KC_ATTR } from '../services/idp-admin/attributes.js';
 import {
@@ -119,14 +120,14 @@ async function findCoordinatorLogin(aggregatorId: string, log: FastifyBaseLogger
 
 /**
  * The Keycloak user id of a coordinator's login for a write, or `null` when
- * its recorded login is shared with an admin account (an owner's own
- * coordinator account), which coordinator paths never write in Keycloak.
+ * its recorded login is an owner's shared login (an admin account and no
+ * `aggregator_id`), which coordinator paths never write in Keycloak.
  * Any other login is found by its `aggregator_id`.
  *
  * @param aggregatorId - The coordinator's `users.id`.
  * @param log - Request logger.
  * @returns The Keycloak user id, or `null` for a shared login.
- * @throws DB_UNAVAILABLE if the identity store fails; IDP_UNAVAILABLE as {@link findCoordinatorLogin}.
+ * @throws DB_UNAVAILABLE if the identity store fails; IDP_UNAVAILABLE if Keycloak fails or as {@link findCoordinatorLogin}.
  */
 async function coordinatorLoginForWrite(
   aggregatorId: string,
@@ -138,7 +139,12 @@ async function coordinatorLoginForWrite(
   if (linked.value !== null) {
     const accounts = await identities.accountsOf(IDP_PROVIDER, linked.value);
     if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
-    if (accounts.value.admin !== null) return null;
+    const shared = await isSharedLogin(linked.value, accounts.value);
+    if (!shared.ok) {
+      log.error({ status: 'failure', sub_operation: 'idp.findById', code: shared.error.code });
+      throw httpError('IDP_UNAVAILABLE', { fields: { sub_operation: 'idp.findById' } });
+    }
+    if (shared.value) return null;
   }
   return findCoordinatorLogin(aggregatorId, log);
 }
@@ -364,6 +370,66 @@ async function usableOwnCoordinator(
   return null;
 }
 
+/** The `read/me` contact of a person. */
+type MeContact = { name: string | null; email: string; phone: string | null };
+
+/**
+ * A coordinator's own contact.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE; USER_NOT_PROVISIONED when the row is gone.
+ */
+async function coordinatorContact(userId: string): Promise<MeContact> {
+  const row = await getUserStore().findById(userId);
+  if (!row.ok) dbDown('userStore.findById', row.error.message);
+  if (!row.value) throw httpError('USER_NOT_PROVISIONED');
+  return {
+    name: row.value.contact.name ?? null,
+    email: row.value.contact.email,
+    phone: row.value.contact.phone ?? null,
+  };
+}
+
+/**
+ * Loads each of the actor's orgs that still exists, with its decision-engine target.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function resolveMeOrgs(
+  actor: Actor,
+): Promise<Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }>> {
+  const orgStore = getOrganisationStore();
+  const root = await orgStore.findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  const rootId = root.value?.id ?? null;
+  const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
+  for (const o of actor.orgs) {
+    const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
+    if (!found.ok) dbDown('orgStore.findById', found.error.message);
+    if (!found.value) continue;
+    resolved.push({
+      org: o,
+      found: found.value,
+      target: {
+        id: o.id,
+        orgType: o.orgType,
+        ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+      },
+    });
+  }
+  return resolved;
+}
+
+/**
+ * The coordinator account an admin's login may act as, else `null`.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function ownCoordinatorAccountOf(subject: string): Promise<string | null> {
+  const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, subject);
+  if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
+  return usableOwnCoordinator(subject, accounts.value.coordinator);
+}
+
 /**
  * Builds the `read/me` answer for an actor.
  *
@@ -379,58 +445,27 @@ async function meOf(
   actor: Actor,
   subject: string,
 ): Promise<MeResponse> {
-  const orgStore = getOrganisationStore();
-  const orgs: MeOrg[] = [];
-  let self: { name: string | null; email: string; phone: string | null } | null = null;
-
-  if (actor.userType === 'coordinator') {
-    const row = await getUserStore().findById(actor.userId);
-    if (!row.ok) dbDown('userStore.findById', row.error.message);
-    if (!row.value) throw httpError('USER_NOT_PROVISIONED');
-    self = {
-      name: row.value.contact.name ?? null,
-      email: row.value.contact.email,
-      phone: row.value.contact.phone ?? null,
-    };
-  }
-
-  const root = await orgStore.findRoot();
-  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
-  const rootId = root.value?.id ?? null;
+  let self: MeContact | null =
+    actor.userType === 'coordinator' ? await coordinatorContact(actor.userId) : null;
   // Ask the decision engine once per distinct question; this route runs on every page load.
-  const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
-  for (const o of actor.orgs) {
-    const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
-    if (!found.ok) dbDown('orgStore.findById', found.error.message);
-    if (!found.value) continue;
-    resolved.push({
-      org: o,
-      found: found.value,
-      target: {
-        id: o.id,
-        orgType: o.orgType,
-        ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
-      },
-    });
-    // An admin's own contact is its orgs' owner contact (one person).
-    if (!self && o.relation === 'owner') self = ownerContact(found.value);
-  }
+  const resolved = await resolveMeOrgs(actor);
   const capabilitiesByOrg = await listCapabilitiesForTargets(
     req,
     actor,
     resolved.map((r) => r.target),
   );
-  for (const { org: o, found } of resolved) {
-    orgs.push({
-      id: found.id,
-      name: found.displayName,
-      slug: found.slug,
-      org_type: o.orgType,
-      role: o.relation,
-      is_default: found.isDefault,
-      capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
-    });
-  }
+  const orgs: MeOrg[] = resolved.map(({ org: o, found }) => ({
+    id: found.id,
+    name: found.displayName,
+    slug: found.slug,
+    org_type: o.orgType,
+    role: o.relation,
+    is_default: found.isDefault,
+    capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
+  }));
+  // An admin's own contact is its orgs' owner contact (one person).
+  const owned = resolved.find((r) => r.org.relation === 'owner');
+  if (!self && owned) self = ownerContact(owned.found);
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 
   const me: MeResponse = {
@@ -441,9 +476,7 @@ async function meOf(
     capabilities: await listActorCapabilities(req, actor),
   };
   if (actor.userType === 'admin') {
-    const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, subject);
-    if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
-    me.own_coordinator_account_id = await usableOwnCoordinator(subject, accounts.value.coordinator);
+    me.own_coordinator_account_id = await ownCoordinatorAccountOf(subject);
   }
   return me;
 }
