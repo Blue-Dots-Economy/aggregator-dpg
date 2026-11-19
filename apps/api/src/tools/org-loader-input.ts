@@ -3,8 +3,9 @@
  *
  * Turns text into typed rows plus {@link InputProblem}s. No DB, no network
  * config and no phone normalisation; later steps build the load plan from
- * these rows. A row with a missing required cell is reported and left out of
- * `rows`, so every returned row has all its required fields.
+ * these rows. Every non-empty data row is returned; a missing required
+ * string field is '' (and `profileTypes` []), and `problems` says what blocks
+ * the row. Consumers must treat a row with any problem as not plannable.
  */
 
 import Papa from 'papaparse';
@@ -55,14 +56,28 @@ export interface CoordinatorRow {
 export interface InputProblem {
   file: 'orgs' | 'coordinators';
   line: number;
-  code: string;
+  code: InputProblemCode;
   field?: string;
 }
 
+/** Problem codes this module emits; later stages should reuse these. */
+export const INPUT_PROBLEM = {
+  MISSING_COLUMN: 'MISSING_COLUMN',
+  REQUIRED: 'REQUIRED',
+  MALFORMED_ROW: 'MALFORMED_ROW',
+} as const;
+
+/** One of the {@link INPUT_PROBLEM} codes. */
+export type InputProblemCode = (typeof INPUT_PROBLEM)[keyof typeof INPUT_PROBLEM];
+
+const EXTRA_KEY = '__parsed_extra';
+
 interface ParsedFile {
   columns: Set<string>;
-  /** Each record's cells keyed by normalised header, trimmed, empty cells absent. */
+  /** Each non-empty record's cells keyed by normalised header, trimmed, empty cells absent. */
   records: Array<{ line: number; cells: Record<string, string> }>;
+  /** Parser-level problems (ragged rows, quote errors), keyed to the record's line. */
+  malformed: Array<{ line: number }>;
 }
 
 const ORG_REQUIRED = ['name', 'owner_name', 'owner_phone', 'owner_email'] as const;
@@ -83,26 +98,55 @@ function normaliseHeader(raw: string): string {
   return lower;
 }
 
+/**
+ * Parse CSV text. Blank rows are dropped here (not by Papa) so each record
+ * keeps its physical line. Line numbers assume one record per physical line;
+ * a quoted cell containing a newline shifts later lines (known limitation).
+ */
 function parseFile(text: string): ParsedFile {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const result = Papa.parse<Record<string, string>>(body, {
     header: true,
-    skipEmptyLines: 'greedy',
+    delimiter: ',',
+    skipEmptyLines: false,
     transformHeader: normaliseHeader,
   });
   const columns = new Set((result.meta.fields ?? []).filter((f) => f !== ''));
-  const records = result.data.map((raw, i) => {
+  const records: ParsedFile['records'] = [];
+  const emptyIdx = new Set<number>();
+  result.data.forEach((raw, i) => {
     const cells: Record<string, string> = {};
     for (const [key, value] of Object.entries(raw)) {
       const cell = typeof value === 'string' ? value.trim() : '';
-      if (key !== '' && cell !== '') cells[key] = cell;
+      if (key !== '' && key !== EXTRA_KEY && cell !== '') cells[key] = cell;
     }
-    return { line: i + 2, cells };
+    const hasExtra = Array.isArray(raw[EXTRA_KEY]);
+    if (Object.keys(cells).length === 0 && !hasExtra) {
+      emptyIdx.add(i);
+      return;
+    }
+    records.push({ line: i + 2, cells });
   });
-  return { columns, records };
+  const lines = new Set<number>();
+  for (const err of result.errors) {
+    if (err.row === undefined || emptyIdx.has(err.row)) continue;
+    lines.add(err.row + 2);
+  }
+  result.data.forEach((raw, i) => {
+    if (Array.isArray(raw[EXTRA_KEY]) && !emptyIdx.has(i)) lines.add(i + 2);
+  });
+  return { columns, records, malformed: [...lines].map((line) => ({ line })) };
 }
 
-/** A required cell's value; the caller has already checked it is present. */
+function malformedProblems(file: InputProblem['file'], parsed: ParsedFile): InputProblem[] {
+  return parsed.malformed.map(({ line }) => ({
+    file,
+    line,
+    code: INPUT_PROBLEM.MALFORMED_ROW,
+  }));
+}
+
+/** A required cell's value, or '' when absent (the problems list says why). */
 function cell(cells: Record<string, string>, key: string): string {
   return cells[key] ?? '';
 }
@@ -114,13 +158,17 @@ function missingColumns(
 ): InputProblem[] {
   return required
     .filter((c) => !columns.has(c))
-    .map((field) => ({ file, line: 1, code: 'MISSING_COLUMN', field }));
+    .map((field) => ({ file, line: 1, code: INPUT_PROBLEM.MISSING_COLUMN, field }));
 }
 
 /** Parse `orgs.csv`. */
 export function parseOrgsCsv(text: string): { rows: OrgRow[]; problems: InputProblem[] } {
-  const { columns, records } = parseFile(text);
-  const problems = missingColumns('orgs', columns, ORG_REQUIRED);
+  const parsed = parseFile(text);
+  const { columns, records } = parsed;
+  const problems = [
+    ...missingColumns('orgs', columns, ORG_REQUIRED),
+    ...malformedProblems('orgs', parsed),
+  ];
   const rows: OrgRow[] = [];
   const known = new Set<string>([
     ...ORG_REQUIRED,
@@ -128,9 +176,11 @@ export function parseOrgsCsv(text: string): { rows: OrgRow[]; problems: InputPro
     ...ADDRESS_PARTS.map((p) => ADDRESS_PREFIX + p),
   ]);
   for (const { line, cells } of records) {
-    const missing = ORG_REQUIRED.filter((f) => columns.has(f) && cells[f] === undefined);
-    for (const field of missing) problems.push({ file: 'orgs', line, code: 'REQUIRED', field });
-    if (missing.length > 0 || problems.some((p) => p.code === 'MISSING_COLUMN')) continue;
+    for (const field of ORG_REQUIRED) {
+      if (columns.has(field) && cells[field] === undefined) {
+        problems.push({ file: 'orgs', line, code: INPUT_PROBLEM.REQUIRED, field });
+      }
+    }
     const address: Partial<Record<AddressPart, string>> = {};
     for (const part of ADDRESS_PARTS) {
       const v = cells[ADDRESS_PREFIX + part];
@@ -159,16 +209,20 @@ export function parseCoordinatorsCsv(text: string): {
   rows: CoordinatorRow[];
   problems: InputProblem[];
 } {
-  const { columns, records } = parseFile(text);
-  const problems = missingColumns('coordinators', columns, COORD_REQUIRED);
+  const parsed = parseFile(text);
+  const { columns, records } = parsed;
+  const problems = [
+    ...missingColumns('coordinators', columns, COORD_REQUIRED),
+    ...malformedProblems('coordinators', parsed),
+  ];
   const rows: CoordinatorRow[] = [];
   const known = new Set<string>(COORD_REQUIRED);
   for (const { line, cells } of records) {
-    const missing = COORD_REQUIRED.filter((f) => columns.has(f) && cells[f] === undefined);
-    for (const field of missing) {
-      problems.push({ file: 'coordinators', line, code: 'REQUIRED', field });
+    for (const field of COORD_REQUIRED) {
+      if (columns.has(field) && cells[field] === undefined) {
+        problems.push({ file: 'coordinators', line, code: INPUT_PROBLEM.REQUIRED, field });
+      }
     }
-    if (missing.length > 0 || problems.some((p) => p.code === 'MISSING_COLUMN')) continue;
     const extra: Record<string, string> = {};
     for (const [k, v] of Object.entries(cells)) if (!known.has(k)) extra[k] = v;
     rows.push({

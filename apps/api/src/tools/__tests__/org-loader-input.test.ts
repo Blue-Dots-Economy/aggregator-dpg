@@ -62,7 +62,8 @@ describe('parseOrgsCsv', () => {
       code: 'REQUIRED',
       field: 'owner_name',
     });
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.owner.name).toBe('');
   });
 
   it('trims and lowercases header names', () => {
@@ -111,5 +112,36 @@ describe('parseCoordinatorsCsv', () => {
       code: 'REQUIRED',
       field: 'name',
     });
+  });
+
+  it('returns rows even when a column is missing', () => {
+    const { rows } = parseCoordinatorsCsv('org,name,phone,email\nA,B,1,a@b.co');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.profileTypes).toEqual([]);
+  });
+});
+
+describe('line numbers and malformed rows', () => {
+  const head = 'name,parent,owner_name,owner_phone,owner_email';
+
+  it('keeps physical line numbers across a blank line', () => {
+    const { rows } = parseOrgsCsv(`${head}\nA,,B,1,a@b.co\n\nC,,D,2,c@d.co`);
+    expect(rows.map((r) => r.line)).toEqual([2, 4]);
+  });
+
+  it('flags a row with too many fields as MALFORMED_ROW', () => {
+    const { rows, problems } = parseOrgsCsv(`${head}\nA,,B,1,a@b.co,extra`);
+    expect(rows).toHaveLength(1);
+    expect(problems).toContainEqual({ file: 'orgs', line: 2, code: 'MALFORMED_ROW' });
+  });
+
+  it('flags an unterminated quote as MALFORMED_ROW', () => {
+    const { problems } = parseOrgsCsv(`${head}\nA,,"B,1,a@b.co`);
+    expect(problems.some((p) => p.code === 'MALFORMED_ROW')).toBe(true);
+  });
+
+  it('does not flag blank lines or the trailing newline', () => {
+    const { problems } = parseOrgsCsv(`${head}\nA,,B,1,a@b.co\n\n`);
+    expect(problems).toEqual([]);
   });
 });
