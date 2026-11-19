@@ -162,19 +162,45 @@ function orgEligibility(actor: Actor, org: Organisation): string | null {
  */
 async function reactivate(
   row: Coordinator,
-  { actor, subject, org, serves, linkedCoordinator }: SelfAddTarget,
+  target: SelfAddTarget,
   consent: SelfAddRequest['consent'],
   log: FastifyBaseLogger,
 ): Promise<SelfAddResult<string>> {
+  const checked = await checkReactivation(row, target);
+  if (!checked.success) return checked;
+  // The login is linked before the row changes, so a failed link leaves the row as it was.
+  if (!checked.value.linked) {
+    const link = await getIdentityStore().link(row.id, IDP_PROVIDER, target.subject, 'coordinator');
+    if (!link.ok) return refuse('UNAVAILABLE', `identity link: ${link.error.code}`);
+  }
+  // The update takes no hook, so the consent row is written just before it.
+  const recorded = await recordReactivationConsent(row.id, consent, log);
+  if (!recorded.success) return recorded;
+  const updated = await getUserStore().update(row.id, {
+    serves: target.serves,
+    status: 'pending',
+    updatedBy: target.actor.userId,
+  });
+  if (!updated.ok) return refuse('UNAVAILABLE', 'user store update');
+  return ok(row.id);
+}
+
+/**
+ * Checks that a coordinator row may be reactivated for this login.
+ *
+ * @returns Whether the row's login is already linked, or why it is refused.
+ */
+async function checkReactivation(
+  row: Coordinator,
+  { subject, org, linkedCoordinator }: SelfAddTarget,
+): Promise<SelfAddResult<{ linked: boolean }>> {
   if (row.parentOrgId !== org.id || row.status === 'active') {
     return refuse('ALREADY_COORDINATOR', 'contact already has a coordinator account');
   }
   if (linkedCoordinator !== null && linkedCoordinator !== row.id) {
     return refuse('ALREADY_COORDINATOR', 'login already has a coordinator account');
   }
-  const users = getUserStore();
-  const identities = getIdentityStore();
-  const linked = await identities.subjectOf(row.id, IDP_PROVIDER);
+  const linked = await getIdentityStore().subjectOf(row.id, IDP_PROVIDER);
   if (!linked.ok) return refuse('UNAVAILABLE', 'identity store');
   if (linked.value !== null && linked.value !== subject) {
     return refuse('ALREADY_COORDINATOR', 'coordinator account belongs to another login');
@@ -185,32 +211,29 @@ async function reactivate(
   if (legacy.value !== null && legacy.value.id !== subject) {
     return refuse('ALREADY_COORDINATOR', 'coordinator account has its own Keycloak user');
   }
-  // The login is linked before the row changes, so a failed link leaves the row as it was.
-  if (linked.value === null) {
-    const link = await identities.link(row.id, IDP_PROVIDER, subject, 'coordinator');
-    if (!link.ok) return refuse('UNAVAILABLE', `identity link: ${link.error.code}`);
-  }
-  // The update takes no hook, so the consent row is written just before it.
+  return ok({ linked: linked.value !== null });
+}
+
+/** Writes the consent row of a reactivated account. */
+async function recordReactivationConsent(
+  rowId: string,
+  consent: SelfAddRequest['consent'],
+  log: FastifyBaseLogger,
+): Promise<SelfAddResult<void>> {
   const recordConsent = await aggregatorConsentWriter({ consent, log });
   if (!recordConsent) return refuse('UNAVAILABLE', 'consent config');
   try {
-    await recordConsent(undefined, row.id);
+    await recordConsent(undefined, rowId);
   } catch (e) {
     log.error({
       status: 'failure',
       sub_operation: 'consentLedger.recordAggregatorConsent',
       error_type: e instanceof Error ? e.name : typeof e,
-      target_id: row.id,
+      target_id: rowId,
     });
     return refuse('UNAVAILABLE', 'consent ledger');
   }
-  const updated = await users.update(row.id, {
-    serves,
-    status: 'pending',
-    updatedBy: actor.userId,
-  });
-  if (!updated.ok) return refuse('UNAVAILABLE', 'user store update');
-  return ok(row.id);
+  return ok(undefined);
 }
 
 /**
