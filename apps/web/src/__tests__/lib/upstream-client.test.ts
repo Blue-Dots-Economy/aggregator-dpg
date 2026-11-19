@@ -166,4 +166,49 @@ describe('callApi', () => {
     await callApi('/v1/links');
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:4000/v1/links', expect.anything());
   });
+
+  describe('while terms are outstanding', () => {
+    it('refuses a gated path with 403 TERMS_REQUIRED and no upstream call', async () => {
+      getSessionMock.mockResolvedValue({
+        accessToken: 'AT-1',
+        accessTokenExp: FAR_FUTURE,
+        termsStatus: 'outstanding',
+      });
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      const res = await callApi('/v1/dashboard/items?page=1');
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'TERMS_REQUIRED' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('passes the consent call through', async () => {
+      getSessionMock.mockResolvedValue({
+        accessToken: 'AT-1',
+        accessTokenExp: FAR_FUTURE,
+        termsStatus: 'outstanding',
+      });
+      const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      const res = await callApi('/v1/user/consent', { method: 'POST', body: {} });
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://api.internal:4000/v1/user/consent',
+        expect.anything(),
+      );
+    });
+
+    it('passes every call through for an ok session', async () => {
+      getSessionMock.mockResolvedValue({
+        accessToken: 'AT-1',
+        accessTokenExp: FAR_FUTURE,
+        termsStatus: 'ok',
+      });
+      const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      const res = await callApi('/v1/dashboard/items');
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

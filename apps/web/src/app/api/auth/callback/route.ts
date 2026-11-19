@@ -5,9 +5,11 @@
  * - Verifies state, exchanges the auth code (with PKCE verifier) for tokens.
  * - For an invited account (`decision_made = invited`), activates it and
  *   refreshes the tokens so the new access applies.
+ * - Reads whether the user still has to accept the current terms.
  * - Persists the session in Redis.
  * - Drops the `sid` cookie.
- * - Redirects to the original `returnTo` path.
+ * - Redirects to the original `returnTo` path, or to `/accept-terms` first
+ *   when terms are outstanding.
  *
  * GET /api/auth/callback?code=...&state=...
  */
@@ -31,6 +33,7 @@ import {
   tokenAggregatorId,
 } from '@/lib/jwt';
 import { activateInvitee } from '@/lib/invite-activation';
+import { ACCEPT_TERMS_PATH, fetchTermsStatus } from '@/lib/terms-status.server';
 
 export const runtime = 'nodejs';
 
@@ -131,6 +134,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return failure(req, reason);
   }
 
+  // A failed check (`unknown`) lets the user in and the session is not marked outstanding, so `callApi` does not block it.
+  const { status: termsStatus } = await fetchTermsStatus(tokens.accessToken, log);
+
   const now = Date.now();
   const sessionData: SessionData = {
     sub: claims.sub,
@@ -145,12 +151,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     createdAt: now,
     lastSeenAt: now,
     ...(claims.sid ? { idpSid: claims.sid } : {}),
+    termsStatus,
   };
   const sid = await getSessionStore().create(sessionData);
 
-  const res = NextResponse.redirect(absoluteUrl(req, landingPath(flow.returnTo, isCoordinator)), {
-    status: 302,
-  });
+  const landing = landingPath(flow.returnTo, isCoordinator);
+  const target =
+    termsStatus === 'outstanding'
+      ? `${ACCEPT_TERMS_PATH}?returnTo=${encodeURIComponent(landing)}`
+      : landing;
+  const res = NextResponse.redirect(absoluteUrl(req, target), { status: 302 });
   res.cookies.set(SESSION_COOKIE, sid, sessionCookieOptions());
   res.cookies.set(OIDC_FLOW_COOKIE, '', clearCookieOptions());
   return res;

@@ -26,6 +26,13 @@ vi.mock('@/lib/session', () => ({
 }));
 const { activateInviteeMock } = vi.hoisted(() => ({ activateInviteeMock: vi.fn() }));
 vi.mock('@/lib/invite-activation', () => ({ activateInvitee: activateInviteeMock }));
+const { fetchTermsStatusMock } = vi.hoisted(() => ({
+  fetchTermsStatusMock: vi.fn(async () => ({ status: 'ok' as string })),
+}));
+vi.mock('@/lib/terms-status.server', () => ({
+  ACCEPT_TERMS_PATH: '/accept-terms',
+  fetchTermsStatus: fetchTermsStatusMock,
+}));
 
 import { GET } from '@/app/api/auth/callback/route';
 import { getOidcAdapter } from '@/lib/oidc';
@@ -87,6 +94,7 @@ describe('GET /api/auth/callback', () => {
     if (originalPublicUrl === undefined) delete process.env.PUBLIC_PORTAL_URL;
     else process.env.PUBLIC_PORTAL_URL = originalPublicUrl;
     vi.clearAllMocks();
+    fetchTermsStatusMock.mockResolvedValue({ status: 'ok' });
   });
 
   it('exchanges the code, creates a session, and redirects to returnTo', async () => {
@@ -290,5 +298,69 @@ describe('GET /api/auth/callback', () => {
     resolveSignalsRealmRolesMock.mockResolvedValueOnce([]);
     const res = await blockedWith(['seeker']);
     expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
+  });
+
+  describe('terms at login', () => {
+    function signIn(claims: Record<string, unknown>, returnTo: string): Promise<Response> {
+      exchangeCode.mockResolvedValue({
+        ok: true,
+        value: {
+          tokens: {
+            accessToken: fakeJwt(claims),
+            refreshToken: 'refresh-1',
+            idToken: 'id-1',
+            accessTokenExp: Date.now() + 60_000,
+            refreshTokenExp: Date.now() + 60_000,
+          },
+          claims: { sub: 'user-1' },
+        },
+      });
+      const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
+        headers: { cookie: `oidc_flow=${flowCookie(returnTo)}` },
+      });
+      return GET(req);
+    }
+    const coordinator = { aggregator_id: 'agg-1' };
+    const owner = { sub: 'owner-1', realm_access: { roles: ['org_owner'] } };
+
+    it('sends a coordinator with outstanding terms to accept them first', async () => {
+      fetchTermsStatusMock.mockResolvedValue({ status: 'outstanding' });
+      const res = await signIn(coordinator, '/dashboard');
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/accept-terms?returnTo=%2Fdashboard',
+      );
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ termsStatus: 'outstanding' }));
+      expect(fetchTermsStatusMock).toHaveBeenCalledWith(fakeJwt(coordinator), expect.anything());
+    });
+
+    it('sends an owner with outstanding terms to accept them, returning to the console', async () => {
+      fetchTermsStatusMock.mockResolvedValue({ status: 'outstanding' });
+      const res = await signIn(owner, '/dashboard');
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/accept-terms?returnTo=%2Fconsole',
+      );
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ termsStatus: 'outstanding' }));
+    });
+
+    it('lands a user whose terms are current on the landing page', async () => {
+      fetchTermsStatusMock.mockResolvedValue({ status: 'ok' });
+      const res = await signIn(coordinator, '/dashboard');
+      expect(res.headers.get('location')).toBe('http://portal.test/dashboard');
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ termsStatus: 'ok' }));
+    });
+
+    it('lets the user in when the status is unknown and records it as unknown', async () => {
+      fetchTermsStatusMock.mockResolvedValue({ status: 'unknown' });
+      const res = await signIn(owner, '/console/orgs');
+      expect(res.headers.get('location')).toBe('http://portal.test/console/orgs');
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ termsStatus: 'unknown' }));
+    });
+
+    it('does not check terms for a login it refuses', async () => {
+      const res = await signIn({ sub: 'x', realm_access: { roles: ['offline_access'] } }, '/');
+      expect(res.headers.get('location')).toBe('http://portal.test/login?error=no_portal_access');
+      expect(fetchTermsStatusMock).not.toHaveBeenCalled();
+    });
   });
 });

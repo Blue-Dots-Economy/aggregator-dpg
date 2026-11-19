@@ -32,6 +32,7 @@ vi.mock('@/lib/logger', () => ({ logger: { warn: logWarn, error: vi.fn(), info: 
 vi.mock('@/lib/console-actor', () => ({
   getConsoleActor: vi.fn(async () => ({ ok: false, reason: 'unavailable' })),
 }));
+vi.mock('@/lib/terms-guard.server', () => ({ ensureTermsAccepted: vi.fn(async () => undefined) }));
 vi.mock('@/components/shell/Sidebar', () => ({
   Sidebar: () => <nav data-testid="sidebar" />,
 }));
@@ -54,6 +55,7 @@ import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
 import { callApi } from '@/lib/upstream-client';
 import { getConsoleActor } from '@/lib/console-actor';
 import { redirect } from 'next/navigation';
+import { ensureTermsAccepted } from '@/lib/terms-guard.server';
 
 function AuthProbe() {
   const { user, supportEnabled, isAuthenticated, capabilities, can } = useAuth();
@@ -264,5 +266,30 @@ describe('<ProtectedLayout />', () => {
         status: 'failure',
       }),
     );
+  });
+
+  it('checks the terms with the page path once the coordinator gate passes', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }));
+    await renderLayout();
+    expect(ensureTermsAccepted).toHaveBeenCalledWith('/dashboard');
+  });
+
+  it('stops at the terms redirect without reading support or the actor', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(ensureTermsAccepted).mockRejectedValueOnce(new Error('REDIRECT:/accept-terms'));
+    await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow('REDIRECT:/accept-terms');
+    expect(callApi).not.toHaveBeenCalled();
+    expect(getConsoleActor).not.toHaveBeenCalled();
+  });
+
+  it('sends an org owner to the console before checking terms', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue(null);
+    vi.mocked(classifyNonCoordinator).mockReturnValue('org_owner');
+    await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
+    expect(ensureTermsAccepted).not.toHaveBeenCalled();
   });
 });

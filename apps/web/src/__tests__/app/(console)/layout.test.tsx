@@ -16,6 +16,7 @@ vi.mock('@/components/console/ConsoleSidebar', () => ({
     return <nav data-testid="console-nav" />;
   },
 }));
+vi.mock('@/lib/terms-guard.server', () => ({ ensureTermsAccepted: vi.fn(async () => undefined) }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
@@ -35,6 +36,7 @@ import { getSession } from '@/lib/server-session';
 import { getConsoleActor } from '@/lib/console-actor';
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
 import { redirect } from 'next/navigation';
+import { ensureTermsAccepted } from '@/lib/terms-guard.server';
 
 const session = {
   sub: 's',
@@ -150,5 +152,19 @@ describe('<ConsoleLayout />', () => {
     vi.mocked(getSession).mockResolvedValue(null);
     await expect(ConsoleLayout({ children: null })).rejects.toThrow();
     expect(redirect).toHaveBeenCalledWith('/api/auth/login?returnTo=%2Fconsole');
+  });
+
+  it('checks the terms with the page path before reading the actor', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    vi.mocked(ensureTermsAccepted).mockRejectedValueOnce(new Error('REDIRECT:/accept-terms'));
+    await expect(ConsoleLayout({ children: null })).rejects.toThrow('REDIRECT:/accept-terms');
+    expect(ensureTermsAccepted).toHaveBeenCalledWith('/console');
+    expect(getConsoleActor).not.toHaveBeenCalled();
+  });
+
+  it('does not check the terms without a session', async () => {
+    vi.mocked(getSession).mockResolvedValue(null);
+    await expect(ConsoleLayout({ children: null })).rejects.toThrow();
+    expect(ensureTermsAccepted).not.toHaveBeenCalled();
   });
 });
