@@ -77,6 +77,7 @@ function buildConfig(
         },
       },
       organisation: DEFAULT_ORGANISATION,
+      voice_bots: [],
     },
     network: {
       id: fixture.networkId,

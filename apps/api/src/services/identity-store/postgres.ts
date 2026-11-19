@@ -5,16 +5,16 @@
  * driver message (it includes query parameters).
  */
 
-import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client.js';
-import { userIdentities } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
 import {
   IdentityMismatchError,
   IdentityNotLinkableError,
   IdentityTakenError,
+  accountsOfSubject,
   linkIdentity,
   subjectOf,
+  userOfSubject,
 } from '../../db/account-writes.js';
 import { logger } from '../../logger.js';
 import { IdentityStoreBase, type IdentityStoreResult, type LinkOutcome } from './interface.js';
@@ -54,15 +54,27 @@ export class PostgresIdentityStore extends IdentityStoreBase {
   }
 
   /** {@inheritDoc IdentityStoreBase.userOf} */
-  async userOf(provider: string, subject: string): Promise<IdentityStoreResult<string | null>> {
+  async userOf(
+    provider: string,
+    subject: string,
+    userType?: 'admin' | 'coordinator',
+  ): Promise<IdentityStoreResult<string | null>> {
     try {
-      const [row] = await getDb()
-        .select({ userId: userIdentities.userId })
-        .from(userIdentities)
-        .where(and(eq(userIdentities.provider, provider), eq(userIdentities.subject, subject)));
-      return { ok: true, value: row?.userId ?? null };
+      return { ok: true, value: await userOfSubject(getDb(), provider, subject, userType) };
     } catch (e) {
       return dbFailure('identityStore.userOf', e);
+    }
+  }
+
+  /** {@inheritDoc IdentityStoreBase.accountsOf} */
+  async accountsOf(
+    provider: string,
+    subject: string,
+  ): Promise<IdentityStoreResult<{ admin: string | null; coordinator: string | null }>> {
+    try {
+      return { ok: true, value: await accountsOfSubject(getDb(), provider, subject) };
+    } catch (e) {
+      return dbFailure('identityStore.accountsOf', e);
     }
   }
 }

@@ -28,4 +28,14 @@ describe('message catalogs', () => {
   it('hi has exactly the same keys as en', () => {
     expect(keyPaths(hi).sort()).toEqual(enKeys);
   });
+
+  // Call-back is deferred (#1123): the participant places the call, so no
+  // locale may say they can request one.
+  it.each([
+    ['en', en.registration_mode.voice_or_form.hint, /request a call/i],
+    ['hi', hi.registration_mode.voice_or_form.hint, /अनुरोध/],
+    ['kn', kn.registration_mode.voice_or_form.hint, /ಕೋರ/],
+  ])('%s voice_or_form hint does not promise a call-back', (_locale, hint, forbidden) => {
+    expect(hint).not.toMatch(forbidden);
+  });
 });

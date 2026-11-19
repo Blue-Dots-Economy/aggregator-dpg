@@ -18,16 +18,13 @@ import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { getRegistrationValidator } from '../registration-validator.js';
 import { stampConsent } from '../registration-consent.js';
 import { getUserStore } from '../user-store/index.js';
-import type { CreateCoordinatorInput, StoreError } from '../user-store/interface.js';
+import type { StoreError } from '../user-store/interface.js';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 import { getNetworkConfig } from '../network-config.js';
 import { resolveProfileRef } from '../schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../idp-admin/index.js';
 import { splitName } from '../name.js';
-import { slugFromName } from '../slug.js';
-
-/** Attempts at a fresh random-suffixed slug when one collides. */
-const SLUG_RETRIES = 3;
+import { createAggregatorWithSlug } from './coordinator-row.js';
 
 /**
  * A coordinator registration form. `consent` is optional here; the invite-accept
@@ -320,25 +317,6 @@ function storeCreateFailure(error: StoreError): CoordinatorCreateError {
 }
 
 /**
- * Inserts a coordinator, retrying up to {@link SLUG_RETRIES} times on a slug collision.
- *
- * @param input - The insert without its slug, which is drawn from the name on each attempt.
- * @returns The last store result.
- */
-async function createAggregatorWithSlug(
-  input: Omit<CreateCoordinatorInput, 'orgSlug'>,
-): ReturnType<ReturnType<typeof getUserStore>['create']> {
-  const store = getUserStore();
-  const createWithRetry = async (attempt: number): ReturnType<typeof store.create> => {
-    const result = await store.create({ ...input, orgSlug: slugFromName(input.name) });
-    if (result.ok || result.error.code !== 'DUPLICATE_SLUG') return result;
-    if (attempt + 1 >= SLUG_RETRIES) return result;
-    return createWithRetry(attempt + 1);
-  };
-  return createWithRetry(0);
-}
-
-/**
  * Creates the coordinator's Keycloak user: enabled, unverified and `decision_made = invited`.
  *
  * On failure deletes the coordinator row, so a retry can succeed.
@@ -426,15 +404,12 @@ export async function createCoordinatorWithLogin(input: {
   locations: BecknLocation[];
   log: FastifyBaseLogger;
 }): Promise<CoordinatorCreateResult<{ userId: string; orgSlug: string; kcUserId: string }>> {
-  const created = await createAggregatorWithSlug({
-    name: input.body.name,
-    type: input.domains[0] ?? null,
-    serves: input.domains,
+  const created = await createAggregatorWithSlug(getUserStore(), input.body.name, {
+    domains: input.domains,
     contact: input.contact,
     consent: input.consent ?? undefined,
     recordConsent: input.recordConsent,
     createdBy: input.createdBy,
-    updatedBy: input.createdBy,
     orgId: input.orgId,
     legacyOrgDetails: null,
     locations: input.locations,

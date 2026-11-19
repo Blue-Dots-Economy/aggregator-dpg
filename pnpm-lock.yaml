@@ -239,6 +239,9 @@ importers:
       '@aggregator-dpg/network-config':
         specifier: workspace:*
         version: link:../../packages/network-config
+      '@aggregator-dpg/rbac':
+        specifier: workspace:*
+        version: link:../../packages/rbac
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../../packages/shared-primitives

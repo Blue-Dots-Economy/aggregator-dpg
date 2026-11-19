@@ -52,3 +52,42 @@ export function domainRequiresBirthYear(domain: AggregatorConfigDomain | undefin
 export function registrationShowsConsent(domain: AggregatorConfigDomain | undefined): boolean {
   return domainRequiresConsent(domain) || domainRequiresBirthYear(domain);
 }
+
+/** Oldest age, in years, treated as a minor; a minor submits without consent and accepts terms later in the Signalstack app. */
+export const MINOR_MAX_AGE = 18;
+
+/** Oldest age, in years, a birth year may give; the forms offer no earlier year. */
+export const MAX_AGE_YEARS = 120;
+
+/**
+ * Whether a year of birth is a four-digit year between {@link MAX_AGE_YEARS} ago and now.
+ *
+ * @param yearOfBirth - The value from the form; any non-string is invalid.
+ * @param currentYear - The year to measure from; defaults to this year.
+ * @returns True for a usable birth year.
+ */
+export function isValidBirthYear(
+  yearOfBirth: unknown,
+  currentYear: number = new Date().getFullYear(),
+): boolean {
+  if (typeof yearOfBirth !== 'string' || !/^\d{4}$/.test(yearOfBirth.trim())) return false;
+  const year = Number(yearOfBirth.trim());
+  return year >= currentYear - MAX_AGE_YEARS && year <= currentYear;
+}
+
+/**
+ * Whether a year of birth makes the registrant a minor (age at most {@link MINOR_MAX_AGE}).
+ *
+ * Age is derived from the birth year alone; no birthdate is stored.
+ *
+ * @param yearOfBirth - The value from the form; an invalid year is not a minor.
+ * @param currentYear - The year to measure from; defaults to this year.
+ * @returns True when the registrant is a minor.
+ */
+export function isMinorBirthYear(
+  yearOfBirth: unknown,
+  currentYear: number = new Date().getFullYear(),
+): boolean {
+  if (!isValidBirthYear(yearOfBirth, currentYear)) return false;
+  return currentYear - Number(String(yearOfBirth).trim()) <= MINOR_MAX_AGE;
+}

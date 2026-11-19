@@ -28,12 +28,8 @@ import {
   releaseInvite,
   usableInvite,
 } from './invite-shared.js';
-import type { RecordConsentHook } from '../services/user-store/interface.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
-import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { getConsentLedger } from '../services/consent-ledger/index.js';
-import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import {
   assertContactFree,
   checkCoordinatorForm,
@@ -41,6 +37,7 @@ import {
   ownLocations,
   type CheckedCoordinatorForm,
 } from '../services/registration/coordinator-create.js';
+import { aggregatorConsentWriter } from '../services/registration/coordinator-row.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { unwrapOrThrow } from '../errors/unwrap.js';
@@ -100,7 +97,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 }
 
 type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
-type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
  * Checks a coordinator form, normalises its phone, stamps its consent and applies the submit rate limit.
@@ -166,6 +162,11 @@ async function acceptCoordinatorInvite(
   let committed = false;
   try {
     const recordConsent = await aggregatorConsentWriter({ consent, log });
+    if (!recordConsent) {
+      throw httpError('CONSENT_WRITE_FAILED', {
+        fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+      });
+    }
     const {
       userId: aggregatorId,
       orgSlug,
@@ -230,78 +231,4 @@ function assertNoOrgDetails(body: RegistrationPayload): void {
   if (body.url?.trim()) {
     throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: ['url'] } });
   }
-}
-
-/**
- * Builds the consent-ledger write that `store.create` runs inside its transaction.
- *
- * The consent config is read now, before the transaction. A failed ledger
- * write throws, so the store rolls back and answers `CONSENT_WRITE_FAILED`.
- *
- * @param consent - The server-stamped registration consent (`valid_till` is stored).
- * @param log - Request-scoped child logger.
- * @returns The hook to pass as `recordConsent`.
- * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
- */
-async function aggregatorConsentWriter({
-  consent,
-  log,
-}: {
-  consent: ConsentRecord;
-  log: RequestLog;
-}): Promise<RecordConsentHook> {
-  const { network, brand } = resolveActiveNetwork();
-  let termsVersion: number;
-  let privacyVersion: number;
-  try {
-    const consentCfg = await loadConsentConfig(network, brand);
-    termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
-    privacyVersion = consentCfg.audiences.aggregator.documents.privacy.current_version;
-  } catch (e) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
-        network,
-        brand: brand ?? null,
-      },
-      'consent config load failed — registration refused',
-    );
-    throw httpError('CONSENT_WRITE_FAILED', {
-      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
-    });
-  }
-
-  return async (executor, aggregatorId) => {
-    const result = await getConsentLedger()
-      .withExecutor(executor)
-      .recordRegistrationConsent({
-        subjectType: 'user',
-        subjectId: aggregatorId,
-        network,
-        brand: brand ?? null,
-        termsVersion,
-        privacyVersion,
-        validTill: new Date(consent.valid_till),
-      });
-    if (!result.success) {
-      log.error(
-        {
-          operation: 'consentLedger.recordAggregatorConsent',
-          status: 'failure',
-          error: result.error.message,
-          error_type: result.error.name,
-          aggregator_id: aggregatorId,
-          network,
-          brand: brand ?? null,
-          terms_version: termsVersion,
-          privacy_version: privacyVersion,
-        },
-        'consent ledger write failed — registration rolled back',
-      );
-      // Throwing inside the store's transaction rolls the registration back.
-      throw result.error;
-    }
-  };
 }

@@ -10,10 +10,15 @@
  *     schema, normalises phone and email, creates the user and profile in
  *     signalstack, records a link_submission row, and returns its id.
  *
+ *   POST /public/v1/aggregators/:orgSlug/voice-requests/:slug
+ *     Anonymous voice-bot request on a link that offers voice. Creates the
+ *     account for a new phone (an existing one is left untouched) and returns
+ *     the bot's number.
+ *
  * The (org_slug, slug) pair is the access credential; no JWT is needed.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
@@ -21,14 +26,14 @@ import { getRegistrationLinksStore } from '../services/registration-links-store/
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { domainRequiresConsent } from '@aggregator-dpg/network-config/interface';
+import { domainRequiresConsent, type VoiceBot } from '@aggregator-dpg/network-config/interface';
 import {
   describeSchemaIssue,
-  fieldLabel,
   formatFieldErrors,
   type FieldError,
 } from '@aggregator-dpg/network-config/field-errors';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
+import { modeOffers, modeOffersVoice, resolveVoiceBot } from '../services/voice-bots/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import {
@@ -44,17 +49,12 @@ import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
-
-/**
- * String value of a body field.
- *
- * @returns The value when `key` is set and the field is a string; otherwise `undefined`.
- */
-function readString(body: Record<string, unknown>, key: string | undefined): string | undefined {
-  if (!key) return undefined;
-  const value = body[key];
-  return typeof value === 'string' ? value : undefined;
-}
+import {
+  checkAccountOnlyBody,
+  onboardFailureError,
+  readString,
+  resolveConsentAndAge,
+} from './public-registration-identity.js';
 
 const LinkParamsSchema = z.object({
   orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
@@ -82,6 +82,17 @@ const ResolveLinkResponseSchema = z
       .loose()
       .describe('Identity field selectors (name / phone / email) for this domain.'),
     expires_at: z.string().nullable(),
+    offers: z
+      .array(z.enum(['voice', 'form']))
+      .describe('Registration channels the page offers, in display order.'),
+    voice_bot: z
+      .object({
+        display_name: z.string(),
+        languages: z.array(z.string()),
+        description: z.string().optional(),
+      })
+      .nullable()
+      .describe('The voice bot the link resolves to; null when it offers no voice option.'),
   })
   .loose();
 
@@ -138,6 +149,26 @@ const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
   message: z.string(),
 }).loose();
 
+/** Voice request body: identity, consent and birth year only; checked at runtime. */
+const VoiceRequestBodySchema = z
+  .object({})
+  .loose()
+  .describe(
+    "The domain's identity name and phone keys, consent_terms / consent_privacy, and year_of_birth (or age) on guardian-gated domains. Phone is required; email and profile fields are rejected.",
+  );
+
+/** 200 payload of a voice request: the bot to call and whether the phone already had an account. */
+const VoiceRequestResponseSchema = z.object({
+  existing: z
+    .boolean()
+    .describe('True when the phone already had an account; nothing was created then.'),
+  voice_bot: z.object({
+    display_name: z.string(),
+    phone: z.string().describe('E.164 number to call.'),
+    languages: z.array(z.string()),
+  }),
+});
+
 export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
@@ -187,6 +218,23 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       const hintKey = publicHintI18nKey(link.registrationMode, networkCfg);
       const accountOnly = submissionShape === 'account_only';
 
+      // Resolve the bot only for modes that offer voice. `voice` is dropped from
+      // `offers` when none applies. The phone is never returned here.
+      const modeChannels = modeOffers(link.registrationMode, networkCfg);
+      let bot: VoiceBot | null = null;
+      if (modeChannels.includes('voice')) {
+        const resolved = resolveVoiceBot(link, networkCfg);
+        bot = resolved.bot;
+        if (resolved.fellBack) {
+          log.warn({
+            status: 'voice_bot_fallback',
+            link_id: link.id,
+            voice_bot_key: link.voiceBotKey,
+          });
+        }
+      }
+      const offers = bot ? modeChannels : modeChannels.filter((o) => o !== 'voice');
+
       return reply.send({
         slug: link.slug,
         // Active network id; the BFF passes it to /lookup.
@@ -203,6 +251,14 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         // these stay required (a name + at least one contact).
         identity: linkDomainCfg.identity,
         expires_at: link.expiresAt ? link.expiresAt.toISOString() : null,
+        offers,
+        voice_bot: bot
+          ? {
+              display_name: bot.display_name,
+              languages: bot.languages,
+              ...(bot.description !== undefined && { description: bot.description }),
+            }
+          : null,
       });
     },
   );
@@ -234,22 +290,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       });
       const start = Date.now();
 
-      // Rate limit by (orgSlug, slug, ip). CAPTCHA is checked in the BFF; this is
-      // a fallback.
-      const ip = (req.ip ?? '0.0.0.0').toString();
-      const rate = await consume({
-        namespace: 'link-submit',
-        key: `${orgSlug}:${slug}:${ip}`,
-        windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
-        max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
-      });
-      if (!rate.allowed) {
-        void reply.header('Retry-After', String(rate.retryAfterSeconds));
-        log.warn({ status: 'rate_limited', count: rate.count, ip });
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rate.retryAfterSeconds}s.`,
-        });
-      }
+      await enforceSubmitRateLimit(req, reply, orgSlug, slug, log);
 
       const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
@@ -272,47 +313,12 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfgEarly);
 
       // `account_only`: accept identity fields only. Reject item_state or any other
-      // top-level key before Ajv runs. Enforced here because the client can be tampered with.
+      // top-level key before Ajv runs.
       if (submissionShape === 'account_only') {
-        const allowed = new Set<string>([
-          'consent_terms',
-          'consent_privacy',
-          // Year of birth (or `age` from older clients) is allowed with consent on
-          // guardian-gated domains.
-          'age',
-          'year_of_birth',
-          ...[
-            linkDomainCfgEarly.identity.name,
-            linkDomainCfgEarly.identity.phone,
-            linkDomainCfgEarly.identity.email,
-          ].filter((k): k is string => typeof k === 'string' && k.length > 0),
-        ]);
-        for (const key of Object.keys(rawBody)) {
-          if (!allowed.has(key)) {
-            throw httpError('REGISTRATION_MODE_MISMATCH', {
-              detail: `account_only link does not accept field '${key}'`,
-              fields: { rejected_key: key },
-            });
-          }
-        }
-        // Require name and (phone or email); otherwise the writer would answer 502.
-        const nameKey = linkDomainCfgEarly.identity.name;
-        const phoneKey = linkDomainCfgEarly.identity.phone;
-        const emailKey = linkDomainCfgEarly.identity.email;
-        const hasName = Boolean(readString(rawBody, nameKey));
-        const hasPhone = Boolean(readString(rawBody, phoneKey));
-        const hasEmail = Boolean(readString(rawBody, emailKey));
-        if (!hasName || (!hasPhone && !hasEmail)) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'account_only requires name and at least one of phone or email',
-            fields: {
-              missing: [
-                ...(!hasName ? [nameKey ?? 'name'] : []),
-                ...(!hasPhone && !hasEmail ? ['phone_or_email'] : []),
-              ],
-            },
-          });
-        }
+        checkAccountOnlyBody(rawBody, linkDomainCfgEarly.identity, {
+          requirePhone: false,
+          allowEmail: true,
+        });
       }
 
       // The link's registration_mode sets the submit shape. `account_only` creates
@@ -339,55 +345,12 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
 
-      // Consent booleans are read, then stripped so they never reach Ajv or
-      // item_state. Consent is required for adults only (see below).
-      const termsOk = body['consent_terms'] === true;
-      const privacyOk = body['consent_privacy'] === true;
-      const profileConsentOk = body['consent_profile'] === true;
-      delete body['consent_terms'];
-      delete body['consent_privacy'];
-      delete body['consent_profile'];
-
-      // Year of birth gives the age; it is stripped from `body`. Only this
-      // top-level age triggers the U18 rule, not a profile `age` field. Falls back
-      // to body `age` for older clients.
-      const yobRaw = body['year_of_birth'];
-      delete body['year_of_birth'];
-      const coerceNum = (v: unknown): number | undefined =>
-        typeof v === 'number'
-          ? v
-          : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))
-            ? Number(v)
-            : undefined;
-      const yob = coerceNum(yobRaw);
-      const derivedAge =
-        yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
-
-      // A minor cannot give consent here; they accept terms in the Signals app.
-      // Signals rejects an onboard with top-level `age < 18`, so for a minor send
-      // neither age nor compliance. For an adult, require consent and send both.
-      // Unknown age is treated as adult.
-      const isMinor = derivedAge !== undefined && derivedAge <= 18;
-      if (consentRequiredForDomain && !isMinor) {
-        const missingConsent: string[] = [];
-        if (!termsOk) missingConsent.push('user_terms');
-        if (!privacyOk) missingConsent.push('user_privacy');
-        if (submitMode === 'with_item' && !profileConsentOk)
-          missingConsent.push('profile_creation');
-        if (missingConsent.length > 0) {
-          throw httpError('CONSENT_REQUIRED', { fields: { missing: missingConsent } });
-        }
-      }
-      const ageNum = isMinor ? undefined : derivedAge;
-      // Send compliance only when the domain requires consent and the registrant is an adult.
-      const compliance =
-        !consentRequiredForDomain || isMinor
-          ? undefined
-          : [
-              { key: 'user_terms', value: true },
-              { key: 'user_privacy', value: true },
-              ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
-            ];
+      // Consent and birth year are read, then stripped so they never reach Ajv
+      // or item_state.
+      const { compliance, age: ageNum } = resolveConsentAndAge(body, {
+        consentRequired: consentRequiredForDomain,
+        withItem: submitMode === 'with_item',
+      });
 
       // Identity selectors come from the network config (schema sniffer, with
       // aggregator.config.yaml overrides).
@@ -560,52 +523,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
               code: result.error.code,
               link_id: link.id,
             });
-            // Show signals' profile-limit message as is; other failures get a generic message.
-            const signalsMessage = result.error.details?.signalsMessage;
-            // A client that skips the minor check gets `U18_NOT_ALLOWED` from Signals;
-            // map it to the finish-in-the-app response.
-            if (result.error.message.includes('U18_NOT_ALLOWED')) {
-              throw httpError('U18_REGISTRATION_REDIRECT', {
-                fields: { code: result.error.code, message: result.error.message },
-                cause: result.error,
-              });
-            }
-            // Signals rejected the profile data itself (#904). That is the
-            // participant's input, not a server fault: answer 400 with Signals'
-            // per-field messages so the form names the field, instead of the
-            // generic 502 below.
-            const details = result.error.details;
-            if (
-              details?.upstreamCode === 'INVALID_ITEM_STATE' &&
-              isStringMap(details.signalsFields) &&
-              Object.keys(details.signalsFields).length > 0
-            ) {
-              const signalsFields = details.signalsFields;
-              throw httpError('SCHEMA_VALIDATION', {
-                detail: formatFieldErrors(
-                  Object.entries(signalsFields).map(([field, message]) => ({
-                    field,
-                    label: fieldLabel(linkDomainCfg.schema, field),
-                    message,
-                  })),
-                ),
-                fields: {
-                  field_errors: signalsFields,
-                  upstream_code: details.upstreamCode,
-                },
-                cause: result.error,
-              });
-            }
-            const detail =
-              result.error.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED' &&
-              typeof signalsMessage === 'string'
-                ? signalsMessage
-                : `Signalstack rejected the participant push (${result.error.code}).`;
-            throw httpError('SIGNALSTACK_PUSH_FAILED', {
-              detail,
-              fields: { code: result.error.code, message: result.error.message },
-              cause: result.error,
-            });
+            throw onboardFailureError(result.error, linkDomainCfg.schema);
           }
 
           // `account_only` creates no item, so lifecycle fields are null.
@@ -692,6 +610,215 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
       });
     },
   );
+
+  app.post(
+    '/public/v1/aggregators/:orgSlug/voice-requests/:slug',
+    {
+      config: { rbac: { access: 'public' } },
+      schema: {
+        tags: ['public-registration'],
+        summary: 'Get the voice-bot number of a public link, creating the account if new',
+        description:
+          "Public endpoint behind the 'talk to the voice bot' option of a two-option link. Checks the phone with signalstack first: a new phone gets an account (no profile) under the link's aggregator; an existing one, whoever owns it, is left untouched. Returns the bot's number either way (200, never 409 for an existing account). 409 when the link offers no voice option or no bot resolves; 429 when the per-link rate limit, shared with the form submit, trips.",
+        params: LinkParamsSchema,
+        body: VoiceRequestBodySchema,
+        response: {
+          200: VoiceRequestResponseSchema,
+          ...errorResponses(400, 404, 409, 410, 429, 502, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const { orgSlug, slug } = req.params;
+      const log = req.log.child({ operation: 'public.voiceRequest', org_slug: orgSlug, slug });
+      const start = Date.now();
+
+      await enforceSubmitRateLimit(req, reply, orgSlug, slug, log);
+
+      const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
+      const networkCfg = await getNetworkConfig();
+      const domainCfg = networkCfg.domains[link.domain];
+      if (!domainCfg) {
+        throw httpError('NOT_FOUND', {
+          detail: `link domain '${link.domain}' not declared in network ${networkCfg.network.id}`,
+        });
+      }
+
+      const resolved = modeOffersVoice(link.registrationMode, networkCfg)
+        ? resolveVoiceBot(link, networkCfg)
+        : null;
+      const bot = resolved?.bot ?? null;
+      if (!bot) {
+        log.info({ status: 'failure', reason: 'voice_bot_unavailable', link_id: link.id });
+        throw httpError('VOICE_BOT_UNAVAILABLE');
+      }
+      if (resolved?.fellBack) {
+        log.warn({
+          status: 'voice_bot_fallback',
+          link_id: link.id,
+          voice_bot_key: link.voiceBotKey,
+        });
+      }
+
+      const rawBody = req.body;
+      checkAccountOnlyBody(rawBody, domainCfg.identity, { requirePhone: true, allowEmail: false });
+      const body: Record<string, unknown> = { ...rawBody };
+      const { compliance, age } = resolveConsentAndAge(body, {
+        consentRequired: domainRequiresConsent(domainCfg.goLiveRequired),
+        withItem: false,
+      });
+
+      const phone = normalisePhone(readString(body, domainCfg.identity.phone) ?? '');
+      if (!phone.ok) {
+        throw httpError('INVALID_PHONE', { detail: phone.error.message });
+      }
+      const phoneNumber = phone.value;
+
+      const ss = getSignalStackWriter();
+      if (!ss) {
+        log.error({ status: 'failure', sub: 'signalstack.disabled', link_id: link.id });
+        throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+          detail: 'Signalstack integration is not configured.',
+        });
+      }
+      const aggLookup = await getUserStore().findById(link.aggregatorId);
+      if (!aggLookup.ok) {
+        throw httpError('DB_UNAVAILABLE', { fields: { sub_operation: 'userStore.findById' } });
+      }
+      if (!aggLookup.value) {
+        throw httpError('NOT_FOUND', { detail: 'Aggregator missing for live link.' });
+      }
+      const actingOrgId = aggLookup.value.signalstackOrgId;
+      if (!actingOrgId) {
+        throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
+          fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+        });
+      }
+
+      // Probe first: an account-only onboard for an existing user is not a
+      // no-op in Signals (it records consent again and can put drafts live).
+      const probe = await ss.probeUser({
+        actingOrgId,
+        requestId: req.id,
+        phoneNumber,
+        network: config.SIGNALSTACK_ITEM_NETWORK,
+        domain: link.domain,
+      });
+      if (!probe.success) {
+        log.error({
+          status: 'failure',
+          sub: 'signalstack.probe',
+          error: probe.error.message,
+          code: probe.error.code,
+          link_id: link.id,
+        });
+        throw httpError('SIGNALSTACK_PROBE_FAILED', {
+          detail: 'Could not check the phone number.',
+          fields: { code: probe.error.code },
+          cause: probe.error,
+        });
+      }
+      const existing = probe.value.user_exists;
+
+      // The stored body keeps identity only; consent and birth year were stripped.
+      const submission = {
+        linkId: link.id,
+        userId: link.aggregatorId,
+        metadataSnapshot: link.context,
+        submittedData: body,
+      };
+      let outcome: 'passed' | 'skipped';
+      if (existing) {
+        outcome = 'skipped';
+        await getDb()
+          .insert(linkSubmissions)
+          .values({ ...submission, outcome })
+          .returning({ id: linkSubmissions.id });
+      } else {
+        outcome = 'passed';
+        // The row and the onboard commit together: an onboard failure rolls the row back.
+        await getDb().transaction(async (tx) => {
+          await tx
+            .insert(linkSubmissions)
+            .values({ ...submission, outcome })
+            .returning({ id: linkSubmissions.id });
+          const result = await ss.onboard({
+            actingOrgId,
+            requestId: req.id,
+            name: readString(body, domainCfg.identity.name) ?? link.id,
+            phoneNumber,
+            ...(compliance ? { compliance } : {}),
+            ...(age !== undefined ? { age } : {}),
+            channel: 'link',
+            source_id: link.id,
+            network: config.SIGNALSTACK_ITEM_NETWORK,
+            domain: link.domain,
+            item_type: domainCfg.itemType,
+            profile: buildSignalStackItemState(body, phoneNumber, domainCfg.identity.phone),
+            submit_mode: 'account_only',
+          });
+          if (!result.success) {
+            log.error({
+              status: 'failure',
+              sub: 'signalstack.push',
+              error: result.error.message,
+              code: result.error.code,
+              link_id: link.id,
+            });
+            throw onboardFailureError(result.error, domainCfg.schema);
+          }
+        });
+      }
+
+      // Audit line, no PII: `outcome: 'passed'` means an account was created.
+      log.info({
+        status: 'success',
+        event_type: 'audit',
+        audit: 'link.voice_request_recorded',
+        latency_ms: Date.now() - start,
+        link_id: link.id,
+        voice_bot_key: bot.key,
+        existing,
+        outcome,
+      });
+
+      return reply.send({
+        existing,
+        voice_bot: { display_name: bot.display_name, phone: bot.phone, languages: bot.languages },
+      });
+    },
+  );
+}
+
+/**
+ * Applies the per-link submit rate limit, keyed by (orgSlug, slug, ip).
+ *
+ * The form submit and the voice request share the budget. CAPTCHA is checked
+ * in the BFF; this is a fallback.
+ *
+ * @throws {HttpError} `RATE_LIMITED`, with a `Retry-After` header, when the window is used up.
+ */
+async function enforceSubmitRateLimit(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  orgSlug: string,
+  slug: string,
+  log: FastifyRequest['log'],
+): Promise<void> {
+  const ip = (req.ip ?? '0.0.0.0').toString();
+  const rate = await consume({
+    namespace: 'link-submit',
+    key: `${orgSlug}:${slug}:${ip}`,
+    windowSeconds: config.PUBLIC_SUBMIT_RATE_WINDOW_SECONDS,
+    max: config.PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW,
+  });
+  if (!rate.allowed) {
+    void reply.header('Retry-After', String(rate.retryAfterSeconds));
+    log.warn({ status: 'rate_limited', count: rate.count, ip });
+    throw httpError('RATE_LIMITED', {
+      detail: `Retry in ${rate.retryAfterSeconds}s.`,
+    });
+  }
 }
 
 /**
@@ -762,14 +889,4 @@ function fieldErrorMap(errors: readonly FieldError[]): Record<string, string> {
     if (e.field && !Object.hasOwn(out, e.field)) out[e.field] = e.message;
   }
   return out;
-}
-
-/** True for a plain `{ string: string }` object such as Signals' `fields` map. */
-function isStringMap(value: unknown): value is Record<string, string> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every((v) => typeof v === 'string')
-  );
 }

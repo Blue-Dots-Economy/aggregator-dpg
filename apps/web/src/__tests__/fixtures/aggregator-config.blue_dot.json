@@ -357,6 +357,13 @@
       "label_i18n_key": "registration_mode.form.label",
       "submission_shape": "account_and_profile",
       "public_hint_i18n_key": null
+    },
+    "voice_or_form": {
+      "label_i18n_key": "registration_mode.voice_or_form.label",
+      "submission_shape": "account_and_profile",
+      "public_hint_i18n_key": null,
+      "signals_cta": true,
+      "offers": ["voice", "form"]
     }
   },
   "signals_ui_urls": {},

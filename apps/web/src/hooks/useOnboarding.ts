@@ -6,6 +6,7 @@ import {
   type ApiRegistrationLink,
   type BulkUploadList,
   type CreateLinkInput,
+  type ListVoiceBotsResponse,
   type OnboardingBySource,
   type OnboardingSummary,
   type UpdateLinkInput,
@@ -19,6 +20,15 @@ export function useRegistrationLinks(domain: string) {
       return res.items;
     },
     staleTime: 15_000,
+  });
+}
+
+/** The voice bots a coordinator can attach to a link in `domain`, plus the instance default. */
+export function useVoiceBots(domain: string) {
+  return useQuery<ListVoiceBotsResponse>({
+    queryKey: ['onboarding', 'voice-bots', domain],
+    queryFn: () => onboardingService.listVoiceBots(domain),
+    staleTime: 60_000,
   });
 }
 

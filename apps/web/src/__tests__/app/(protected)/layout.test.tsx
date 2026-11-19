@@ -58,7 +58,8 @@ import { redirect } from 'next/navigation';
 import { ensureTermsAccepted } from '@/lib/terms-guard.server';
 
 function AuthProbe() {
-  const { user, supportEnabled, isAuthenticated, capabilities, can } = useAuth();
+  const { user, supportEnabled, isAuthenticated, capabilities, can, acting, actingOrgName } =
+    useAuth();
   return (
     <div>
       <span data-testid="user-name">{user?.name}</span>
@@ -69,6 +70,8 @@ function AuthProbe() {
         {capabilities === null ? 'null' : capabilities.join(',')}
       </span>
       <span data-testid="can-export-pii">{String(can('profiles.view_pii'))}</span>
+      <span data-testid="acting">{String(acting)}</span>
+      <span data-testid="acting-org">{actingOrgName ?? 'none'}</span>
     </div>
   );
 }
@@ -291,5 +294,98 @@ describe('<ProtectedLayout />', () => {
     vi.mocked(classifyNonCoordinator).mockReturnValue('org_owner');
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
     expect(ensureTermsAccepted).not.toHaveBeenCalled();
+  });
+
+  describe("acting as the owner's own coordinator account", () => {
+    const ACCOUNT_ID = '7d0f2c1e-4b8a-4c3d-9e2f-1a2b3c4d5e6f';
+    const coordinatorMe = {
+      kind: 'coordinator' as const,
+      user: { id: ACCOUNT_ID, contact: { name: 'Asha', email: 'o@x.org', phone: null } },
+      orgs: [
+        {
+          id: 'org-1',
+          name: 'Acme Jobs',
+          slug: 'acme',
+          org_type: 'aggregator' as const,
+          role: 'member' as const,
+          is_default: false,
+        },
+      ],
+      is_network_admin: false,
+      capabilities: ['profiles.onboard'],
+    };
+
+    it('renders the coordinator shell for an owner session with an acting account', async () => {
+      vi.mocked(getSession).mockResolvedValue(
+        baseSession({ name: 'Owner', actingAccountId: ACCOUNT_ID }),
+      );
+      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+      vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: true, me: coordinatorMe });
+
+      await renderLayout();
+
+      expect(redirect).not.toHaveBeenCalled();
+      expect(classifyNonCoordinator).not.toHaveBeenCalled();
+      expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+      expect(screen.getByTestId('acting')).toHaveTextContent('true');
+      expect(screen.getByTestId('acting-org')).toHaveTextContent('Acme Jobs');
+      expect(screen.getByTestId('user-name')).toHaveTextContent('Asha');
+      expect(screen.getByTestId('capabilities')).toHaveTextContent('profiles.onboard');
+    });
+
+    it('keeps the acting shell, without an org name, when /me is unavailable', async () => {
+      vi.mocked(getSession).mockResolvedValue(
+        baseSession({ name: 'Owner', actingAccountId: ACCOUNT_ID }),
+      );
+      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+      vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: false, reason: 'unavailable' });
+
+      await renderLayout();
+
+      expect(redirect).not.toHaveBeenCalled();
+      expect(screen.getByTestId('acting')).toHaveTextContent('true');
+      expect(screen.getByTestId('acting-org')).toHaveTextContent('none');
+      expect(screen.getByTestId('user-name')).toHaveTextContent('Owner');
+    });
+
+    it('ends acting mode and lands on the console notice when the account is no longer valid', async () => {
+      vi.mocked(getSession).mockResolvedValue(baseSession({ actingAccountId: ACCOUNT_ID }));
+      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+      vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: false, reason: 'acting_invalid' });
+
+      await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
+      expect(redirect).toHaveBeenCalledWith(
+        '/api/auth/acting/leave?returnTo=%2Fconsole&reason=acting_ended',
+      );
+    });
+
+    it('ends acting mode when /me answers with an admin, not the coordinator account', async () => {
+      vi.mocked(getSession).mockResolvedValue(baseSession({ actingAccountId: ACCOUNT_ID }));
+      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+      vi.mocked(getConsoleActor).mockResolvedValueOnce({
+        ok: true,
+        me: { ...coordinatorMe, kind: 'admin' },
+      });
+
+      await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
+      expect(redirect).toHaveBeenCalledWith(
+        '/api/auth/acting/leave?returnTo=%2Fconsole&reason=acting_ended',
+      );
+    });
+
+    it('is not acting for a plain coordinator', async () => {
+      vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
+      vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+      vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+
+      await renderLayout();
+
+      expect(screen.getByTestId('acting')).toHaveTextContent('false');
+      expect(screen.getByTestId('acting-org')).toHaveTextContent('none');
+    });
   });
 });

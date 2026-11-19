@@ -647,6 +647,19 @@ describe('InMemoryOrganisationStore — parents and descendants', () => {
     const withStatus = await store.search({ orgIds: null, descendantsOf: 's', status: 'active' });
     expect(withStatus.ok && withStatus.value.rows).toEqual([]);
   });
+
+  it('search parentId returns only the direct children of that org', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 's', slug: 's', displayName: 'State', parentId: 'root' }),
+      buildOrganisation({ id: 'd', slug: 'd', displayName: 'District', parentId: 's' }),
+      buildOrganisation({ id: 'a', slug: 'a', displayName: 'Agg', parentId: 'd' }),
+    ]);
+    const children = await store.search({ orgIds: null, parentId: 's' });
+    expect(children.ok && children.value.rows.map((o) => o.id)).toEqual(['d']);
+    const none = await store.search({ orgIds: null, parentId: 'a' });
+    expect(none.ok && none.value.rows).toEqual([]);
+  });
 });
 
 const BLOCK = { key: 'block', name: 'Block' };

@@ -30,6 +30,9 @@ vi.mock('next-intl/server', () => ({
   getFormatter: vi.fn(async () => ({ dateTime: () => '13 Nov 2026' })),
 }));
 vi.mock('@/lib/console-invites.server', () => ({ readOpenInvites: vi.fn(async () => null) }));
+vi.mock('@/app/(public)/register/register-server', () => ({
+  loadConsentContent: vi.fn(async () => null),
+}));
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => {
     throw new Error(`redirect:${to}`);
@@ -46,6 +49,7 @@ import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { readOpenInvites } from '@/lib/console-invites.server';
+import { networkDomains } from '@/lib/console-domains.server';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -250,5 +254,65 @@ describe('console home — network admin', () => {
     });
     await expect(ConsoleHomePage()).rejects.toThrow('redirect:/console/orgs');
     expect(consoleRead).not.toHaveBeenCalled();
+  });
+});
+
+describe('console home — adding the owner to My Team', () => {
+  const OWN = '00000000-0000-4000-8000-0000000000c1';
+  const addMyself = () =>
+    screen.queryByRole('button', { name: /console\.self_add\.button|Add myself/ });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(networkDomains).mockResolvedValue([{ id: 'seeker', label: 'Seekers' }]);
+  });
+
+  it('offers "Add myself to My Team" to an owner without a coordinator account', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: null }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    await show();
+    expect(addMyself()).toBeInTheDocument();
+    expect(screen.queryByText(messages.console.org_home.you)).toBeNull();
+  });
+
+  it('hides it once the account exists and tags the owner\'s own row "You"', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: OWN }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    vi.mocked(consoleRead).mockImplementation(async (path: string) => {
+      if (path === '/v1/user/search') {
+        return {
+          users: [
+            {
+              id: OWN,
+              name: 'Edge Org A',
+              status: 'active',
+              serves: ['seeker'],
+              contact: { name: 'Owner Self', email: 'owner@a.org', phone: null },
+            },
+            ...users.users,
+          ],
+          next_cursor: null,
+        } as never;
+      }
+      const { coordinator_count, child_count, pending_count, ...org } = row('org-1', 'Edge Org A');
+      return {
+        org,
+        owner: { id: 'u', contact: { name: null, email: 'owner@a.org', phone: null } },
+        coordinator_count,
+        child_count,
+        pending_count,
+      } as never;
+    });
+    await show();
+    expect(addMyself()).toBeNull();
+    const tags = screen.getAllByText(messages.console.org_home.you);
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.closest('tr')).toHaveTextContent('Owner Self');
   });
 });

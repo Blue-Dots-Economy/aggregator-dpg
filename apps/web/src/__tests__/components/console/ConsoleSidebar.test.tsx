@@ -3,8 +3,8 @@
  * active, and the account card, in the shell shared with the coordinator
  * portal. Hooks the shared shell reads are mocked, as in `Sidebar.test.tsx`.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render as rtlRender, screen, within, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render as rtlRender, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { makeQueryClient } from '@/__tests__/test-utils';
@@ -153,5 +153,85 @@ describe('<ConsoleSidebar />', () => {
     expect(hrefs).toContain('/console/coordinators');
     expect(hrefs).not.toContain('/console/invite');
     expect(hrefs).not.toContain('/console/orgs/invite');
+  });
+
+  describe('Onboard participants', () => {
+    const ACCOUNT = '00000000-0000-4000-8000-0000000000c3';
+    const original = global.fetch;
+    const assign = vi.fn();
+    beforeEach(() => {
+      vi.stubGlobal('location', { ...window.location, assign });
+    });
+    afterEach(() => {
+      global.fetch = original;
+      vi.unstubAllGlobals();
+    });
+
+    const item = () => within(aside()).queryByRole('button', { name: 'nav.onboard_participants' });
+
+    it("is not offered without the owner's own coordinator account", () => {
+      render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+      expect(item()).toBeNull();
+      expect(within(aside()).queryByText('nav.my_onboarding')).toBeNull();
+    });
+
+    it('sits under My onboarding when the owner has a coordinator account', () => {
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      expect(item()).toBeInTheDocument();
+      expect(within(aside()).getByText('nav.my_onboarding')).toBeInTheDocument();
+    });
+
+    it('starts acting as the account and opens its onboarding', async () => {
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ redirect: '/onboarding' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      global.fetch = fetchSpy;
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      fireEvent.click(item()!);
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/onboarding'));
+      const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('/api/auth/acting');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(String(init.body))).toEqual({ accountId: ACCOUNT });
+    });
+
+    it('says the access is still being set up on ACTING_NOT_READY', async () => {
+      global.fetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { code: 'ACTING_NOT_READY', title: 'x' } }), {
+            status: 409,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      fireEvent.click(item()!);
+      expect(await within(aside()).findByText('nav.acting_not_ready')).toBeInTheDocument();
+      expect(assign).not.toHaveBeenCalled();
+    });
   });
 });
