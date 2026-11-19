@@ -371,10 +371,46 @@ describe('bulk-upload command', () => {
       expect(storage.read(rawRef)?.toString()).toBe(csv);
     });
 
-    it('stops a call that hangs', async () => {
+    const unknownState = `FAILED: upload ${UPLOAD_1} state unknown after timeout — check with --upload-id ${UPLOAD_1} before retrying`;
+
+    it('stops a call that hangs and leaves the upload alone', async () => {
       vi.spyOn(storage, 'put').mockReturnValue(new Promise(() => undefined));
+      const del = vi.spyOn(storage, 'delete');
       expect(await run(args(), io(undefined, { callTimeoutMs: 5 }))).toBe(1);
-      expect(lines.at(-1)).toBe('FAILED: storage write timed out after 5 ms');
+      expect(lines.at(-1)).toBe(unknownState);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it('deletes nothing when the start times out, since it may still go through', async () => {
+      vi.spyOn(ledger, 'recordRegistrationConsent').mockReturnValue(new Promise(() => undefined));
+      const del = vi.spyOn(storage, 'delete');
+      expect(await run(args(), io(undefined, { callTimeoutMs: 20 }))).toBe(1);
+      expect(lines).toEqual([`upload ${UPLOAD_1} created`, unknownState]);
+      expect(del).not.toHaveBeenCalled();
+      expect(storage.read(rawRef)?.toString()).toBe(csv);
+    });
+
+    it('tells the operator when the CSV of a failed start could not be deleted', async () => {
+      vi.spyOn(ledger, 'recordRegistrationConsent').mockResolvedValue(
+        err(new UpstreamError('ledger down')),
+      );
+      storage.failNext('delete', new UpstreamError('storage down'));
+      expect(await run(args(), io())).toBe(1);
+      expect(lines).toContain(
+        `WARNING: upload ${UPLOAD_1}: its CSV was left in storage (storage down)`,
+      );
+      expect(storage.read(rawRef)?.toString()).toBe(csv);
+    });
+
+    it('tells the operator when deleting the CSV of a failed start hangs', async () => {
+      vi.spyOn(ledger, 'recordRegistrationConsent').mockResolvedValue(
+        err(new UpstreamError('ledger down')),
+      );
+      vi.spyOn(storage, 'delete').mockReturnValue(new Promise(() => undefined));
+      expect(await run(args(), io(undefined, { callTimeoutMs: 20 }))).toBe(1);
+      expect(lines).toContain(
+        `WARNING: upload ${UPLOAD_1}: its CSV was left in storage (storage delete timed out after 20 ms)`,
+      );
     });
   });
 

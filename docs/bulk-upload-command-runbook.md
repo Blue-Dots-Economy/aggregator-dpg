@@ -70,18 +70,20 @@ Do not run the upload again unless it ended `failed` or `file_failed`; a second 
 
 ## What the messages mean
 
-| Message                                                 | Meaning                                                                 |
-| ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `REFUSED: no coordinator with that email or user id`    | Check the address or id.                                                |
-| `REFUSED: coordinator … is pending, not active`         | The coordinator has not been approved yet.                              |
-| `REFUSED: coordinator … has no recorded Keycloak login` | The coordinator was never approved through the normal approval step.    |
-| `REFUSED: coordinator … has no Signals org`             | The coordinator's approval did not finish; every row would fail.        |
-| `REFUSED: DOMAIN_NOT_SERVED: …`                         | Wrong `--type`, or the coordinator does not serve it.                   |
-| `REFUSED: missing columns: …` / `unknown columns: …`    | The CSV header does not match the template; nothing was created.        |
-| `REFUSED: the file is not valid UTF-8`                  | Save the CSV as UTF-8 and run it again; nothing was created.            |
-| `REFUSED: rate limited; retry in Ns`                    | Wait, or use `--skip-rate-limit` for the initial load.                  |
-| `FAILED: … timed out after 30000 ms`                    | A storage, database or queue call hung; check the upload id it printed. |
-| `status: file_failed (…)`                               | The worker rejected the whole file; nothing was processed.              |
+| Message                                                 | Meaning                                                                                                                                       |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REFUSED: no coordinator with that email or user id`    | Check the address or id.                                                                                                                      |
+| `REFUSED: coordinator … is pending, not active`         | The coordinator has not been approved yet.                                                                                                    |
+| `REFUSED: coordinator … has no recorded Keycloak login` | The coordinator was never approved through the normal approval step.                                                                          |
+| `REFUSED: coordinator … has no Signals org`             | The coordinator's approval did not finish; every row would fail.                                                                              |
+| `REFUSED: DOMAIN_NOT_SERVED: …`                         | Wrong `--type`, or the coordinator does not serve it.                                                                                         |
+| `REFUSED: missing columns: …` / `unknown columns: …`    | The CSV header does not match the template; nothing was created.                                                                              |
+| `REFUSED: the file is not valid UTF-8`                  | Save the CSV as UTF-8 and run it again; nothing was created.                                                                                  |
+| `REFUSED: rate limited; retry in Ns`                    | Wait, or use `--skip-rate-limit` for the initial load.                                                                                        |
+| `FAILED: … timed out after N ms`                        | A call hung before the upload was created; nothing was created.                                                                               |
+| `FAILED: upload … state unknown after timeout — …`      | A call hung after the upload was created. It may still start: run `--upload-id <id>` and only retry if it never started. Nothing was deleted. |
+| `WARNING: upload …: its CSV was left in storage (…)`    | The upload failed and its stored CSV could not be deleted; tell the platform team the upload id.                                              |
+| `status: file_failed (…)`                               | The worker rejected the whole file; nothing was processed.                                                                                    |
 
 ## What is recorded
 

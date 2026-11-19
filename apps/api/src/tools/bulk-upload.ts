@@ -34,12 +34,11 @@ import {
   CSV_FIELD_DELIMITER,
   normaliseHeaderCells,
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
-import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../config.js';
 import { HttpError } from '../errors/http-error.js';
 import { logger } from '../logger.js';
 import {
-  deleteRejectedUpload,
   reserveBulkUpload,
   saveStorageKey,
   startBulkUpload,
@@ -74,6 +73,19 @@ class Refusal extends Error {}
 /** A usage error. Printed with the usage text and exit code 2. */
 class UsageError extends Error {}
 
+/** A call that did not finish within the per-call timeout; whether it took effect is unknown. */
+class CallTimeout extends Error {}
+
+/** A failure after the upload row was created; carries the upload id for the message. */
+class UploadFailure extends Error {
+  constructor(
+    readonly uploadId: string,
+    readonly failure: unknown,
+  ) {
+    super(errorMessage(failure), { cause: failure });
+  }
+}
+
 /** What the command reads from and writes to; tests replace them. */
 export interface CommandIo {
   /** One line of human-readable output. */
@@ -87,11 +99,16 @@ export interface CommandIo {
   sleep: (ms: number) => Promise<void>;
 }
 
-/** Rejects when `promise` takes longer than `ms`. */
+/**
+ * Rejects when `promise` takes longer than `ms`. The call itself is not
+ * cancelled and may still complete.
+ *
+ * @throws {CallTimeout} When the time runs out.
+ */
 async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    timer = setTimeout(() => reject(new CallTimeout(`${what} timed out after ${ms} ms`)), ms);
   });
   try {
     return await Promise.race([promise, timeout]);
@@ -274,7 +291,10 @@ async function followUp(
   return report(done, io);
 }
 
-/** Deletes the stored CSV of an upload that failed before it was marked uploaded. */
+/**
+ * Deletes the stored CSV of an upload whose start failed while it was still
+ * `pending`. Tells the operator when the CSV could not be deleted.
+ */
 async function discardIfNotStarted(
   uploadId: string,
   coordinatorId: string,
@@ -284,9 +304,21 @@ async function discardIfNotStarted(
 ): Promise<void> {
   try {
     const upload = await readUpload(uploadId, coordinatorId, io);
-    if (upload.status === 'pending') await deleteRejectedUpload(ref, log);
+    if (upload.status !== 'pending') return;
+    const deleted = await withTimeout(
+      getObjectStorage().delete(ref),
+      io.callTimeoutMs,
+      'storage delete',
+    );
+    if (!deleted.success) throw deleted.error;
   } catch (err) {
-    log.warn({ status: 'failure', sub_operation: 'discard', error: errorMessage(err) });
+    log.warn({
+      status: 'failure',
+      sub_operation: 'discard',
+      error: errorMessage(err),
+      error_type: errorType(err),
+    });
+    io.out(`WARNING: upload ${uploadId}: its CSV was left in storage (${errorMessage(err)})`);
   }
 }
 
@@ -381,9 +413,12 @@ async function upload(values: Flags, coordinatorRef: string, io: CommandIo): Pro
       'upload start',
     );
   } catch (err) {
-    runLog.error({ status: 'failure', error: errorMessage(err) });
-    await discardIfNotStarted(uploadId, coordinator.id, ref, runLog, io);
-    throw err;
+    runLog.error({ status: 'failure', error: errorMessage(err), error_type: errorType(err) });
+    // After a timeout the start may still mark the upload and enqueue it, so nothing is deleted.
+    if (!(err instanceof CallTimeout)) {
+      await discardIfNotStarted(uploadId, coordinator.id, ref, runLog, io);
+    }
+    throw new UploadFailure(uploadId, err);
   }
   runLog.info({ status: 'success', skip_rate_limit: skipRateLimit });
   io.out(`upload ${uploadId} started`);
@@ -427,7 +462,15 @@ async function main(args: string[], io: CommandIo): Promise<number> {
 export async function run(args: string[], io: CommandIo): Promise<number> {
   try {
     return await main(args, io);
-  } catch (err) {
+  } catch (thrown) {
+    const uploadId = thrown instanceof UploadFailure ? thrown.uploadId : undefined;
+    const err = thrown instanceof UploadFailure ? thrown.failure : thrown;
+    if (uploadId !== undefined && err instanceof CallTimeout) {
+      io.out(
+        `FAILED: upload ${uploadId} state unknown after timeout — check with --upload-id ${uploadId} before retrying`,
+      );
+      return 1;
+    }
     if (err instanceof UsageError) {
       io.out(err.message);
       io.out(USAGE);
