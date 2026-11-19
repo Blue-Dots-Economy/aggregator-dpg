@@ -14,14 +14,12 @@
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import Papa from 'papaparse';
+import {
+  checkBulkHeader,
+  CSV_FIELD_DELIMITER,
+  normaliseHeaderCells,
+} from '@aggregator-dpg/shared-primitives/bulk-columns';
 import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
-
-/**
- * The bulk CSV field delimiter, used for every parse of an upload.
- *
- * Set explicitly because auto-detect can pick the array delimiter (`|`) instead.
- */
-export const CSV_FIELD_DELIMITER = ',';
 
 /** Reasons the File Processor can reject a file before per-row work begins. */
 export type FileFailureReason =
@@ -147,16 +145,9 @@ export async function streamCsvParse(
   const validateHeaders = (
     hdrs: string[],
   ): { reason: FileFailureReason; detail?: string } | null => {
-    const headerSet = new Set(hdrs);
-    const missing = options.required.filter((f) => !headerSet.has(f));
-    if (missing.length > 0) {
-      return { reason: 'header_mismatch', detail: `missing: ${missing.join(',')}` };
-    }
-    const unknown = hdrs.filter((h) => !options.allowed.has(h));
-    if (unknown.length > 0) {
-      return { reason: 'header_mismatch', detail: `unknown: ${unknown.join(',')}` };
-    }
-    return null;
+    const problem = checkBulkHeader(hdrs, options);
+    if (!problem) return null;
+    return { reason: 'header_mismatch', detail: `${problem.kind}: ${problem.columns.join(',')}` };
   };
 
   try {
@@ -168,7 +159,7 @@ export async function streamCsvParse(
         for await (const record of parsed) {
           // The first non-empty record is the header.
           if (headers === null) {
-            headers = record.map((h) => String(h ?? '').trim());
+            headers = normaliseHeaderCells(record);
             const headerFailure = validateHeaders(headers);
             if (headerFailure) throw new ParseFailure(headerFailure.reason, headerFailure.detail);
             continue;

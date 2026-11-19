@@ -126,3 +126,69 @@ export function schemaOwnsColumn(
   if (!props || typeof props !== 'object') return false;
   return Object.hasOwn(props, name);
 }
+
+/**
+ * The bulk CSV field delimiter, used for every parse of an upload.
+ *
+ * Set explicitly because auto-detect can pick the array delimiter (`|`) instead.
+ */
+export const CSV_FIELD_DELIMITER = ',';
+
+/** The columns a bulk CSV header must have and may have. */
+export interface BulkHeaderColumns {
+  /** Columns that must be present: the schema's `required` names. */
+  required: string[];
+  /** Columns that may be present: schema properties plus {@link WELL_KNOWN_COLUMNS}. */
+  allowed: ReadonlySet<string>;
+}
+
+/**
+ * The header columns a bulk CSV for `schema` must and may have.
+ *
+ * Well-known columns are allowed but never required.
+ *
+ * @param schema - The participant item schema.
+ */
+export function bulkHeaderColumns(schema: Record<string, unknown>): BulkHeaderColumns {
+  const requiredList = schema['required'];
+  const required = Array.isArray(requiredList)
+    ? requiredList.filter((x): x is string => typeof x === 'string')
+    : [];
+  const props = schema['properties'];
+  const properties = props && typeof props === 'object' ? Object.keys(props) : [];
+  return { required, allowed: new Set([...properties, ...WELL_KNOWN_COLUMNS]) };
+}
+
+/**
+ * The header record's cells as column names: each cell trimmed, a missing cell `''`.
+ *
+ * @param record - The first non-empty record of the CSV.
+ */
+export function normaliseHeaderCells(record: readonly unknown[]): string[] {
+  return record.map((h) => String(h ?? '').trim());
+}
+
+/** Why a header fails: required columns missing, or columns the schema does not declare. */
+export interface BulkHeaderProblem {
+  kind: 'missing' | 'unknown';
+  columns: string[];
+}
+
+/**
+ * Checks a header against the columns a schema allows; missing columns are reported first.
+ *
+ * @param headers - Column names from {@link normaliseHeaderCells}.
+ * @param columns - From {@link bulkHeaderColumns}.
+ * @returns The problem, or `null` when the header is accepted.
+ */
+export function checkBulkHeader(
+  headers: readonly string[],
+  columns: BulkHeaderColumns,
+): BulkHeaderProblem | null {
+  const present = new Set(headers);
+  const missing = columns.required.filter((f) => !present.has(f));
+  if (missing.length > 0) return { kind: 'missing', columns: missing };
+  const unknown = headers.filter((h) => !columns.allowed.has(h));
+  if (unknown.length > 0) return { kind: 'unknown', columns: unknown };
+  return null;
+}
