@@ -92,12 +92,16 @@ export function modeOffersVoice(mode: string, cfg: ResolvedNetworkConfig): boole
  * Finds the two-option mode: the first declared mode that offers both voice and the form.
  *
  * @param cfg - The resolved network config.
- * @returns The mode key, or `null` when the network declares none.
+ * @param isEnabled - Skips modes this deployment does not enable; by default every mode counts.
+ * @returns The mode key, or `null` when the network declares none that is enabled.
  */
-export function twoOptionModeKey(cfg: ResolvedNetworkConfig): string | null {
+export function twoOptionModeKey(
+  cfg: ResolvedNetworkConfig,
+  isEnabled: (mode: string) => boolean = () => true,
+): string | null {
   const key = Object.keys(cfg.aggregator.registration_modes).find((mode) => {
     const offers = modeOffers(mode, cfg);
-    return offers.includes('voice') && offers.includes('form');
+    return offers.includes('voice') && offers.includes('form') && isEnabled(mode);
   });
   return key ?? null;
 }

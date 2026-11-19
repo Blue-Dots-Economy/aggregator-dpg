@@ -26,6 +26,7 @@ import { orgSchemaFields } from '../services/org-schema-validator.js';
 import { provisionedBy } from '../services/provisioned.js';
 import { closeRedis } from '../services/redis/index.js';
 import { resolveSchema } from '../services/schema-ref.js';
+import { csvField } from './csv-field.js';
 import { applyLoadPlan, type ReportRow } from './org-loader-apply.js';
 import {
   ADDRESS_PARTS,
@@ -165,20 +166,6 @@ function parseFlags(args: string[], allowed: readonly string[]): Map<string, str
     flags.set(name, value);
   }
   return flags;
-}
-
-/**
- * Neutralises spreadsheet formula injection: a cell starting with `=`, `+`,
- * `-`, `@`, TAB or CR gets a leading single quote. Same rule as `profile-csv`.
- */
-function neutraliseFormula(value: string): string {
-  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-}
-
-/** One CSV field: formula-neutralised, then RFC 4180 quoted when needed. */
-function csvField(value: string): string {
-  const safe = neutraliseFormula(value);
-  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /**

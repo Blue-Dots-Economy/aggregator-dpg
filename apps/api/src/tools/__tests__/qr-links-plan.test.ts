@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
+import { logger } from '../../logger.js';
 import { _setNetworkConfig } from '../../services/network-config.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../../services/user-store/index.js';
 import {
@@ -22,6 +23,7 @@ const MEERA_ID = '00000000-0000-4000-8000-0000000000a2';
 class LinksStoreFake extends RegistrationLinksStoreBase {
   readonly rows: RegistrationLink[] = [];
   failList = false;
+  hangList = false;
 
   async create(): Promise<StoreResult<RegistrationLink>> {
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'unused' } };
@@ -42,6 +44,7 @@ class LinksStoreFake extends RegistrationLinksStoreBase {
     aggregatorId: string,
     options: { status?: RegistrationLink['status']; limit: number; offset: number },
   ): Promise<StoreResult<{ rows: RegistrationLink[]; total: number }>> {
+    if (this.hangList) return new Promise(() => undefined);
     if (this.failList) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } };
     const mine = this.rows.filter(
       (r) => r.aggregatorId === aggregatorId && (!options.status || r.status === options.status),
@@ -154,6 +157,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   _setUserStore(null);
   _setRegistrationLinksStore(null);
   vi.unstubAllEnvs();
@@ -178,6 +182,7 @@ describe('buildLinksPlan', () => {
         userId: RAJ_ID,
         orgSlug: 'raj-org',
         domain: 'seeker',
+        registrationMode: 'voice_or_form',
         voiceBotKey: 'bot_a',
         slug: 'camp-1',
         expiresAt: new Date('2026-12-31T23:59:59.999Z'),
@@ -356,6 +361,7 @@ describe('buildLinksPlan', () => {
     expect(planned[0]?.existing).toEqual({
       slug: 'voice-link',
       url: buildPublicUrl('raj-org', 'voice-link'),
+      voiceBotKey: 'bot_a',
     });
   });
 
@@ -384,5 +390,49 @@ describe('buildLinksPlan', () => {
     const { links: planned, problems } = await plan([row()]);
     expect(planned).toEqual([]);
     expect(problems).toEqual([{ line: 2, code: QR_PLAN_PROBLEM.CHECK_FAILED }]);
+  });
+  it('logs the error code and store reason of a failed row check', async () => {
+    const spy = vi.spyOn(logger, 'error');
+    links.failList = true;
+    await plan([row()]);
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'qrLinks.buildLinksPlan.check',
+        line: 2,
+        error_code: 'PLAN_LOOKUP_FAILED',
+        reason: 'DB_UNAVAILABLE',
+      }),
+      expect.any(String),
+    );
+  });
+
+  it('reports a lookup that times out as CHECK_FAILED on the row', async () => {
+    links.hangList = true;
+    const { links: planned, problems } = await buildLinksPlan({
+      rows: [row()],
+      inputProblems: [],
+      now: NOW,
+      callTimeoutMs: 20,
+    });
+    expect(planned).toEqual([]);
+    expect(problems).toEqual([{ line: 2, code: QR_PLAN_PROBLEM.CHECK_FAILED }]);
+  });
+
+  it('plans the first two-option mode that is enabled, with its key on the link', async () => {
+    const cfg = twoOptionConfig();
+    const declared = cfg.aggregator.registration_modes;
+    const twoOption = declared['voice_or_form'];
+    if (!twoOption) throw new Error('fixture has no voice_or_form');
+    _setNetworkConfig({
+      ...cfg,
+      aggregator: {
+        ...cfg.aggregator,
+        registration_modes: { ...declared, voice_or_form_b: twoOption },
+      },
+    });
+    vi.stubEnv('AGGREGATOR_ONBOARDING_ENABLED', 'form,voice_or_form_b');
+    const { links: planned, problems } = await plan([row()]);
+    expect(problems).toEqual([]);
+    expect(planned[0]?.registrationMode).toBe('voice_or_form_b');
   });
 });

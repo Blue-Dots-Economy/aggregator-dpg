@@ -53,6 +53,7 @@ import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 import { provisionedBy } from '../services/provisioned.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
+import { CallTimeout, withTimeout } from './call-timeout.js';
 
 const USAGE = [
   'usage: bulk-upload --coordinator <email or user id> --type <profile type> --file - --operator <name> [--skip-rate-limit] < file.csv',
@@ -78,9 +79,6 @@ class Refusal extends Error {}
 
 /** A usage error. Printed with the usage text and exit code 2. */
 class UsageError extends Error {}
-
-/** A call that did not finish within the per-call timeout; whether it took effect is unknown. */
-class CallTimeout extends Error {}
 
 /**
  * A failure after the upload row was created; carries the upload id for the
@@ -121,24 +119,6 @@ export interface CommandIo {
   pollTimeoutMs: number;
   callTimeoutMs: number;
   sleep: (ms: number) => Promise<void>;
-}
-
-/**
- * Rejects when `promise` takes longer than `ms`. The call itself is not
- * cancelled and may still complete.
- *
- * @throws {CallTimeout} When the time runs out.
- */
-async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new CallTimeout(`${what} timed out after ${ms} ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** Reads the CSV from stdin, refusing more than the upload limit. */

@@ -22,6 +22,7 @@ import { getUserStore } from '../services/user-store/index.js';
 import type { Coordinator } from '../services/user-store/interface.js';
 import { servedDomains } from '../services/user-store/serves.js';
 import { twoOptionModeKey } from '../services/voice-bots/index.js';
+import { CallTimeout, withTimeout } from './call-timeout.js';
 import { LINK_INPUT_PROBLEM, type InputProblem, type LinkRow } from './qr-links-input.js';
 
 /** Problem codes the plan adds to the parser's {@link LINK_INPUT_PROBLEM} codes. */
@@ -55,6 +56,8 @@ export interface PlannedLink {
   /** The coordinator's org slug, used in the public URL. */
   orgSlug: string;
   domain: string;
+  /** The instance's two-option mode key, checked against the declared and enabled modes. */
+  registrationMode: string;
   /** The bot to store: the row's choice, else the domain's default or only bot; `null` when none serves it. */
   voiceBotKey: string | null;
   /** The row's `link_name`; `undefined` gets a random slug. */
@@ -62,7 +65,7 @@ export interface PlannedLink {
   /** End of the `expires_on` day in UTC, or `null` for no expiry. */
   expiresAt: Date | null;
   /** A live two-option link that already covers this row; apply creates nothing for it. */
-  existing: { slug: string; url: string } | null;
+  existing: { slug: string; url: string; voiceBotKey: string | null } | null;
 }
 
 /** Links read per `list` call when looking for existing links. */
@@ -76,6 +79,9 @@ interface PlanCache {
   coordinators: Map<string, Coordinator | null>;
   liveLinks: Map<string, RegistrationLink[]>;
 }
+
+/** Bounds a store lookup by the per-call timeout, when one is set. */
+type Bound = <T>(promise: Promise<T>, what: string) => Promise<T>;
 
 /** Unwraps a store result, throwing so the row is reported as CHECK_FAILED. */
 function must<T>(
@@ -107,11 +113,15 @@ function parseExpiry(value: string): Date | null {
   return at;
 }
 
-async function findCoordinator(email: string, cache: PlanCache): Promise<Coordinator | null> {
+async function findCoordinator(
+  email: string,
+  cache: PlanCache,
+  bound: Bound,
+): Promise<Coordinator | null> {
   const cached = cache.coordinators.get(email);
   if (cached !== undefined) return cached;
   const found = must(
-    await getUserStore().findByContactEmail(email),
+    await bound(getUserStore().findByContactEmail(email), 'coordinator lookup'),
     'userStore.findByContactEmail',
   );
   cache.coordinators.set(email, found);
@@ -119,14 +129,21 @@ async function findCoordinator(email: string, cache: PlanCache): Promise<Coordin
 }
 
 /** The coordinator's live links, every page. */
-async function liveLinksOf(userId: string, cache: PlanCache): Promise<RegistrationLink[]> {
+async function liveLinksOf(
+  userId: string,
+  cache: PlanCache,
+  bound: Bound,
+): Promise<RegistrationLink[]> {
   const cached = cache.liveLinks.get(userId);
   if (cached) return cached;
   const store = getRegistrationLinksStore();
   const rows: RegistrationLink[] = [];
   for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
     const page = must(
-      await store.list(userId, { status: 'live', limit: LIST_PAGE_SIZE, offset }),
+      await bound(
+        store.list(userId, { status: 'live', limit: LIST_PAGE_SIZE, offset }),
+        'links list',
+      ),
       'registrationLinksStore.list',
     );
     rows.push(...page.rows);
@@ -134,6 +151,12 @@ async function liveLinksOf(userId: string, cache: PlanCache): Promise<Registrati
   }
   cache.liveLinks.set(userId, rows);
   return rows;
+}
+
+/** The code logged for a failed row check: the lookup's code, or CALL_TIMEOUT. */
+function rowErrorCode(err: unknown): string | undefined {
+  if (err instanceof UpstreamError) return err.code;
+  return err instanceof CallTimeout ? 'CALL_TIMEOUT' : undefined;
 }
 
 /** Maps a voice-bot refusal of the shared create rules to a plan problem. */
@@ -161,7 +184,7 @@ async function planRow(
   row: LinkRow,
   email: string,
   modeKey: string | null,
-  ctx: { cfg: ResolvedNetworkConfig; now: Date; cache: PlanCache },
+  ctx: { cfg: ResolvedNetworkConfig; now: Date; cache: PlanCache; bound: Bound },
 ): Promise<{ link: PlannedLink | null; problems: InputProblem[] }> {
   const problems: InputProblem[] = [];
   const add = (code: QrPlanProblemCode, field?: string): void => {
@@ -180,7 +203,7 @@ async function planRow(
     }
   }
 
-  const coordinator = await findCoordinator(email, ctx.cache);
+  const coordinator = await findCoordinator(email, ctx.cache, ctx.bound);
   if (!coordinator) {
     add(QR_PLAN_PROBLEM.UNKNOWN_COORDINATOR, 'coordinator_email');
     return { link: null, problems };
@@ -201,7 +224,7 @@ async function planRow(
   if (!voiceBot.ok) add(voiceBotProblem(voiceBot.error.code, row.voiceBot, ctx.cfg), 'voice_bot');
   if (!voiceBot.ok || problems.length > 0) return { link: null, problems };
 
-  const live = await liveLinksOf(coordinator.id, ctx.cache);
+  const live = await liveLinksOf(coordinator.id, ctx.cache, ctx.bound);
   const match = live.find(
     (l) =>
       l.registrationMode === modeKey &&
@@ -215,11 +238,16 @@ async function planRow(
       userId: coordinator.id,
       orgSlug: coordinator.orgSlug,
       domain,
+      registrationMode: modeKey,
       voiceBotKey: voiceBot.value,
       slug: row.linkName === '' ? undefined : row.linkName,
       expiresAt,
       existing: match
-        ? { slug: match.slug, url: buildPublicUrl(coordinator.orgSlug, match.slug) }
+        ? {
+            slug: match.slug,
+            url: buildPublicUrl(coordinator.orgSlug, match.slug),
+            voiceBotKey: match.voiceBotKey,
+          }
         : null,
     },
     problems,
@@ -230,15 +258,17 @@ async function planRow(
  * Builds the load plan for the links sheet.
  *
  * Rows with an input problem are not checked. A missing required column stops
- * all row checks. A failed lookup is reported on its row as CHECK_FAILED.
+ * all row checks. A failed or timed-out lookup is reported on its row as CHECK_FAILED.
  *
- * @param input - The parsed rows, the parser's problems and the time expiries are compared with.
+ * @param input - The parsed rows, the parser's problems, the time expiries are compared with
+ *   and the per-lookup timeout (none when absent).
  * @returns The planned links and every problem, the input problems first.
  */
 export async function buildLinksPlan(input: {
   rows: LinkRow[];
   inputProblems: InputProblem[];
   now?: Date;
+  callTimeoutMs?: number;
 }): Promise<{ links: PlannedLink[]; problems: InputProblem[] }> {
   const start = Date.now();
   const now = input.now ?? new Date();
@@ -246,9 +276,8 @@ export async function buildLinksPlan(input: {
   const links: PlannedLink[] = [];
   const cfg = await getNetworkConfig();
 
-  const candidate = twoOptionModeKey(cfg);
-  const mode = candidate === null ? null : resolveMode(candidate, cfg);
-  const modeKey = mode?.ok ? mode.value : null;
+  // The same enabled-mode check link creation applies (declared modes and AGGREGATOR_ONBOARDING_ENABLED).
+  const modeKey = twoOptionModeKey(cfg, (mode) => resolveMode(mode, cfg).ok);
   if (modeKey === null) {
     problems.push({ line: 1, code: QR_PLAN_PROBLEM.MODE_NOT_ENABLED, field: 'registration_mode' });
   }
@@ -259,6 +288,9 @@ export async function buildLinksPlan(input: {
   const blocked = new Set(input.inputProblems.map((p) => p.line));
   const seen = new Set<string>();
   const cache: PlanCache = { coordinators: new Map(), liveLinks: new Map() };
+  const { callTimeoutMs } = input;
+  const bound: Bound = (promise, what) =>
+    callTimeoutMs === undefined ? promise : withTimeout(promise, callTimeoutMs, what);
 
   for (const row of missingColumn ? [] : input.rows) {
     if (blocked.has(row.line)) continue;
@@ -270,7 +302,7 @@ export async function buildLinksPlan(input: {
     }
     seen.add(key);
     try {
-      const planned = await planRow(row, email, modeKey, { cfg, now, cache });
+      const planned = await planRow(row, email, modeKey, { cfg, now, cache, bound });
       problems.push(...planned.problems);
       if (planned.link) links.push(planned.link);
     } catch (err) {
@@ -280,6 +312,8 @@ export async function buildLinksPlan(input: {
           status: 'failure',
           line: row.line,
           error_type: err instanceof Error ? err.constructor.name : typeof err,
+          error_code: rowErrorCode(err),
+          reason: err instanceof UpstreamError ? err.details?.['reason'] : undefined,
         },
         'qr-links row check failed',
       );
