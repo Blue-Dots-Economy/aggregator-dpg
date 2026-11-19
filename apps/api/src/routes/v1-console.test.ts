@@ -39,6 +39,8 @@ import {
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
 import { err } from '@aggregator-dpg/shared-primitives/result';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** A store `err` result (the aggregator / org fakes use `{ ok, ... }`). */
@@ -233,10 +235,14 @@ describe('console routes /v1/user, /v1/org', () => {
       [OWNER_A, 'sub-a'],
       [OWNER_B, 'sub-b'],
       [OWNER_P, 'sub-p'],
+    ] as const) {
+      await identities.link(user, 'keycloak', sub, 'admin');
+    }
+    for (const [user, sub] of [
       [C1, 'sub-c1'],
       [C3, 'sub-c3'],
     ] as const) {
-      await identities.link(user, 'keycloak', sub);
+      await identities.link(user, 'keycloak', sub, 'coordinator');
     }
 
     _setUserStore(coordinators);
@@ -649,6 +655,116 @@ describe('console routes /v1/user, /v1/org', () => {
     it('answers 404 out of reach', async () => {
       const res = await patch(`/v1/user/metadata/update/${C2}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /v1/user/self/add', () => {
+    const OWNER_PHONE = '+919000000199';
+    const consent = {
+      value: true,
+      given_at: '2026-11-19T00:00:00.000Z',
+      valid_till: '2099-01-01T00:00:00.000Z',
+    };
+    const selfAdd = (who: keyof typeof TOKENS, payload: object) =>
+      post('/v1/user/self/add', who, { serves: ['seeker'], consent, ...payload });
+    const codeOf = (res: { json: () => unknown }) =>
+      (res.json() as { error: { code: string } }).error.code;
+    /** Every Keycloak user write a coordinator path could make. */
+    const spyUserWrites = () =>
+      (
+        [
+          'enableUser',
+          'disableUser',
+          'setUserDecision',
+          'setAttributes',
+          'logoutSessions',
+          'createUser',
+        ] as const
+      ).map((m) => vi.spyOn(idp, m));
+
+    beforeEach(async () => {
+      _setConsentLedger(new ConsentLedgerFake());
+      await setOrg(ORG_A, { ownerPhone: OWNER_PHONE, ownerName: 'Alice Owner' });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      _setConsentLedger(null);
+    });
+
+    it('adds the owner as an active coordinator of its org, with no Keycloak write', async () => {
+      const spies = spyUserWrites();
+
+      const res = await selfAdd('a', { org_id: ORG_A });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json() as { id: string; status: string; serves: string[] };
+      expect(body).toMatchObject({ status: 'active', serves: ['seeker'] });
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(await getIdentityStore().accountsOf('keycloak', 'sub-a')).toEqual({
+        ok: true,
+        value: { admin: OWNER_A, coordinator: body.id },
+      });
+      const me = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(me.own_coordinator_account_id).toBe(body.id);
+    });
+
+    it('409 ALREADY_COORDINATOR on a second self-add', async () => {
+      expect((await selfAdd('a', { org_id: ORG_A })).statusCode).toBe(201);
+      const again = await selfAdd('a', { org_id: ORG_A });
+      expect(again.statusCode).toBe(409);
+      expect(codeOf(again)).toBe('ALREADY_COORDINATOR');
+    });
+
+    it('403 NOT_ORG_OWNER for an org the caller does not own', async () => {
+      const res = await selfAdd('a', { org_id: ORG_B });
+      expect(res.statusCode).toBe(403);
+      expect(codeOf(res)).toBe('NOT_ORG_OWNER');
+    });
+
+    it('403 ORG_NOT_ELIGIBLE for the network admin on the Default org', async () => {
+      await setOrg(DEFAULT, { ownerPhone: '+919000000198', status: 'active' });
+      const res = await selfAdd('na', { org_id: DEFAULT });
+      expect(res.statusCode).toBe(403);
+      expect(codeOf(res)).toBe('ORG_NOT_ELIGIBLE');
+    });
+
+    it.each([
+      ['an empty serves', { serves: [] }],
+      ['a domain the network does not have', { serves: ['pilot'] }],
+      ['no consent', { consent: undefined }],
+      [
+        'a consent that already expired',
+        { consent: { ...consent, valid_till: '2020-01-01T00:00:00.000Z' } },
+      ],
+    ])('400 for %s', async (_label, extra) => {
+      const res = await selfAdd('a', { org_id: ORG_A, ...extra });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('refuses a coordinator token', async () => {
+      const res = await selfAdd('coord', { org_id: ORG_A });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("changes the self account's profile types without touching the owner's Keycloak user", async () => {
+      const added = (await selfAdd('a', { org_id: ORG_A })).json() as { id: string };
+      const ss = new SignalStackWriterFake();
+      _setSignalStackWriter(ss);
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      const spies = [...spyUserWrites(), vi.spyOn(idp, 'findByAttribute')];
+
+      const res = await patch(`/v1/user/metadata/update/${added.id}`, 'a', {
+        serves: ['seeker', 'provider'],
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { serves: string[] }).serves).toEqual(['seeker', 'provider']);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ external_id: added.id, domains: ['seeker', 'provider'] }),
+      );
     });
   });
 

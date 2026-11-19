@@ -522,6 +522,13 @@
           "network.administer"
         ]
       }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/self/add",
+      "access": {
+        "capability": "org.manage"
+      }
     }
   ]
 }

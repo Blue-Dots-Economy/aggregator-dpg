@@ -2,16 +2,22 @@
  * Coordinator approval (`@aggregator-dpg/api`).
  *
  * The one place a pending coordinator becomes active, run by invite
- * activation. Approve provisions Signals and Keycloak before its
- * compare-and-set; if that loses, the Keycloak user is disabled and stamped
- * `rejected` again.
+ * activation and by an owner's self-add. Approve provisions Signals and
+ * Keycloak before its compare-and-set; if that loses, the Keycloak user is
+ * disabled and stamped `rejected` again.
+ *
+ * A shared login (the coordinator's login also holds an admin account, made by
+ * the owner self-add) is never written in Keycloak here: the row's `status`
+ * and `signalstack_org_id` are the only record of that account.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
-import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
+import { getIdpAdmin, KC_ATTR } from '../idp-admin/index.js';
+import { IDP_PROVIDER } from '../idp-admin/provider.js';
+import { getIdentityStore } from '../identity-store/index.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { servedDomains } from '../user-store/serves.js';
@@ -32,33 +38,37 @@ export type ApprovalOutcome =
 /** Inputs of {@link approveCoordinator}. */
 export interface CoordinatorApprovalInput {
   aggregatorId: string;
-  /** Written to `updated_by`: `invite:<inviter id>`. */
+  /** Written to `updated_by`: `invite:<inviter id>`, or the owner's admin id for a self-add. */
   decidedBy: string;
   requestId?: string;
   log: FastifyBaseLogger;
 }
 
 /**
- * Loads a coordinator and its Keycloak user, recording the login link
- * (best effort).
+ * Loads a coordinator and its Keycloak user id: the recorded login first,
+ * else the user carrying its `aggregator_id` (whose login is then recorded,
+ * best effort).
  *
  * @param aggregatorId - Coordinator id.
- * @returns The row and the user, or why they are unavailable.
+ * @returns The row and the Keycloak user id, or why they are unavailable.
  */
 async function loadCoordinatorAndUser(
   aggregatorId: string,
 ): Promise<
-  | { ok: true; aggregator: Coordinator; kcUser: IdpUser }
+  | { ok: true; aggregator: Coordinator; kcUserId: string }
   | { ok: false; reason: 'not_found' | 'db' | 'idp' | 'idp_missing' }
 > {
   const stored = await getUserStore().findById(aggregatorId);
   if (!stored.ok) return { ok: false, reason: 'db' };
   if (!stored.value) return { ok: false, reason: 'not_found' };
+  const linked = await getIdentityStore().subjectOf(aggregatorId, IDP_PROVIDER);
+  if (!linked.ok) return { ok: false, reason: 'db' };
+  if (linked.value) return { ok: true, aggregator: stored.value, kcUserId: linked.value };
   const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId);
   if (!kc.ok) return { ok: false, reason: 'idp' };
   if (!kc.value) return { ok: false, reason: 'idp_missing' };
   await recordLoginIdentity(aggregatorId, kc.value.id, 'decisions.recordIdentity');
-  return { ok: true, aggregator: stored.value, kcUser: kc.value };
+  return { ok: true, aggregator: stored.value, kcUserId: kc.value.id };
 }
 
 /**
@@ -83,17 +93,23 @@ export async function approveCoordinator(
   if (lookup.aggregator.status !== 'pending') {
     return { kind: 'already_decided', status: lookup.aggregator.status };
   }
-  return approve(input, lookup.aggregator, lookup.kcUser, log);
+  return approve(input, lookup.aggregator, lookup.kcUserId, log);
 }
 
 async function approve( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   input: CoordinatorApprovalInput,
   aggregator: Coordinator,
-  kcUser: IdpUser,
+  kcUserId: string,
   log: FastifyBaseLogger,
 ): Promise<ApprovalOutcome> {
   const store = getUserStore();
   const idp = getIdpAdmin();
+
+  // A login that also holds an admin account is the owner's: no Keycloak write
+  // below may touch it.
+  const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, kcUserId);
+  if (!accounts.ok) return { kind: 'unavailable', dependency: 'db' };
+  const sharedLogin = accounts.value.admin !== null;
 
   // The coordinator's org must still be active.
   if (aggregator.parentOrgId) {
@@ -136,27 +152,31 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     signalstackOrgId = upsert.value.org_id;
   }
 
-  // 2. Enable the Keycloak user (idempotent); must succeed to sign in.
-  const enable = await idp.enableUser(kcUser.id);
-  if (!enable.ok) {
-    log.error({ status: 'failure', sub_operation: 'idp.enableUser', code: enable.error.code });
-    return { kind: 'unavailable', dependency: 'idp' };
-  }
-  // 3. The gate attribute. Soft-fail: the enabled flag already admits them, and
-  //    the login-time check repairs it.
-  const stamp = await idp.setUserDecision(kcUser.id, 'approved');
-  if (!stamp.ok) {
-    log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
-  }
-  // 4. Signals org id on Keycloak. Soft-fail: login backfill repairs it.
-  //    The row's copy is written after the commit point, so a losing approval
-  //    never touches the row.
-  if (signalstackOrgId) {
-    const attr = await idp.setAttributes(kcUser.id, {
-      [KC_ATTR.SIGNALSTACK_ORG_ID]: signalstackOrgId,
-    });
-    if (!attr.ok)
-      log.warn({ status: 'failure', sub_operation: 'idp.setAttributes', code: attr.error.code });
+  if (sharedLogin) {
+    log.info({ status: 'skipped', sub_operation: 'idp.provision', reason: 'shared_login' });
+  } else {
+    // 2. Enable the Keycloak user (idempotent); must succeed to sign in.
+    const enable = await idp.enableUser(kcUserId);
+    if (!enable.ok) {
+      log.error({ status: 'failure', sub_operation: 'idp.enableUser', code: enable.error.code });
+      return { kind: 'unavailable', dependency: 'idp' };
+    }
+    // 3. The gate attribute. Soft-fail: the enabled flag already admits them, and
+    //    the login-time check repairs it.
+    const stamp = await idp.setUserDecision(kcUserId, 'approved');
+    if (!stamp.ok) {
+      log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
+    }
+    // 4. Signals org id on Keycloak. Soft-fail: login backfill repairs it.
+    //    The row's copy is written after the commit point, so a losing approval
+    //    never touches the row.
+    if (signalstackOrgId) {
+      const attr = await idp.setAttributes(kcUserId, {
+        [KC_ATTR.SIGNALSTACK_ORG_ID]: signalstackOrgId,
+      });
+      if (!attr.ok)
+        log.warn({ status: 'failure', sub_operation: 'idp.setAttributes', code: attr.error.code });
+    }
   }
 
   // 5. The commit point: compare-and-set pending → active.
@@ -166,11 +186,11 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     // changes, so a user is never enabled while its row is not active.
     const now = await store.findById(aggregator.id);
     const current = now.ok ? now.value : null;
-    if (current?.status !== 'active') {
+    if (current?.status !== 'active' && !sharedLogin) {
       if (current?.status !== 'inactive') {
-        await restoreInvited(kcUser.id, log);
+        await restoreInvited(kcUserId, log);
       } else {
-        await compensate(kcUser.id, log);
+        await compensate(kcUserId, log);
       }
     }
     if (signalstackOrgId) {

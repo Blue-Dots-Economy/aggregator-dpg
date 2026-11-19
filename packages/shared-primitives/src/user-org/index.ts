@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 import { BecknLocationSchema } from '../beckn/index.js';
 import { fieldsQuerySchema } from '../dto/index.js';
-import { ProfileTypeSchema } from '../aggregator/index.js';
+import { ProfileTypeSchema, RegistrationConsentSchema } from '../aggregator/index.js';
 
 // ─── Shared pieces ──────────────────────────────────────────────────────────
 
@@ -333,6 +333,21 @@ export const UserMetadataUpdateRequestSchema = z
   })
   .strict();
 export type UserMetadataUpdateRequest = z.infer<typeof UserMetadataUpdateRequestSchema>;
+
+/**
+ * `POST /v1/user/self/add`: an org owner adds their own coordinator account to
+ * an organisation they own. `consent` is the same block the coordinator
+ * invite-accept takes.
+ */
+export const SelfAddRequestSchema = z
+  .object({
+    org_id: z.guid(),
+    /** The profile types to serve: at least one network domain id. */
+    serves: z.array(ProfileTypeSchema).min(1).max(50),
+    consent: RegistrationConsentSchema,
+  })
+  .strict();
+export type SelfAddRequest = z.infer<typeof SelfAddRequestSchema>;
 
 // ─── Organisations ──────────────────────────────────────────────────────────
 
