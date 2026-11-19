@@ -97,6 +97,19 @@ class UploadFailure extends Error {
   }
 }
 
+/**
+ * A failure while reading an earlier upload (`--upload-id`); the upload itself
+ * is unaffected, so the operator reads it again later.
+ */
+class FollowUpFailure extends Error {
+  constructor(
+    readonly uploadId: string,
+    readonly failure: unknown,
+  ) {
+    super(errorMessage(failure), { cause: failure });
+  }
+}
+
 /** What the command reads from and writes to; tests replace them. */
 export interface CommandIo {
   /** One line of human-readable output. */
@@ -493,7 +506,12 @@ async function main(args: string[], io: CommandIo): Promise<number> {
   if (extra.length > 0) {
     throw new UsageError(`--upload-id cannot be combined with ${extra.join(', ')}`);
   }
-  return followUp(coordinatorRef, uploadId, values['errors-csv'] === true, io);
+  try {
+    return await followUp(coordinatorRef, uploadId, values['errors-csv'] === true, io);
+  } catch (err) {
+    if (err instanceof Refusal) throw err;
+    throw new FollowUpFailure(uploadId, err);
+  }
 }
 
 /** Runs the command and maps the outcome to an exit code. Exported for tests. */
@@ -504,15 +522,15 @@ export async function run(args: string[], io: CommandIo): Promise<number> {
     const uploadId = thrown instanceof UploadFailure ? thrown.uploadId : undefined;
     const err = thrown instanceof UploadFailure ? thrown.failure : thrown;
     if (thrown instanceof UploadFailure && thrown.started) {
-      const reason = err instanceof HttpError ? `${err.code}: ${err.detail}` : errorMessage(err);
-      logger.error({
-        operation: 'tools.bulkUpload',
-        status: 'failure',
-        upload_id: uploadId,
-        error: reason,
-        error_type: errorType(err),
-      });
+      const reason = logReadFailure(thrown.uploadId, err);
       io.out(`FAILED: upload ${uploadId} started; check with --upload-id ${uploadId} (${reason})`);
+      return 1;
+    }
+    if (thrown instanceof FollowUpFailure) {
+      const reason = logReadFailure(thrown.uploadId, thrown.failure);
+      io.out(
+        `FAILED: upload ${thrown.uploadId}: ${reason}; try --upload-id ${thrown.uploadId} again later; do not start a new upload`,
+      );
       return 1;
     }
     if (uploadId !== undefined && err instanceof CallTimeout) {
@@ -548,6 +566,26 @@ export async function run(args: string[], io: CommandIo): Promise<number> {
     }
     return 1;
   }
+}
+
+/**
+ * Logs a failure to read an upload that exists, with the code and cause of an
+ * `HttpError` (ids and driver text, no row data); returns the operator-facing reason.
+ */
+function logReadFailure(uploadId: string, err: unknown): string {
+  const http = err instanceof HttpError ? err : undefined;
+  const cause = http?.cause;
+  logger.error({
+    operation: 'tools.bulkUpload',
+    status: 'failure',
+    upload_id: uploadId,
+    error: errorMessage(err),
+    error_type: errorType(err),
+    error_code: http?.code,
+    cause_type: cause === undefined ? undefined : errorType(cause),
+    cause: cause === undefined ? undefined : errorMessage(cause),
+  });
+  return http ? `${http.code}: ${http.detail}` : errorMessage(err);
 }
 
 /** Whether this module is the process entry, including through a symlink. */

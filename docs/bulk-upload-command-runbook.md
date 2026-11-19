@@ -53,6 +53,8 @@ Note the upload id; it is printed as soon as the upload is created, so it is the
 
 The usual per-coordinator limit (5 uploads an hour) applies. For the initial load only, add `--skip-rate-limit`; the command logs that the limit was skipped.
 
+Every run that gets past the coordinator and header checks uses one slot, even if it then fails or times out, so a retry may answer `REFUSED: rate limited`. For the initial load, use `--skip-rate-limit`.
+
 ## Get the errors report
 
 When some rows failed, fetch the report (it holds participant data, so delete it once the rows are fixed):
@@ -78,24 +80,25 @@ Run the upload again only when this reports `failed`, `file_failed`, or `upload 
 
 ## What the messages mean
 
-| Message                                                           | Meaning                                                                                                                                       |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REFUSED: no coordinator with that email or user id`              | Check the address or id.                                                                                                                      |
-| `REFUSED: coordinator … is pending, not active`                   | The coordinator has not been approved yet.                                                                                                    |
-| `REFUSED: coordinator … has no recorded Keycloak login`           | The coordinator was never approved through the normal approval step.                                                                          |
-| `REFUSED: coordinator … has no Signals org`                       | The coordinator's approval did not finish; every row would fail.                                                                              |
-| `REFUSED: DOMAIN_NOT_SERVED: …`                                   | Wrong `--type`, or the coordinator does not serve it.                                                                                         |
-| `REFUSED: missing columns: …` / `unknown columns: …`              | The CSV header does not match the template; nothing was created.                                                                              |
-| `REFUSED: the file is not valid UTF-8`                            | Save the CSV as UTF-8 and run it again; nothing was created.                                                                                  |
-| `REFUSED: rate limited; retry in Ns`                              | Wait, or use `--skip-rate-limit` for the initial load.                                                                                        |
-| `FAILED: upload …: DB_UNAVAILABLE: …` (or another code)           | A server-side failure (database, consent ledger, queue). The logs carry its cause. Check the upload with `--upload-id` before retrying.       |
-| `FAILED: … timed out after N ms`                                  | A call hung before the upload was created; nothing was created. Run it again.                                                                 |
-| `FAILED: upload create timed out …; a pending upload may exist …` | A pending upload may exist, but it never starts on its own; run it again.                                                                     |
-| `FAILED: upload … state unknown after timeout — …`                | A call hung after the upload was created. It may still start: run `--upload-id <id>` and only retry if it never started. Nothing was deleted. |
-| `FAILED: upload … started; check with --upload-id … (…)`          | The upload started, then a status or counts read failed. It is processing: do not run it again; read it with `--upload-id <id>`.              |
-| `WARNING: upload …: its CSV was left in storage (…)`              | The upload failed and its stored CSV could not be deleted; tell the platform team the upload id.                                              |
-| `upload … never started; it is safe to run the upload again`      | From `--upload-id`: the run stopped before the start. Run the upload again.                                                                   |
-| `status: file_failed (…)`                                         | The worker rejected the whole file; nothing was processed.                                                                                    |
+| Message                                                                         | Meaning                                                                                                                                       |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REFUSED: no coordinator with that email or user id`                            | Check the address or id.                                                                                                                      |
+| `REFUSED: coordinator … is pending, not active`                                 | The coordinator has not been approved yet.                                                                                                    |
+| `REFUSED: coordinator … has no recorded Keycloak login`                         | The coordinator was never approved through the normal approval step.                                                                          |
+| `REFUSED: coordinator … has no Signals org`                                     | The coordinator's approval did not finish; every row would fail.                                                                              |
+| `REFUSED: DOMAIN_NOT_SERVED: …`                                                 | Wrong `--type`, or the coordinator does not serve it.                                                                                         |
+| `REFUSED: missing columns: …` / `unknown columns: …`                            | The CSV header does not match the template; nothing was created.                                                                              |
+| `REFUSED: the file is not valid UTF-8`                                          | Save the CSV as UTF-8 and run it again; nothing was created.                                                                                  |
+| `REFUSED: rate limited; retry in Ns`                                            | Wait, or use `--skip-rate-limit` for the initial load.                                                                                        |
+| `FAILED: upload …: DB_UNAVAILABLE: …` (or another code)                         | A server-side failure (database, consent ledger, queue). The logs carry its cause. Check the upload with `--upload-id` before retrying.       |
+| `FAILED: … timed out after N ms` (new upload, before `upload … created`)        | A call hung before the upload was created; nothing was created. Run it again.                                                                 |
+| `FAILED: upload create timed out …; a pending upload may exist …`               | A pending upload may exist, but it never starts on its own; run it again.                                                                     |
+| `FAILED: upload … state unknown after timeout — …`                              | A call hung after the upload was created. It may still start: run `--upload-id <id>` and only retry if it never started. Nothing was deleted. |
+| `FAILED: upload … started; check with --upload-id … (…)`                        | A status or counts read failed after the upload started (it may already be complete). Do not run it again; read it with `--upload-id <id>`.   |
+| `WARNING: upload …: its CSV was left in storage (…)`                            | The upload failed and its stored CSV could not be deleted; tell the platform team the upload id.                                              |
+| `upload … never started; it is safe to run the upload again`                    | From `--upload-id`: the run stopped before the start. Run the upload again.                                                                   |
+| `FAILED: upload …: …; try --upload-id … again later; do not start a new upload` | From `--upload-id`: reading the upload failed or timed out. The upload is unaffected; read it again later.                                    |
+| `status: file_failed (…)`                                                       | The worker rejected the whole file; nothing was processed.                                                                                    |
 
 ## What is recorded
 

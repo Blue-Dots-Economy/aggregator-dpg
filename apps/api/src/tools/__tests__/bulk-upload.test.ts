@@ -483,11 +483,21 @@ describe('bulk-upload command', () => {
     });
 
     it('keeps the upload id when the counts cannot be read after completion', async () => {
+      const logged = vi.spyOn(logger, 'error');
       _setCountsLoader(async () => {
-        throw new Error('db down');
+        throw new TypeError('db down');
       });
       expect(await run(args(), io())).toBe(1);
       expect(lines.at(-1)).toBe(started('db down'));
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'tools.bulkUpload',
+          status: 'failure',
+          upload_id: UPLOAD_1,
+          error: 'db down',
+          error_type: 'TypeError',
+        }),
+      );
     });
 
     const unknownState = `FAILED: upload ${UPLOAD_1} state unknown after timeout — check with --upload-id ${UPLOAD_1} before retrying`;
@@ -556,6 +566,40 @@ describe('bulk-upload command', () => {
       lines = [];
       expect(await run(['--coordinator', COORD, '--upload-id', UPLOAD_1], io())).toBe(1);
       expect(lines).toEqual(['status: file_failed (header_mismatch)']);
+    });
+
+    const later = (reason: string) =>
+      `FAILED: upload ${UPLOAD_1}: ${reason}; try --upload-id ${UPLOAD_1} again later; do not start a new upload`;
+
+    it('names the upload when a status read times out', async () => {
+      store.seed([
+        buildBulkUpload({ id: UPLOAD_1, aggregatorId: COORD, status: 'row_processing' }),
+      ]);
+      vi.spyOn(store, 'findById').mockReturnValue(new Promise(() => undefined));
+      const code = await run(
+        ['--coordinator', COORD, '--upload-id', UPLOAD_1],
+        io(undefined, { callTimeoutMs: 20 }),
+      );
+      expect(code).toBe(1);
+      expect(lines).toEqual([later('upload status read timed out after 20 ms')]);
+    });
+
+    it('names the upload when the coordinator lookup fails', async () => {
+      const users = new UserStoreFake();
+      vi.spyOn(users, 'findById').mockResolvedValue({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+      });
+      _setUserStore(users);
+      expect(
+        await run(['--coordinator', COORD, '--upload-id', UPLOAD_1, '--errors-csv'], io()),
+      ).toBe(1);
+      expect(lines).toEqual([later('db down')]);
+    });
+
+    it("still refuses an upload that is not the coordinator's", async () => {
+      expect(await run(['--coordinator', COORD, '--upload-id', UPLOAD_1], io())).toBe(1);
+      expect(lines).toEqual([`REFUSED: upload ${UPLOAD_1} is not this coordinator's`]);
     });
 
     it('reports an upload that never started at once, without waiting', async () => {
