@@ -57,6 +57,7 @@ import {
   type UpdateCoordinatorPatch,
 } from './interface.js';
 import { errorType } from '@aggregator-dpg/shared-primitives/errors';
+import { isProvisioned } from '../provisioned.js';
 
 /** Ledger sources that record a registration consent (the others are attestations). */
 const REGISTRATION_CONSENT_SOURCES = sql`('registration', 'registration-backfill')`;
@@ -72,6 +73,15 @@ class ConsentHookError extends Error {
 export class PostgresUserStore extends UserStoreBase {
   async create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>> {
     const start = Date.now();
+    if (!input.recordConsent && !isProvisioned(input.createdBy)) {
+      return {
+        ok: false,
+        error: {
+          code: 'CONSENT_REQUIRED',
+          message: 'a consent hook is required for a non-provisioned coordinator',
+        },
+      };
+    }
     let created: Coordinator | null;
     try {
       // The contact and the row that references it are written atomically.

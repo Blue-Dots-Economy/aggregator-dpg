@@ -393,6 +393,7 @@ function mapAggregatorUpdateError(
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
     | 'CONSENT_WRITE_FAILED'
+    | 'CONSENT_REQUIRED'
     | 'DB_UNAVAILABLE',
 ): Parameters<typeof httpError>[0] {
   switch (code) {
@@ -402,6 +403,8 @@ function mapAggregatorUpdateError(
       return 'PHONE_EXISTS';
     case 'DUPLICATE_EMAIL':
       return 'USER_EXISTS';
+    // Unreachable from routes, which always pass the consent hook.
+    case 'CONSENT_REQUIRED':
     case 'CHECK_VIOLATION':
       return 'SCHEMA_VALIDATION';
     case 'DUPLICATE_SLUG':

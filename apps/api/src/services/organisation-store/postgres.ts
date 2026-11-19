@@ -76,6 +76,7 @@ import {
   type TreeRefusal,
 } from './tree.js';
 import { errorType, toError } from '@aggregator-dpg/shared-primitives/errors';
+import { isProvisioned } from '../provisioned.js';
 
 /** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
 class ConsentHookError extends Error {
@@ -115,6 +116,10 @@ const parentKnownAs = alias(orgKnownAs, 'parent_known_as');
 export class PostgresOrganisationStore extends OrganisationStoreBase {
   async create(input: CreateOrgInput, rules: TreeRules): Promise<OrgStoreResult<Organisation>> {
     const start = Date.now();
+    const createdBy = input.createdBy ?? 'self';
+    if (!input.recordConsent && !isProvisioned(createdBy)) {
+      return errResult('CONSENT_REQUIRED', 'a consent hook is required for a non-provisioned org');
+    }
     try {
       const created = await getDb().transaction(async (tx) => {
         await lockTree(tx);
@@ -150,8 +155,8 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             knownAs: defaultKnownAsKey(await listOf(tx, parent.id)),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
-            createdBy: 'self',
-            updatedBy: 'self',
+            createdBy,
+            updatedBy: createdBy,
           })
           .returning({ id: organisations.id });
         if (!row) throw new Error('insert returned no row');

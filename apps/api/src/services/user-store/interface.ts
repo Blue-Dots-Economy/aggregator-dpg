@@ -125,14 +125,16 @@ export interface CreateCoordinatorInput {
   contact: BecknContact;
   /**
    * The accepted consent. Only the in-memory store keeps it; Postgres reads
-   * consent back from the ledger row {@link recordConsent} writes.
+   * consent back from the ledger row {@link recordConsent} writes. Absent only
+   * when `isProvisioned(createdBy)`.
    */
-  consent: ConsentRecord;
+  consent?: ConsentRecord | undefined;
   /**
-   * Writes the consent ledger row in the create transaction. Required, so no
-   * coordinator is created without a consent record.
+   * Writes the consent ledger row in the create transaction. Absent only when
+   * `isProvisioned(createdBy)`; otherwise the store returns `CONSENT_REQUIRED`,
+   * so no self-created coordinator exists without a consent record.
    */
-  recordConsent: RecordConsentHook;
+  recordConsent?: RecordConsentHook | undefined;
   createdBy: string;
   updatedBy: string;
   /** The coordinator's org (`users.org_id`). */
@@ -236,6 +238,8 @@ export type StoreError =
   | { code: 'CHECK_VIOLATION'; message: string }
   /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
+  /** No `recordConsent` hook and the account is not operator-provisioned; nothing was created. */
+  | { code: 'CONSENT_REQUIRED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };

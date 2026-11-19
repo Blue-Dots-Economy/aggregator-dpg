@@ -27,6 +27,7 @@ import {
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { coordinatorLocations, renderOrgDetails, type OrgDetailColumns } from './org-details.js';
 import { servesForCreate, servesOf } from './serves.js';
+import { isProvisioned } from '../provisioned.js';
 
 /** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
 export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';
@@ -106,6 +107,12 @@ export class InMemoryUserStore extends UserStoreBase {
   }
 
   async create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>> {
+    if (!input.recordConsent && !isProvisioned(input.createdBy)) {
+      return errResult(
+        'CONSENT_REQUIRED',
+        'a consent hook is required for a non-provisioned coordinator',
+      );
+    }
     if (this.bySlug.has(input.orgSlug)) {
       return errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`);
     }
@@ -149,7 +156,7 @@ export class InMemoryUserStore extends UserStoreBase {
       contactPhone: phone,
       contactEmail: email,
       locations: coordinatorLocations(input.locations, input.legacyOrgDetails),
-      consent: input.consent,
+      consent: input.consent ?? null,
       profile: input.profile ?? {},
       profileRef: input.profileRef ?? null,
       status: 'pending',

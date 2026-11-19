@@ -112,11 +112,14 @@ export interface CreateOrgInput {
    * non-Default aggregator org, else `INVALID_PARENT`.
    */
   parentId?: string;
+  /** Who created the org; defaults to `'self'`. Operator-provisioned orgs use `provisionedBy(...)`. */
+  createdBy?: string;
   /**
    * Writes the org's consent ledger row inside the create transaction.
-   * Required, so no org is created without a consent record.
+   * Absent only when `isProvisioned(createdBy)`; otherwise the store returns
+   * `CONSENT_REQUIRED`, so no self-created org exists without a consent record.
    */
-  recordConsent: RecordConsentHook;
+  recordConsent?: RecordConsentHook | undefined;
 }
 
 export interface UpdateOrgPatch {
@@ -205,6 +208,8 @@ export type OrgStoreError =
   | { code: 'NOT_EDITABLE'; message: string }
   /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
+  /** No `recordConsent` hook and the org is not operator-provisioned; nothing was created. */
+  | { code: 'CONSENT_REQUIRED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: OrgStoreError };

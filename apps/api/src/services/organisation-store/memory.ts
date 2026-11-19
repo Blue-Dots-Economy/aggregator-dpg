@@ -19,6 +19,7 @@ import {
   type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { defaultKnownAsKey, fillKnownAsKeys, knownAsKeyValid, knownAsNameOf } from '../known-as.js';
+import { isProvisioned } from '../provisioned.js';
 import {
   OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
@@ -65,6 +66,10 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     input: CreateOrgInput,
     rules: TreeRules,
   ): Promise<OrgStoreResult<Organisation>> {
+    const createdBy = input.createdBy ?? 'self';
+    if (!input.recordConsent && !isProvisioned(createdBy)) {
+      return err('CONSENT_REQUIRED', 'a consent hook is required for a non-provisioned org');
+    }
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
@@ -121,7 +126,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       status: 'pending',
       createdAt: now,
       updatedAt: now,
-      updatedBy: 'self',
+      updatedBy: createdBy,
       rejectedAt: null,
       isDefault: false,
       locations: input.locations ?? [],
