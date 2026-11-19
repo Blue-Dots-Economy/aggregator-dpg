@@ -5,6 +5,7 @@
 **Goal:** An aggregator org owner adds themselves as a coordinator in their own org (same contact, same Keycloak login) and switches the web between the console and the coordinator shell to onboard seekers and providers.
 
 **Architecture:**
+
 - **Data.** `user_identities` allows at most one account per type per login.
 - **API.** It accepts an `X-Acting-Account` header from an owner token only when the header names that login's own active coordinator account. It then builds the normal coordinator context from the DB row.
 - **Token and edge.** The roles claim of a shared login carries `acting:<id>:<role>` entries. The OPA edge uses them only for a matching header.
@@ -30,23 +31,25 @@
 
 ## Review Focus
 
-1. **The coordinator row is deactivated while the owner is still in acting mode.** The next API call must fail with `403` (not show stale data), and the web must drop back to the console with a message, not loop. *Pinned in Task 4 and Task 9.*
-2. **The token has no `acting:` entries yet (first request right after self-add, or the sync was deferred).** The edge gives `403`. The BFF switch refreshes the token first and, if the entries are still missing after the refresh, reports "not ready, try again" instead of entering acting mode. *Pinned in Task 8.*
-3. **The owner opens a console URL directly while in acting mode.** The console must never send the header; leaving acting mode is automatic. *Pinned in Task 9.*
-4. **A plain coordinator sends `x-acting-account` with its own id or another id.** Its own id behaves as today; any other id gives `403` at the API, and the edge also refuses it because there are no tagged entries. *Pinned in Task 4 and Task 7.*
-5. **Self-add when the owner's email or phone already belongs to another person's coordinator, or the owner already has a coordinator account in another org.** The answer is `409` with a code the dialog shows, and nothing is created in Signals or Keycloak. *Pinned in Task 5.*
+1. **The coordinator row is deactivated while the owner is still in acting mode.** The next API call must fail with `403` (not show stale data), and the web must drop back to the console with a message, not loop. _Pinned in Task 4 and Task 9._
+2. **The token has no `acting:` entries yet (first request right after self-add, or the sync was deferred).** The edge gives `403`. The BFF switch refreshes the token first and, if the entries are still missing after the refresh, reports "not ready, try again" instead of entering acting mode. _Pinned in Task 8._
+3. **The owner opens a console URL directly while in acting mode.** The console must never send the header; leaving acting mode is automatic. _Pinned in Task 9._
+4. **A plain coordinator sends `x-acting-account` with its own id or another id.** Its own id behaves as today; any other id gives `403` at the API, and the edge also refuses it because there are no tagged entries. _Pinned in Task 4 and Task 7._
+5. **Self-add when the owner's email or phone already belongs to another person's coordinator, or the owner already has a coordinator account in another org.** The answer is `409` with a code the dialog shows, and nothing is created in Signals or Keycloak. _Pinned in Task 5._
 
 ---
 
 ### Task 1: `user_identities.user_type` and a type-aware identity store
 
 **Files:**
+
 - Modify: `packages/db-schema/src/schema.ts:331-349`
 - Create (generated): three migrations under `apps/api/drizzle/migrations/`
 - Modify: `apps/api/src/db/account-writes.ts` (`linkIdentity` ~89, `subjectOf` ~127, a new `userOfSubject`), `apps/api/src/services/identity-store/{interface,postgres,memory}.ts`
 - Test: `apps/api/src/services/identity-store/memory.test.ts` (create if absent), `apps/api/src/db/account-writes.integration.test.ts` (create if absent)
 
 **Interfaces:**
+
 - Produces:
   - `IdentityStoreBase.userOf(provider: string, subject: string, userType?: 'admin' | 'coordinator'): Promise<IdentityStoreResult<string | null>>`. Without `userType` it returns the admin account if one exists, else the coordinator.
   - `IdentityStoreBase.accountsOf(provider: string, subject: string): Promise<IdentityStoreResult<{ admin: string | null; coordinator: string | null }>>`.
@@ -73,6 +76,7 @@
 ### Task 2: Boot reconcile and the H-5 docs
 
 **Files:**
+
 - Modify: `apps/api/src/services/organisation-root.ts` (header comment 14-15; `ownerConflict` 155-172; refusal ~535)
 - Modify: `docs/rbac/phase-5-rbac-handoff.md:30`, `docs/plans/user-org-target-model.md:59`
 - Test: `apps/api/src/services/__tests__/organisation-root.test.ts:~642`
@@ -88,12 +92,14 @@
 ### Task 3: Shared constants and the acting-account check
 
 **Files:**
+
 - Modify: `packages/shared-primitives/src/user-org/*.ts` (export `ACTING_ACCOUNT_HEADER = 'x-acting-account'`; add `own_coordinator_account_id: z.guid().nullable().optional()` to `MeResponseSchema` ~194)
 - Modify: `packages/rbac/src/index.ts` (or the file exporting `effectiveRoleKeys`): `ACTING_ROLE_PREFIX`, `actingRoleEntry`, `parseActingRoleEntry(entry: string): { accountId: string; roleKey: string } | null`
 - Create: `apps/api/src/services/auth/acting.ts`
 - Test: `apps/api/src/services/auth/acting.test.ts`, `packages/rbac/src/acting.test.ts`
 
 **Interfaces:**
+
 - Produces: `resolveActingAccount(subject: string, accountId: string): Promise<Result<Coordinator, ActingError>>`, where `ActingError = { code: 'NOT_LINKED' | 'NOT_SHARED_LOGIN' | 'INACTIVE' | 'UNAVAILABLE'; message: string }`.
 - Checks, in order:
   1. `accountsOf(IDP_PROVIDER, subject).coordinator === accountId`, else `NOT_LINKED`;
@@ -115,19 +121,21 @@
 ### Task 4: Acting on coordinator routes and in the actor resolver
 
 **Files:**
+
 - Modify: `apps/api/src/services/auth/access-token.ts` (`requireApproved` ~190-215; a new `actingContext` helper next to `hydrateContext` ~158)
 - Modify: `apps/api/src/services/auth/actor/interface.ts:51` (`ResolveActorInput.actingAccountId?: string`), `actor/store.ts:72-87`, `actor/require.ts:59-62`
 - Modify: `apps/api/src/routes/v1-user.ts` `meOf` (fill `own_coordinator_account_id` for an admin actor from `accountsOf(...).coordinator`)
 - Test: `apps/api/src/services/auth/access-token.acting.test.ts`, `apps/api/src/services/auth/actor/store.test.ts`, `apps/api/src/routes/onboarding.test.ts`, `bulk-uploads.test.ts`, `registration-links.registration-mode.test.ts`, `dashboard.test.ts` (one acting case each)
 
 **Interfaces:**
+
 - Consumes `resolveActingAccount` (Task 3) and `ACTING_ACCOUNT_HEADER`.
 - `requireApproved(req)` keeps its signature. In the acting path, the `AuthContext` is built from the row:
   - `aggregatorId` = `row.id`;
   - `serves` = `row.serves`;
   - `decisionMade` = row status mapped (approved/active → `'approved'`, pending → `'pending'`, rejected → `'rejected'`);
   - `signalstackOrgId` = the row value.
-  The token supplies only `userId` (sub), email, names, phone and azp.
+    The token supplies only `userId` (sub), email, names, phone and azp.
 
 - [ ] **Step 1: Write failing tests.**
   - **(a)** A token with no `aggregator_id` plus the header for a linked active coordinator: `requireApproved` is ok, the context comes from the row, and `backfillSignalstackOrgId` and `recordLoginIdentity` are **not** called (spy via the idp-admin fake: no `setAttributes`).
@@ -147,6 +155,7 @@
 ### Task 5: Self-add ("Add myself to My Team")
 
 **Files:**
+
 - Modify: `apps/api/src/services/decisions/coordinator.ts` (`loadCoordinatorAndUser` ~40-62; `approve` ~95-175)
 - Create: `apps/api/src/services/registration/owner-self-add.ts`
 - Modify: `apps/api/src/routes/v1-user.ts` (new route `POST /v1/user/self/add`, `config: { rbac: { capability: 'org.manage' } }` like `/v1/user/invite` at 522)
@@ -155,6 +164,7 @@
 - Test: `apps/api/src/services/registration/owner-self-add.test.ts`, `apps/api/src/services/decisions/coordinator.shared-login.test.ts`, `apps/api/src/routes/v1-console.test.ts`
 
 **Interfaces:**
+
 - Produces: `ownerSelfAdd(actor: Actor, subject: string, input: SelfAddRequest, log): Promise<Result<Coordinator, SelfAddError>>`, where `SelfAddError` codes are `NOT_ORG_OWNER | ORG_NOT_ELIGIBLE | ALREADY_COORDINATOR | NO_PROFILE_TYPES | UNAVAILABLE`.
 - The route maps them to `403` (owner and eligibility), `409` (`ALREADY_COORDINATOR`), `422` (no types) and `503`.
 - Error codes are added to `apps/api/src/errors/codes.ts`.
@@ -187,10 +197,12 @@
 ### Task 6: Roles claim for a shared login
 
 **Files:**
+
 - Modify: `apps/api/src/services/authz/token-roles.ts` (`run` ~74-133, `defaultTokenRolesDeps` ~108)
 - Test: `apps/api/src/services/authz/token-roles.test.ts`
 
 **Interfaces:**
+
 - Consumes `accountsOf`, `actingRoleEntry` and `tokenRolesOf`.
 - New behaviour of `syncTokenRoles(userId)`: when `userId` is on a shared login, it **re-targets to the admin account id**. It takes the lock on the admin id and writes `tokenRolesOf(adminActor) ∪ tokenRolesOf(coordActor).map(k => actingRoleEntry(coordId, k))`, sorted. An inactive coordinator contributes nothing.
 - Add `TokenRolesDeps.accountsOf(userId: string)` → `{ admin: string | null; coordinator: string | null }` (via `subjectOf` then `accountsOf`) so the tests inject it.
@@ -210,12 +222,14 @@
 ### Task 7: Edge policy and docs
 
 **Files:**
+
 - Modify: `policy/rbac/edge.rego` (`roles` at 56-59 and its users: `permissions` 72-76, the `count(roles) == 0` check ~139)
 - Modify: `policy/rbac/edge_test.rego` and the shared vectors used by the API's TS edge test (`grep -rln "edge" apps/api/src/services/authz/*.test.ts`)
 - Modify: `docs/rbac/rbac-edge-enforcement.md` (Status line 7; §3.2 claim format; new "Acting account" subsection), `apps/api/CLAUDE.md` (a short acting-account note under auth)
 - Commit the spec and this plan on this branch too (already on `feat/1121-owner-onboarding`; rebase them into the API branch)
 
 **Interfaces:**
+
 - `raw_roles` stays the parsed claim set.
 - `acting_id := lower(object.get(http.headers, "x-acting-account", ""))`.
 - `roles := {r | some e in raw_roles; not contains(e, ":"); r := e}` when `acting_id == ""`.
@@ -235,17 +249,19 @@
 - [ ] **Step 6: Open the API PR.**
   - Run `gh stack init --base develop feat/1121-owner-onboarding-api`, push, and `gh stack submit`. The PR body follows `.github/PULL_REQUEST_TEMPLATE.md` and includes In Plain Terms, "Part 1 of 2", and a release note on the boot re-link of owners who were refused for being coordinators.
   - **Ask the user before pushing.**
-  - Raise the bluedots-automation Task for the Helm policy copy (`helm/aggregator/charts/api/files/opa-authz.rego` and related) with the `creating-bluedots-tickets` skill. It must deploy with or before this API.
+  - No infra change: the edge policy ships in the API image (edge-init copies it); the image must be built from the head of the whole stack (#1132), and `rbac.mode` must be log or enforce for the edge to apply.
 
 ### Task 8: Web session, `callApi` header and the BFF switch routes
 
 **Files:**
+
 - Modify: `apps/web/src/lib/session/interface.ts:27-47` (`actingAccountId: z.guid().optional()`)
 - Modify: `apps/web/src/lib/upstream-client.ts:65-80`. It is the only BFF path that sends the user's token; `bff-service-proxy.ts`, `invite-read.server.ts` and `invite-activation.ts` use the service token and stay unchanged.
 - Create: `apps/web/src/app/api/auth/acting/route.ts` (`POST`, `DELETE`)
 - Test: `apps/web/src/lib/upstream-client.test.ts`, `apps/web/src/app/api/auth/acting/route.test.ts`
 
 **Interfaces:**
+
 - Consumes `ACTING_ACCOUNT_HEADER` and `MeResponse.own_coordinator_account_id`.
 - `POST` body `{ accountId: string }` does the following:
   1. requires a session;
@@ -269,6 +285,7 @@
 ### Task 9: Shell gates, Back to console, banner
 
 **Files:**
+
 - Modify: `apps/web/src/app/(protected)/layout.tsx:36-44`, `apps/web/src/app/(console)/console/layout.tsx`
 - Modify: `apps/web/src/components/shell/Sidebar.tsx` (acting mode: "← Back to console" above OVERVIEW, which calls `DELETE /api/auth/acting`; "Account Details" links to `/console/profile`)
 - Create: `apps/web/src/components/shell/ActingBanner.tsx` (on `/onboarding` only)
@@ -277,6 +294,7 @@
 - Test: the layout tests next to each layout, `Sidebar.test.tsx`, `ActingBanner.test.tsx`
 
 **Interfaces:**
+
 - `(protected)` admits `tokenAggregatorId(token) || session.actingAccountId`. An acting session whose API calls return `403 ACTING_ACCOUNT_INVALID` is redirected to `DELETE /api/auth/acting?returnTo=/console&reason=acting_ended`.
 - `(console)` redirects to `DELETE /api/auth/acting?returnTo=<path>` when `session.actingAccountId` is set.
 
@@ -294,6 +312,7 @@
 ### Task 10: Console entry points — sidebar item, "Add myself", "You" tag
 
 **Files:**
+
 - Modify: the console sidebar component used by `app/(console)/console/layout.tsx` (group "MY ONBOARDING" with "Onboard participants" when `me.own_coordinator_account_id`; the click calls `POST /api/auth/acting` and shows `ACTING_NOT_READY` as "Setting up your access — try again in a minute")
 - Modify: `apps/web/src/app/(console)/console/coordinators/**` (My Team): an "＋ Add myself to My Team" button when `kind === 'admin' && !is_network_admin && !own_coordinator_account_id` and the current org is not the Default org; a dialog with a Seekers/Providers checkbox (at least one) and an org picker only when the owner owns more than one eligible org; it posts through a new BFF route `app/api/console/user/self-add/route.ts` to `POST /v1/user/self/add`, shows `409`/`403` codes inline, and on success refreshes the page
 - Modify: the My Team row: a "You" tag when `row.id === me.own_coordinator_account_id`

@@ -12,41 +12,44 @@ The fix is to give the owner a normal coordinator account in their own org, on t
 
 ## 2. Decisions recorded (19 Nov 2026)
 
-| # | Question | Answer |
-|---|---|---|
-| 1 | Relax H-5 to one account per type per login (A), or start `user_orgs` now (B)? | **A.** `user_identities` unique becomes `(provider, subject, user_type)`. |
-| 2 | How is the acting account chosen? | **In the web session, checked by the API** (a header). No new Keycloak client or scope. |
-| 3 | Network admins too? | **Not now.** Only org owners (owners of an `aggregator` org). |
-| 4 | Is the owner's coordinator account a team member? | **Yes.** It shows in My Team (tagged "You") and counts in Team Members and Active. The participants it onboards count in org totals and console dashboards like any coordinator's. |
-| 5 | Web layout | **Switch shells.** One new console sidebar item opens the existing coordinator shell, which gets "← Back to console". The merged-sidebar alternative was rejected. |
+| #   | Question                                                                       | Answer                                                                                                                                                                             |
+| --- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Relax H-5 to one account per type per login (A), or start `user_orgs` now (B)? | **A.** `user_identities` unique becomes `(provider, subject, user_type)`.                                                                                                          |
+| 2   | How is the acting account chosen?                                              | **In the web session, checked by the API** (a header). No new Keycloak client or scope.                                                                                            |
+| 3   | Network admins too?                                                            | **Not now.** Only org owners (owners of an `aggregator` org).                                                                                                                      |
+| 4   | Is the owner's coordinator account a team member?                              | **Yes.** It shows in My Team (tagged "You") and counts in Team Members and Active. The participants it onboards count in org totals and console dashboards like any coordinator's. |
+| 5   | Web layout                                                                     | **Switch shells.** One new console sidebar item opens the existing coordinator shell, which gets "← Back to console". The merged-sidebar alternative was rejected.                 |
 
 ## 3. Goals, non-goals, anti-goals
 
 **Goals**
+
 - An owner adds themselves to My Team in one step and then onboards in their org exactly as a coordinator does: links, QR, bulk upload, Onboarding and My Blue Dots counts.
 - The console behaves exactly as before.
 - No change to Signals, to the per-coordinator Signals org, to link slugs, to `onboarded_by`, or to PII-decrypt ownership.
 
 **Non-goals**
+
 - A Signals org per aggregator org. Re-homing `onboarded_by_org_id`.
 - The `user_orgs` membership table. This design must not add anything `user_orgs` would have to undo; the owner's coordinator account becomes an ordinary membership row later.
 - Network admins (root owner) onboarding.
 - Campaign routes (`apps/api/src/campaign/auth.ts` requires the `signalstack_org_id` claim). They are not part of the coordinator onboarding shell and stay unavailable to an acting owner.
 
 **Anti-goals** (failure even if it "works")
+
 - The owner's console token turning into a coordinator token. Setting `aggregator_id`, `decision_made`, `signalstack_org_id` or coordinator `roles` on the owner's Keycloak user would do that.
 - Any caller using a coordinator account that isn't linked to its own login.
 - A second Keycloak user or email for the owner (the realm has `duplicateEmailsAllowed: false`, and it would break one-person-one-contact).
 
 ## 4. Approaches considered
 
-| Approach | Trade-off | Outcome |
-|---|---|---|
-| **A. Second coordinator account, same login; acting account chosen per session** | Small change; uses P2-D3 (one admin + one coordinator account per contact) as written; RBAC rule "a role applies only to its account type" holds | **Chosen** |
-| B. `user_orgs` membership now | Long-term direction, but a schema change across tenant data, an RBAC rule rework and a resolver rework. Several weeks | Rejected for now |
-| Acting via a separate Keycloak client or scope that adds `aggregator_id` | No header, but a new client, mapper and login flow per realm; two tokens per browser | Rejected (decision 2) |
-| Signals org per aggregator org | Contradicts the per-coordinator Signals org; needs a tenant migration | Rejected |
-| Web: merged console sidebar | One sidebar, but two "My Blue Dots" entries, and every coordinator page has to work in two layouts | Rejected (decision 5) |
+| Approach                                                                         | Trade-off                                                                                                                                        | Outcome               |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------- |
+| **A. Second coordinator account, same login; acting account chosen per session** | Small change; uses P2-D3 (one admin + one coordinator account per contact) as written; RBAC rule "a role applies only to its account type" holds | **Chosen**            |
+| B. `user_orgs` membership now                                                    | Long-term direction, but a schema change across tenant data, an RBAC rule rework and a resolver rework. Several weeks                            | Rejected for now      |
+| Acting via a separate Keycloak client or scope that adds `aggregator_id`         | No header, but a new client, mapper and login flow per realm; two tokens per browser                                                             | Rejected (decision 2) |
+| Signals org per aggregator org                                                   | Contradicts the per-coordinator Signals org; needs a tenant migration                                                                            | Rejected              |
+| Web: merged console sidebar                                                      | One sidebar, but two "My Blue Dots" entries, and every coordinator page has to work in two layouts                                               | Rejected (decision 5) |
 
 ## 5. Design
 
@@ -56,7 +59,7 @@ The fix is to give the owner a normal coordinator account in their own org, on t
 
 - Add `user_type` (same enum as `users.user_type`, NOT NULL) to `user_identities`, backfilled from `users`.
 - Replace the unique with `UNIQUE (provider, subject, user_type)`.
-- Keep `user_type` consistent with `users`. *Builder's call:* use a composite FK `(user_id, user_type) → users (id, user_type)`, which needs a unique on `users (id, user_type)`, or set it in every write path in `db/account-writes.ts` with a test. Prefer the FK if Drizzle expresses it cleanly.
+- Keep `user_type` consistent with `users`. _Builder's call:_ use a composite FK `(user_id, user_type) → users (id, user_type)`, which needs a unique on `users (id, user_type)`, or set it in every write path in `db/account-writes.ts` with a test. Prefer the FK if Drizzle expresses it cleanly.
 - Generate the migration with `pnpm db:generate`. Never hand-edit it. Existing rows are valid by construction, since each subject has exactly one row today.
 - Audit every `userOf` caller (including `organisation-root.ts:~513` and the lazy `recordLoginIdentity`); each states which type it wants. `IdentityStore.userOf(provider, subject)` (`services/identity-store/*`) becomes type-aware: `userOf(provider, subject, userType?)`. Without a type it returns the **admin** account when one exists, else the coordinator. That keeps today's behaviour: "a coordinator login without the claim is still a coordinator", and an owner token without a header is an owner. `IdentityTakenError` and the link writers check `(provider, subject, user_type)`.
 - Boot reconcile, `services/organisation-root.ts:14-15, 155-172, ~535`: remove the `owner_is_coordinator` refusal. A coordinator may also own the root or the Default org; at most one account per type per login. `owner_owns_other_org` stays. On a deployed instance where a configured owner was refused for this reason, the next boot links the admin row to the existing login (`ownerSubject`, ~525-546). That is intended; call it out in the release notes.
@@ -64,23 +67,24 @@ The fix is to give the owner a normal coordinator account in their own org, on t
 
 ### 5.2 Creating the owner's coordinator account: "Add myself to My Team"
 
-The usual invite → activate path exists to verify an email address and create a Keycloak user. Neither applies here: the owner is signed in and their Keycloak user already exists. So the self path is one owner-only API call, not an emailed invite. *(My call; the handoff suggested reusing invite → activate. The steps after creation are the same pipeline.)*
+The usual invite → activate path exists to verify an email address and create a Keycloak user. Neither applies here: the owner is signed in and their Keycloak user already exists. So the self path is one owner-only API call, not an emailed invite. _(My call; the handoff suggested reusing invite → activate. The steps after creation are the same pipeline.)_
 
 `POST` on the owner's org (route name is the builder's call, next to the coordinator-invite routes), with body `{ serves: ProfileType[] }`. The owner picks Seekers and/or Providers in a small dialog. Behaviour:
 
-1. The caller must be an admin actor who owns the target active `aggregator` org. Refused for the Default org (`slug = 'default'`, which the root owner may own) and for any admin who owns the root (decision 3). *(My call.)*
-   - One coordinator account per contact (`UNIQUE (contact_id, user_type)`). An owner of several aggregator orgs picks the org in the dialog; once the account exists, self-add is refused in every other org. *(My call.)*
+1. The caller must be an admin actor who owns the target active `aggregator` org. Refused for the Default org (`slug = 'default'`, which the root owner may own) and for any admin who owns the root (decision 3). _(My call.)_
+   - One coordinator account per contact (`UNIQUE (contact_id, user_type)`). An owner of several aggregator orgs picks the org in the dialog; once the account exists, self-add is refused in every other org. _(My call.)_
 2. Refuse with a conflict if the contact already has a coordinator account (`UNIQUE (contact_id, user_type)` would anyway).
 3. Create the coordinator `users` row on the owner's existing `contact`: `org_id` = the org, `name` from the admin row or token, slug as for any coordinator, `serves` from the body, status `pending`.
 4. Link the identity `(keycloak, <owner sub>, coordinator)` to the new row.
 5. Run `approveCoordinator` (`services/decisions/coordinator.ts:70`) with a **self branch** (below). It upserts the Signals org (idempotent on `external_id`) and stores `signalstack_org_id` on the row. The coordinator base role comes from membership (`baseRoleOf`) as usual; there are no invite default roles.
 6. Audit-log it as an owner self-add.
 
-**Self branch in `approve()`** (`coordinator.ts` ~95-160). When the coordinator's login subject is also linked to an admin account (a "shared login"):
+**Self branch in `approve()`** (`coordinator.ts` ~95-160). When the coordinator's login subject is also linked to an admin account and its Keycloak user carries no `aggregator_id` (a "shared login"; `services/auth/shared-login.ts`). The self-add never writes `aggregator_id`. A person who registered as both an owner and a coordinator before self-add has a Keycloak user carrying the coordinator's `aggregator_id`; that login is not shared and keeps today's behaviour (separate role writes, coordinator Keycloak writes):
+
 - Find the Keycloak user through `user_identities`, not the `aggregator_id` attribute. Today `loadCoordinatorAndUser` would return `idp_missing`.
 - **Skip every Keycloak write on the shared user**: `enableUser`, `setUserDecision('approved')`, `setAttributes({signalstack_org_id})`, and the failure paths `restoreInvited` / `compensate` (~167-173), which would set `decision_made=invited` on the owner or disable them. The row's `signalstack_org_id` and `status` are the only source of truth for this account.
 
-The three places that refuse an owner's own email are **not touched**: `assertNotOrgOwner` (`routes/aggregator-registrations.ts:232, 285-289`), `mint.ts` `other_account` (`services/invites/mint.ts:126-151, 272`), and `assertContactFree` / `assertNotInKeycloak`. Those refusals stay right for the public and invite paths. The self path doesn't go through them. *(On `hotfix/up-speedrun` those checks have moved to `services/registration/coordinator-create.ts`; also untouched.)*
+The three places that refuse an owner's own email are **not touched**: `assertNotOrgOwner` (`routes/aggregator-registrations.ts:232, 285-289`), `mint.ts` `other_account` (`services/invites/mint.ts:126-151, 272`), and `assertContactFree` / `assertNotInKeycloak`. Those refusals stay right for the public and invite paths. The self path doesn't go through them. _(On `hotfix/up-speedrun` those checks have moved to `services/registration/coordinator-create.ts`; also untouched.)_
 
 **Leaving and removal:** deactivating or removing the owner's coordinator account from My Team works as for any coordinator, except that steps acting on the Keycloak user (disable user, revoke sessions, drop attributes) are skipped for a shared login. Revoking its roles in the DB still applies. The owner can add themselves again later, which reactivates the existing row.
 
@@ -88,7 +92,8 @@ The three places that refuse an owner's own email are **not touched**: `assertNo
 
 The owner's token is never changed. The web sends the chosen account in a header on every API call: **`X-Acting-Account: <coordinator users.id>`**.
 
-**Coordinator-route auth** (`services/auth/access-token.ts`, `authenticate` ~105-145 and `requireApproved` ~190-215). Acting is added in `requireApproved` only, used by `routes/registration-links.ts`, `bulk-uploads.ts`, `dashboard.ts` and `onboarding.ts`. `authenticate` alone (e.g. `routes/aggregator-profile.ts:375`, whose PATCH writes Keycloak contact attributes on the shared login) does **not** accept acting. In acting mode the coordinator shell's "Account Details" links to the console's profile page instead. *(My call.)*
+**Coordinator-route auth** (`services/auth/access-token.ts`, `authenticate` ~105-145 and `requireApproved` ~190-215). Acting is added in `requireApproved` only, used by `routes/registration-links.ts`, `bulk-uploads.ts`, `dashboard.ts` and `onboarding.ts`. `authenticate` alone (e.g. `routes/aggregator-profile.ts:375`, whose PATCH writes Keycloak contact attributes on the shared login) does **not** accept acting. In acting mode the coordinator shell's "Account Details" links to the console's profile page instead. _(My call.)_
+
 - **Token has `aggregator_id`:** today's path, unchanged. If an `X-Acting-Account` header is present and differs from the claim, return `403`. A plain coordinator can't use someone else's account.
 - **Token has no `aggregator_id` but has the header:** accept only if all of these hold:
   1. `user_identities` has `(keycloak, token.sub, coordinator)` → that exact `users.id`;
@@ -98,6 +103,7 @@ The owner's token is never changed. The web sends the chosen account in a header
   Then build the `AuthContext` from the **row**, not the claims: `aggregatorId` = row id, `serves` = row serves, `decisionMade` = row status mapped to `approved/pending/rejected`, `signalstackOrgId` = row value. Identity fields (email, names, phone, azp) still come from the token. `requireApproved` runs its usual approval check against that context.
   - **Skip** `backfillSignalstackOrgId` (it writes the Keycloak attribute) and `recordLoginIdentity` (already linked).
   - If the row has no `signalstack_org_id`, return `NOT_APPROVED` (or `SERVICE_UNAVAILABLE`, builder's call); never backfill onto the owner's Keycloak user.
+
 - **Neither:** `MISSING_AGGREGATOR_ID`, as today.
 - Cache the acting lookup per request only. If the coordinator row is deactivated, the next request fails.
 
@@ -115,7 +121,7 @@ An acting request carries the owner's token, so the claim holds the owner's admi
   - With no `X-Acting-Account` header, the effective roles are the claim entries **without** the `acting:` prefix, so the owner console is unchanged and tagged entries never grant anything.
   - With the header, the effective roles are **only** the entries `acting:<header value>:<k>`, mapped to `k`; the owner's plain roles don't count. No matching entry means no roles, so `403`.
   - `permissions` and the `signed_in`/`self` `count(roles) == 0` check use the effective roles.
-  - Envoy's gRPC ext_authz already forwards `x-acting-account` to OPA (`infra/envoy/envoy.yaml:95-103`). The Helm `opa-authz.rego` / `edge-init.js` in bluedots-automation mirror the policy and must get the same change.
+  - Envoy's gRPC ext_authz already forwards `x-acting-account` to OPA (`infra/envoy/envoy.yaml:95-103`). No infra change: the edge policy ships in the API image (edge-init copies it); the image must be built from the head of the whole stack (#1132), and `rbac.mode` must be log or enforce for the edge to apply.
 - **The API still verifies the link** (the three checks above) and builds the context from the row. The edge decides the permission and the API decides the identity and the data scope, so neither trusts the header alone.
 - **Token freshness.** After self-add, the BFF's `POST /api/auth/acting` refreshes the token before it stores the acting account, so the first acting request carries the tagged roles. Changes later follow the usual sync and refresh lag.
 - **Other claim readers.** Audit every consumer of the `roles` claim (API, web, the Helm policy copy) so that `acting:` entries are ignored where they aren't expected.
@@ -166,11 +172,19 @@ No special-casing. The account is an ordinary coordinator in `users.org_id`, so 
 
 - One branch per block, cut from `develop`, with stacked PRs into `develop` per `.claude/rules/pull-requests.md`:
   1. **api:** schema, migration, identity store, resolver, auth, self-add, roles sync, boot reconcile, `edge.rego` with its tests, `routes.json`, docs.
-   - No infra PR: Envoy's gRPC ext_authz already forwards all request headers to OPA.
-   - The Helm policy and config copy is a bluedots-automation Task, which must deploy with or before the API.
+  - No infra PR: Envoy's gRPC ext_authz already forwards all request headers to OPA.
+  - No infra change: the edge policy ships in the API image (edge-init copies it); the image must be built from the head of the whole stack (#1132), and `rbac.mode` must be log or enforce for the edge to apply.
   2. **web:** session, BFF routes, layouts, sidebar, My Team button and tag.
 - After both merge into `develop`, sync `develop` back to `feature` and merge into `hotfix/up-speedrun`. That branch has `coordinator-create.ts`, so expect conflicts around the registration checks; this design doesn't edit them.
 - Post decisions 1–5 as a comment on #1121 when this spec is approved.
+- **Pre-deploy check (read-only).** Count the people who hold both account types; before this deploys, each is a legacy owner + coordinator whose Keycloak user carries `aggregator_id`, so the shared-login rule leaves them on today's behaviour:
+
+  ```sql
+  SELECT count(*) AS contacts_with_both_types
+  FROM (SELECT contact_id FROM users GROUP BY contact_id
+        HAVING count(DISTINCT user_type) = 2) AS both_types;
+  ```
+
 - **Done when:** on UAT, an owner adds themselves, switches to "Onboard participants", creates a link, runs an upload and sees the counts; the console works as before; the owner's console token, decoded, has no `aggregator_id`, `decision_made` or `signalstack_org_id`.
 
 ## 8. Left to the builder
@@ -180,11 +194,15 @@ No special-casing. The account is an ordinary coordinator in `users.org_id`, so 
 - `NOT_APPROVED` vs `SERVICE_UNAVAILABLE` for an acting row with no Signals org id.
 - The banner wording and whether it is dismissable per session.
 
+### Open question (product / architect)
+
+- **A former owner keeps acting access after an ownership transfer.** The acting check (`acting.ts`) asks whether the login holds _an_ owner account, not whether it still owns the coordinator's org. After a transfer, a former owner whose admin account remains can still act as its own coordinator account in the old org, with that coordinator's roles. This is the shipped behaviour and is not changed here.
+
 ## 9. Decision: whose permissions apply while acting
 
 **Option A**: the coordinator account's own roles, carried in the shared login's `roles` claim as `acting:<id>:<role>` entries and applied by the edge only with a matching `X-Acting-Account` header (§5.3 "Edge").
 
-| Option | Why not |
-|---|---|
-| B. The edge passes acting requests through; the API checks the coordinator's DB roles | A second enforcement point (against decision E6); a pass-through bug skips the edge entirely |
-| C. The owner's own roles apply | Org Admin lacks `profiles.view_pii`, so no bulk-upload errors file or PII export; granting it changes PII policy for every owner |
+| Option                                                                                | Why not                                                                                                                          |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| B. The edge passes acting requests through; the API checks the coordinator's DB roles | A second enforcement point (against decision E6); a pass-through bug skips the edge entirely                                     |
+| C. The owner's own roles apply                                                        | Org Admin lacks `profiles.view_pii`, so no bulk-upload errors file or PII export; granting it changes PII policy for every owner |
