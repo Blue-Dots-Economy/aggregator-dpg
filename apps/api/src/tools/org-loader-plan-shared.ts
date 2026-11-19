@@ -40,6 +40,10 @@ export const PLAN_PROBLEM = {
   ORG_BLOCKED: 'ORG_BLOCKED',
   /** A form check threw (for example an unreadable schema). */
   CHECK_FAILED: 'CHECK_FAILED',
+  /** An `orgs.csv` header that is no fixed, address or schema column (a typo would drop its values). */
+  UNKNOWN_COLUMN: 'UNKNOWN_COLUMN',
+  /** A coordinator row sets an org detail (`url`), which belongs to the org; the accept route refuses it too. */
+  ORG_DETAILS_READ_ONLY: 'ORG_DETAILS_READ_ONLY',
 } as const;
 
 /** One of the {@link PLAN_PROBLEM} codes. */

@@ -222,6 +222,53 @@ describe('buildLoadPlan: problems in the files', () => {
     expect(codesAt(plan, 'coordinators', coord.line)).toEqual([PLAN_PROBLEM.OWNER_IS_COORDINATOR]);
   });
 
+  it('UNKNOWN_COLUMN on line 1 for an orgs header no form field reads', async () => {
+    const row = orgRow({ extra: { webiste: 'https://alpha.org' } });
+    const plan = await buildLoadPlan({
+      orgs: [row],
+      coordinators: [],
+      orgColumns: [
+        'name',
+        'parent',
+        'owner_name',
+        'owner_phone',
+        'owner_email',
+        'website',
+        'state',
+        'address_postalCode',
+        'webiste',
+        'consent',
+      ],
+    });
+    expect(plan.problems).toEqual([
+      { file: 'orgs', line: 1, code: PLAN_PROBLEM.UNKNOWN_COLUMN, field: 'webiste' },
+      { file: 'orgs', line: 1, code: PLAN_PROBLEM.UNKNOWN_COLUMN, field: 'consent' },
+    ]);
+  });
+
+  it('UNKNOWN_COLUMN from the rows extra cells when no header is given', async () => {
+    const row = orgRow({ extra: { webiste: 'https://alpha.org', state: 'Karnataka' } });
+    const plan = await buildLoadPlan({ orgs: [row], coordinators: [] });
+    expect(plan.problems).toEqual([
+      { file: 'orgs', line: 1, code: PLAN_PROBLEM.UNKNOWN_COLUMN, field: 'webiste' },
+    ]);
+  });
+
+  it('ORG_DETAILS_READ_ONLY for a coordinator row that sets url', async () => {
+    const org = orgRow();
+    const coord = coordRow({ extra: { url: 'https://alpha.org' } });
+    const plan = await buildLoadPlan({ orgs: [org], coordinators: [coord] });
+    expect(plan.problems).toEqual([
+      {
+        file: 'coordinators',
+        line: coord.line,
+        code: PLAN_PROBLEM.ORG_DETAILS_READ_ONLY,
+        field: 'url',
+      },
+    ]);
+    expect(plan.coordinators).toEqual([]);
+  });
+
   it('DUPLICATE_COORDINATOR on a repeated email or normalised phone', async () => {
     const org = orgRow();
     const a = coordRow();

@@ -32,6 +32,9 @@ import {
   type Problems,
 } from './org-loader-plan-shared.js';
 
+/** Coordinator form keys that belong to the org; the accept route refuses them (`assertNoOrgDetails`). */
+const ORG_DETAIL_KEYS = ['url'] as const;
+
 /** Coordinator form paths mapped to their CSV columns. */
 const COORDINATOR_FIELD_BY_PATH: Readonly<Record<string, string>> = {
   name: 'org',
@@ -127,6 +130,9 @@ export async function planCoordinator(
   ctx: PlanContext,
 ): Promise<PlannedCoordinator | null> {
   const { problems } = ctx;
+  const orgDetails = ORG_DETAIL_KEYS.filter((k) => (row.extra[k] ?? '').trim() !== '');
+  for (const k of orgDetails) problems.coordinator(row.line, PLAN_PROBLEM.ORG_DETAILS_READ_ONLY, k);
+  if (orgDetails.length > 0) return null;
   const org = await resolveCoordinatorOrg(row, ctx);
   if (!org) return null;
   const phoneE164 = e164(row.phone);

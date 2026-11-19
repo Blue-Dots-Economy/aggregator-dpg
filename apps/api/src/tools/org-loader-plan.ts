@@ -14,13 +14,20 @@ import { treeRules } from '../services/known-as.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { isProvisioned } from '../services/provisioned.js';
-import { orgArrayFields } from '../services/org-schema-validator.js';
+import { orgArrayFields, orgSchemaFields } from '../services/org-schema-validator.js';
 import {
   checkOrgForm,
   findOwnerContactClash,
   type OrgForm,
 } from '../services/registration/org-create.js';
-import type { CoordinatorRow, InputProblem, OrgRow } from './org-loader-input.js';
+import {
+  ADDRESS_PARTS,
+  ADDRESS_PREFIX,
+  ORG_FIXED_COLUMNS,
+  type CoordinatorRow,
+  type InputProblem,
+  type OrgRow,
+} from './org-loader-input.js';
 import { checkCoordinatorRowsInFile, planCoordinator } from './org-loader-plan-coordinators.js';
 import {
   OrgNames,
@@ -65,6 +72,7 @@ const OrgFieldErrorsSchema = z.record(z.string(), z.unknown());
  * but are never planned. Logs counts and codes only.
  *
  * @param input.inputProblems - The parser's problems; returned in `problems`.
+ * @param input.orgColumns - The `orgs.csv` header columns; when absent, the rows' extra cells stand in.
  * @returns The plan; apply must refuse it while `problems` is not empty.
  * @throws {UpstreamError} When a database or Keycloak lookup fails, or the root org is missing.
  * @throws {Error} When the network config cannot be loaded.
@@ -73,6 +81,7 @@ export async function buildLoadPlan(input: {
   orgs: OrgRow[];
   coordinators: CoordinatorRow[];
   inputProblems?: InputProblem[];
+  orgColumns?: readonly string[];
 }): Promise<LoadPlan> {
   const started = Date.now();
   const problems = new Problems(input.inputProblems ?? []);
@@ -87,6 +96,10 @@ export async function buildLoadPlan(input: {
     planned: new Map(),
   };
 
+  const orgColumns = input.orgColumns ?? [
+    ...new Set(input.orgs.flatMap((r) => Object.keys(r.extra))),
+  ];
+  await checkOrgColumns(orgColumns, problems);
   checkOrgRowsInFile(input.orgs, ctx);
   checkCoordinatorRowsInFile(input.coordinators, input.orgs, problems);
 
@@ -171,6 +184,30 @@ export async function buildLoadPlan(input: {
     'org-loader plan built',
   );
   return { orgs, coordinators, problems: problems.list };
+}
+
+/** `orgs.csv` columns the org form reads besides the fixed, address and schema ones. */
+const ORG_FORM_COLUMNS = ['state'] as const;
+
+/**
+ * Reports UNKNOWN_COLUMN (line 1) for each `orgs.csv` header the org form does not read.
+ *
+ * The form check drops keys the schema does not declare, so a misspelt column
+ * would otherwise load its values nowhere.
+ *
+ * @throws {Error} When the org registration schema cannot be found.
+ */
+async function checkOrgColumns(columns: readonly string[], problems: Problems): Promise<void> {
+  if (columns.length === 0) return;
+  const known = new Set<string>([
+    ...ORG_FIXED_COLUMNS,
+    ...ADDRESS_PARTS.map((part) => `${ADDRESS_PREFIX}${part}`),
+    ...ORG_FORM_COLUMNS,
+    ...(await orgSchemaFields()),
+  ]);
+  for (const column of columns) {
+    if (!known.has(column)) problems.org(1, PLAN_PROBLEM.UNKNOWN_COLUMN, column);
+  }
 }
 
 /**

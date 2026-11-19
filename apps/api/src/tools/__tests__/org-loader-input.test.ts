@@ -36,6 +36,21 @@ describe('parseOrgsCsv', () => {
     ]);
   });
 
+  it('returns the normalised header columns in file order', () => {
+    const { columns } = parseOrgsCsv(
+      ` Name ,PARENT,owner_name,owner_phone,owner_email,ADDRESS_POSTALCODE,webiste\n`,
+    );
+    expect(columns).toEqual([
+      'name',
+      'parent',
+      'owner_name',
+      'owner_phone',
+      'owner_email',
+      'address_postalCode',
+      'webiste',
+    ]);
+  });
+
   it('gives identical rows for BOM, CRLF and trailing blank line', () => {
     const plain = parseOrgsCsv(ORGS);
     const messy = parseOrgsCsv('﻿' + ORGS.replace(/\n/g, '\r\n') + '\r\n\r\n');

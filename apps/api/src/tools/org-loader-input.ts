@@ -84,6 +84,15 @@ interface ParsedFile {
 }
 
 const ORG_REQUIRED = ['name', 'owner_name', 'owner_phone', 'owner_email'] as const;
+
+/** Fixed columns of `orgs.csv`, before the schema's own fields; all but `parent` are required. */
+export const ORG_FIXED_COLUMNS: readonly string[] = [
+  'name',
+  'parent',
+  'owner_name',
+  'owner_phone',
+  'owner_email',
+];
 const COORD_REQUIRED = ['org', 'name', 'phone', 'email', 'profile_types'] as const;
 
 /**
@@ -164,8 +173,16 @@ function missingColumns(
     .map((field) => ({ file, line: 1, code: INPUT_PROBLEM.MISSING_COLUMN, field }));
 }
 
-/** Parse `orgs.csv`. */
-export function parseOrgsCsv(text: string): { rows: OrgRow[]; problems: InputProblem[] } {
+/**
+ * Parse `orgs.csv`.
+ *
+ * @returns The rows, the parser's problems and the normalised header columns, in file order.
+ */
+export function parseOrgsCsv(text: string): {
+  rows: OrgRow[];
+  problems: InputProblem[];
+  columns: string[];
+} {
   const parsed = parseFile(text);
   const { columns, records } = parsed;
   const problems = [
@@ -174,8 +191,7 @@ export function parseOrgsCsv(text: string): { rows: OrgRow[]; problems: InputPro
   ];
   const rows: OrgRow[] = [];
   const known = new Set<string>([
-    ...ORG_REQUIRED,
-    'parent',
+    ...ORG_FIXED_COLUMNS,
     ...ADDRESS_PARTS.map((p) => ADDRESS_PREFIX + p),
   ]);
   for (const { line, cells } of records) {
@@ -204,7 +220,7 @@ export function parseOrgsCsv(text: string): { rows: OrgRow[]; problems: InputPro
       address,
     });
   }
-  return { rows, problems };
+  return { rows, problems, columns: [...columns] };
 }
 
 /** Parse `coordinators.csv`. `profile_types` is a `;`-separated list. */
