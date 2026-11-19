@@ -204,3 +204,27 @@ describe('train bounds vs the shipped journal', () => {
     }
   });
 });
+
+describe('shipped journal order', () => {
+  it('has strictly increasing `when` values and a tag prefix equal to each idx', async () => {
+    const journalPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../drizzle/migrations/meta/_journal.json',
+    );
+    const real = JSON.parse(await readFile(journalPath, 'utf8')) as {
+      entries: Array<JournalEntry & { idx: number }>;
+    };
+    // Drizzle applies only entries whose `when` is above the last applied one,
+    // so a repeated or lower `when` (two branches picking the same number) is
+    // silently skipped on instances that already ran the other. `idx` may have
+    // gaps (a number reserved by a parallel branch); drizzle does not read it.
+    real.entries.forEach((e, i) => {
+      expect(e.tag.slice(0, 4)).toBe(String(e.idx).padStart(4, '0'));
+      if (i > 0) {
+        const prev = real.entries[i - 1]!;
+        expect(e.when).toBeGreaterThan(prev.when);
+        expect(e.idx).toBeGreaterThan(prev.idx);
+      }
+    });
+  });
+});
