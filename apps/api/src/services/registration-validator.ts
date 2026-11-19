@@ -27,7 +27,8 @@ const addFormats: AddFormatsFn = require('ajv-formats').default ?? require('ajv-
 /** The coordinator-registration schema this validator compiles. */
 const SCHEMA_FILE = 'registration.v1.json';
 
-let cachedValidator: ValidateFunction | null = null;
+/** Compiled validators, one per `consentRequired` value. */
+const cachedValidators = new Map<boolean, ValidateFunction>();
 
 /**
  * Returns the shared compiled validator, cached on first use.
@@ -35,9 +36,15 @@ let cachedValidator: ValidateFunction | null = null;
  * Before compiling, replaces `properties.type` so it accepts one domain id or a
  * non-empty list without repeats, drawn from the current network's domain ids.
  * Falls back to the schema file's own ids when network config is unavailable.
+ *
+ * @param opts.consentRequired - `false` drops `consent` from `required`, for operator-provisioned accounts. Default `true`.
  */
-export async function getRegistrationValidator(): Promise<ValidateFunction> {
-  if (cachedValidator) return cachedValidator;
+export async function getRegistrationValidator(
+  opts: { consentRequired?: boolean } = {},
+): Promise<ValidateFunction> {
+  const consentRequired = opts.consentRequired ?? true;
+  const cached = cachedValidators.get(consentRequired);
+  if (cached) return cached;
   const schemaPath = resolveSchemaPath();
   const raw = readFileSync(schemaPath, 'utf8');
   const schema = JSON.parse(raw) as Record<string, unknown>;
@@ -53,11 +60,15 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
   if (props && typeProp) {
     props['type'] = oneOrListOf(networkIds.length > 0 ? networkIds : fileDomainIds(typeProp));
   }
+  const required = schema['required'];
+  if (!consentRequired && Array.isArray(required)) {
+    schema['required'] = required.filter((key) => key !== 'consent');
+  }
 
   const ajv = new AjvCtor({ allErrors: true, strict: false });
   addFormats(ajv);
   const validator: ValidateFunction = ajv.compile(schema);
-  cachedValidator = validator;
+  cachedValidators.set(consentRequired, validator);
   return validator;
 }
 
@@ -87,7 +98,7 @@ function resolveSchemaPath(): string {
  * Test-only; clears the cached validator so the next call recompiles.
  */
 export function _resetValidator(): void {
-  cachedValidator = null;
+  cachedValidators.clear();
 }
 
 /**

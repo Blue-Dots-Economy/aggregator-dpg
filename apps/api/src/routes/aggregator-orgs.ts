@@ -24,6 +24,7 @@ import {
 } from './invite-shared.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { unwrapOrThrow } from '../errors/unwrap.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
@@ -34,7 +35,6 @@ import {
   createOrgWithOwner,
   findOwnerContactClash,
   OrgFormSchema,
-  type OrgCreateResult,
 } from '../services/registration/org-create.js';
 
 /**
@@ -52,21 +52,6 @@ const OrgInviteAcceptBodySchema = z
     }),
   })
   .loose();
-
-/**
- * Returns a successful org-creation value, or throws its error as an HTTP error.
- *
- * @throws {HttpError} The error's code, detail, fields and cause.
- */
-function unwrapOrThrow<T>(result: OrgCreateResult<T>): T {
-  if (result.ok) return result.value;
-  const { code, detail, fields, cause } = result.error;
-  throw httpError(code, {
-    ...(detail !== undefined ? { detail } : {}),
-    ...(fields !== undefined ? { fields } : {}),
-    ...(cause !== undefined ? { cause } : {}),
-  });
-}
 
 /** `201` of an org invite accept: pending until the owner enters the email code. */
 const OrgInviteAcceptedResponseSchema = z.object({

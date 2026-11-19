@@ -103,6 +103,23 @@ describe('getRegistrationValidator', () => {
     expect(mockGetNetworkConfig).toHaveBeenCalledTimes(1);
   });
 
+  it('drops consent from required when consent is not required, cached separately', async () => {
+    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker'] });
+    const { getRegistrationValidator } = await import('./registration-validator.js');
+    const body = {
+      name: 'TRRAIN',
+      type: 'seeker',
+      contact: { name: 'Asha Kumari', phone: '+919876543210', email: 'asha@trrain.org' },
+    };
+    const strict = await getRegistrationValidator();
+    const loose = await getRegistrationValidator({ consentRequired: false });
+    expect(loose).not.toBe(strict);
+    expect(strict(body)).toBe(false);
+    expect((strict.errors ?? []).some((e) => e.params['missingProperty'] === 'consent')).toBe(true);
+    expect(loose(body)).toBe(true);
+    expect(await getRegistrationValidator({ consentRequired: false })).toBe(loose);
+  });
+
   it('_resetValidator forces a fresh compile + network-config read', async () => {
     mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker'] });
     const { getRegistrationValidator, _resetValidator } =
