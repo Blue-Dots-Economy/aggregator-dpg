@@ -14,7 +14,7 @@ import {
   buildOrganisation,
   _setOrganisationStore,
 } from '../organisation-store/index.js';
-import { IdpAdminFake, _setIdpAdmin } from '../idp-admin/index.js';
+import { IdpAdminFake, KC_ATTR, _setIdpAdmin } from '../idp-admin/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { IdentityStoreFake } from '../identity-store/testing.js';
 import { _setIdentityStore } from '../identity-store/index.js';
@@ -181,6 +181,22 @@ describe('ownerSelfAdd', () => {
     expect(await errorCode(input(), a)).toBe('ORG_NOT_ELIGIBLE');
   });
 
+  it('does not treat a non-owner relation to the root as owning it', async () => {
+    const a = buildAdminActor({
+      userId: ADMIN,
+      orgs: [
+        { id: ROOT, orgType: 'network_facilitator', relation: 'member', isDefault: false },
+        owned(ORG),
+      ],
+    });
+    expect(await errorCode(input(), a)).toBe('ok');
+  });
+
+  it('refuses an owner contact with no phone with OWNER_PHONE_REQUIRED', async () => {
+    orgs.seed([ownerOrg(ORG, { ownerPhone: null })]);
+    expect(await errorCode(input())).toBe('OWNER_PHONE_REQUIRED');
+  });
+
   it('refuses an org that is not active', async () => {
     orgs.seed([ownerOrg(ORG, { status: 'pending' })]);
     expect(await errorCode(input())).toBe('ORG_NOT_ELIGIBLE');
@@ -224,6 +240,41 @@ describe('ownerSelfAdd', () => {
     expect(again.value.status).toBe('active');
     expect(again.value.serves).toEqual(['seeker', 'provider']);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    expect(ledger.list()).toHaveLength(2);
+    expect(ledger.list()[1]).toMatchObject({ subjectId: first.value.id });
+  });
+
+  it('leaves the row unchanged when linking the login fails during reactivation', async () => {
+    const first = await selfAdd();
+    if (!first.success) throw new Error('seed failed');
+    await users.update(first.value.id, { status: 'inactive', updatedBy: 'test' });
+    // A row with no recorded login yet, whose link then fails.
+    const bare = new IdentityStoreFake();
+    bare.seed([{ userId: ADMIN, userType: 'admin', provider: IDP_PROVIDER, subject: SUB }]);
+    bare.link = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    _setIdentityStore(bare);
+
+    expect(await errorCode(input({ serves: ['seeker', 'provider'] }))).toBe('UNAVAILABLE');
+
+    const row = await users.findById(first.value.id);
+    expect(row.ok && row.value?.status).toBe('inactive');
+    expect(row.ok && row.value?.serves).toEqual(['seeker']);
+    expect(ledger.list()).toHaveLength(1);
+  });
+
+  it('refuses to reactivate a row that has its own Keycloak user', async () => {
+    const first = await selfAdd();
+    if (!first.success) throw new Error('seed failed');
+    await users.update(first.value.id, { status: 'inactive', updatedBy: 'test' });
+    await idp.createUser({
+      email: 'legacy@x.test',
+      enabled: false,
+      attributes: { [KC_ATTR.AGGREGATOR_ID]: first.value.id },
+    });
+
+    expect(await errorCode(input())).toBe('ALREADY_COORDINATOR');
+    const row = await users.findById(first.value.id);
+    expect(row.ok && row.value?.status).toBe('inactive');
   });
 
   it('refuses to reactivate a non-active self account from another org', async () => {

@@ -15,6 +15,7 @@ import type { Actor } from '../auth/actor/index.js';
 import { approveCoordinator } from '../decisions/coordinator.js';
 import { getIdentityStore } from '../identity-store/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
+import { getIdpAdmin, KC_ATTR } from '../idp-admin/index.js';
 import { getNetworkConfig } from '../network-config.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
@@ -27,6 +28,7 @@ export interface SelfAddError {
     | 'ORG_NOT_ELIGIBLE'
     | 'ALREADY_COORDINATOR'
     | 'NO_PROFILE_TYPES'
+    | 'OWNER_PHONE_REQUIRED'
     | 'UNAVAILABLE';
   message: string;
 }
@@ -98,7 +100,7 @@ async function selfAdd(
   const eligible = orgEligibility(actor, org);
   if (eligible !== null) return refuse('ORG_NOT_ELIGIBLE', eligible);
   const ownerPhone = org.ownerPhone;
-  if (!ownerPhone) return refuse('ORG_NOT_ELIGIBLE', 'owner has no phone');
+  if (!ownerPhone) return refuse('OWNER_PHONE_REQUIRED', 'owner contact has no phone');
 
   const networkCfg = await getNetworkConfig();
   const serves = [...new Set(input.serves)];
@@ -122,7 +124,7 @@ async function selfAdd(
     linkedCoordinator: accounts.value.coordinator,
   };
   const prepared = existing.value
-    ? await reactivate(existing.value, target)
+    ? await reactivate(existing.value, target, input.consent, log)
     : await create(target, ownerPhone, input.consent, log);
   if (!prepared.success) return prepared;
 
@@ -145,7 +147,9 @@ interface SelfAddTarget {
  * Why the org cannot take a self-add, or null when it can.
  */
 function orgEligibility(actor: Actor, org: Organisation): string | null {
-  if (actor.orgs.some((o) => o.orgType === 'network_facilitator')) return 'caller owns the root';
+  if (actor.orgs.some((o) => o.orgType === 'network_facilitator' && o.relation === 'owner')) {
+    return 'caller owns the root';
+  }
   if (org.isDefault) return 'the Default org';
   if (org.status !== 'active') return 'organisation is not active';
   return null;
@@ -153,11 +157,14 @@ function orgEligibility(actor: Actor, org: Organisation): string | null {
 
 /**
  * Puts a non-active self account of the same org back to `pending` with the
- * new profile types, linking the login when it has none.
+ * new profile types and a new consent row, linking the login first when it
+ * has none. Refused when the row belongs to another login or Keycloak user.
  */
 async function reactivate(
   row: Coordinator,
   { actor, subject, org, serves, linkedCoordinator }: SelfAddTarget,
+  consent: SelfAddRequest['consent'],
+  log: FastifyBaseLogger,
 ): Promise<SelfAddResult<string>> {
   if (row.parentOrgId !== org.id || row.status === 'active') {
     return refuse('ALREADY_COORDINATOR', 'contact already has a coordinator account');
@@ -172,16 +179,37 @@ async function reactivate(
   if (linked.value !== null && linked.value !== subject) {
     return refuse('ALREADY_COORDINATOR', 'coordinator account belongs to another login');
   }
+  // A row registered before self-add has its own Keycloak user; one row never gets two logins.
+  const legacy = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, row.id);
+  if (!legacy.ok) return refuse('UNAVAILABLE', 'idp lookup');
+  if (legacy.value !== null && legacy.value.id !== subject) {
+    return refuse('ALREADY_COORDINATOR', 'coordinator account has its own Keycloak user');
+  }
+  // The login is linked before the row changes, so a failed link leaves the row as it was.
+  if (linked.value === null) {
+    const link = await identities.link(row.id, IDP_PROVIDER, subject, 'coordinator');
+    if (!link.ok) return refuse('UNAVAILABLE', `identity link: ${link.error.code}`);
+  }
+  // The update takes no hook, so the consent row is written just before it.
+  const recordConsent = await aggregatorConsentWriter({ consent, log });
+  if (!recordConsent) return refuse('UNAVAILABLE', 'consent config');
+  try {
+    await recordConsent(undefined, row.id);
+  } catch (e) {
+    log.error({
+      status: 'failure',
+      sub_operation: 'consentLedger.recordAggregatorConsent',
+      error_type: e instanceof Error ? e.name : typeof e,
+      target_id: row.id,
+    });
+    return refuse('UNAVAILABLE', 'consent ledger');
+  }
   const updated = await users.update(row.id, {
     serves,
     status: 'pending',
     updatedBy: actor.userId,
   });
   if (!updated.ok) return refuse('UNAVAILABLE', 'user store update');
-  if (linked.value === null) {
-    const link = await identities.link(row.id, IDP_PROVIDER, subject, 'coordinator');
-    if (!link.ok) return refuse('UNAVAILABLE', `identity link: ${link.error.code}`);
-  }
   return ok(row.id);
 }
 

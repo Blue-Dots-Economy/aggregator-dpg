@@ -743,6 +743,13 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(400);
     });
 
+    it('400 OWNER_PHONE_REQUIRED when the owner contact has no phone', async () => {
+      await setOrg(ORG_A, { ownerPhone: null });
+      const res = await selfAdd('a', { org_id: ORG_A });
+      expect(res.statusCode).toBe(400);
+      expect(codeOf(res)).toBe('OWNER_PHONE_REQUIRED');
+    });
+
     it('refuses a coordinator token', async () => {
       const res = await selfAdd('coord', { org_id: ORG_A });
       expect(res.statusCode).toBe(403);

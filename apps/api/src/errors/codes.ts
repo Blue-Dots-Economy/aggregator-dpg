@@ -215,7 +215,14 @@ export const ERR = {
     status: 403,
     title: 'Organisation not available',
     detail: 'You cannot add yourself to this organisation.',
-    hint: 'POST /v1/user/self/add: the org is Default or not active, the caller owns the root, or the owner contact has no phone. See services/registration/owner-self-add.ts.',
+    hint: 'POST /v1/user/self/add: the org is Default or not active, or the caller owns the root. See services/registration/owner-self-add.ts.',
+  },
+  OWNER_PHONE_REQUIRED: {
+    code: 'OWNER_PHONE_REQUIRED',
+    status: 400,
+    title: 'Phone number needed',
+    detail: 'Add a phone number to your contact details before adding yourself to the team.',
+    hint: "POST /v1/user/self/add: the owner's contact has no phone, and a coordinator contact needs one (the OTP login key).",
   },
   ALREADY_COORDINATOR: {
     code: 'ALREADY_COORDINATOR',
