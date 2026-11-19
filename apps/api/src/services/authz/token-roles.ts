@@ -9,13 +9,23 @@
  * user's whole list and overwrites it, so a missed or failed write is repaired
  * by the next one (a later change, the sweep, or the reconcile).
  *
+ * A shared login (an org owner whose own coordinator account uses the same
+ * Keycloak user, which carries no `aggregator_id`) has one attribute for two
+ * accounts. The admin account owns
+ * it: a sync of either account writes the admin's role keys plus the
+ * coordinator's as `acting:<coordinatorId>:<roleKey>` entries, under the
+ * admin account's lock. Any other coordinator sync whose Keycloak user turns
+ * out to be such a login is skipped (logged), so a coordinator's untagged keys
+ * never reach an owner's login. A Keycloak user that carries `aggregator_id`
+ * is a coordinator's own login even when an admin account is linked to it.
+ *
  * Runs only with `RBAC_MODE` other than `off`. Never throws and never
  * fails the request that triggered it: a failure is logged and the user is
  * marked for the next sweep.
  */
 
 import { randomUUID } from 'node:crypto';
-import { effectiveRoleKeys } from '@aggregator-dpg/rbac';
+import { actingRoleEntry, effectiveRoleKeys } from '@aggregator-dpg/rbac';
 import { logger } from '../../logger.js';
 import { StoreActorResolver, type Actor, type ActorResult } from '../auth/actor/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
@@ -23,6 +33,7 @@ import { getIdpAdmin } from '../idp-admin/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { getIdentityStore } from '../identity-store/index.js';
 import { getRedis } from '../redis/index.js';
+import { isSharedLogin, type LoginAccounts } from '../auth/shared-login.js';
 import { TEST_TOKEN_ROLES_OFF_KEY } from './edge-test-hook.js';
 import { getRbacRuntime } from './runtime.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
@@ -47,10 +58,30 @@ interface DepFailure {
   error: { code: string; message: string };
 }
 
+/**
+ * The accounts on one Keycloak login. `shared` is set only for an owner's
+ * shared login (`services/auth/shared-login.ts`): an admin account and no
+ * `aggregator_id` on the Keycloak user.
+ */
+export interface TokenLoginAccounts extends LoginAccounts {
+  shared: boolean;
+}
+
 /** What the sync needs from the rest of the app; injectable for tests. */
 export interface TokenRolesDeps {
   /** The account's actor, as the API resolves it (memberships and live roles). */
   actorOf(userId: string): Promise<ActorResult>;
+  /**
+   * The admin and coordinator accounts on the account's Keycloak login, and
+   * whether it is an owner's shared login; both null when the account has no
+   * recorded login.
+   */
+  loginAccountsOf(userId: string): Promise<{ ok: true; value: TokenLoginAccounts } | DepFailure>;
+  /**
+   * The admin and coordinator accounts recorded for a Keycloak user (its
+   * `sub`), and whether it is an owner's shared login; both null when none is.
+   */
+  accountsOfLogin(idpUserId: string): Promise<{ ok: true; value: TokenLoginAccounts } | DepFailure>;
   /** The account's Keycloak user id; null when it has none (no login yet). */
   idpUserOf(userId: string, actor: Actor): Promise<{ ok: true; value: string | null } | DepFailure>;
   /** Overwrites the Keycloak `roles` attribute; null removes it. */
@@ -104,11 +135,31 @@ export function tokenRolesOf(actor: Actor | null, now: number): string[] {
   );
 }
 
+/** The accounts recorded for a Keycloak user and whether it is a shared login. */
+async function tokenLoginAccounts(
+  idpUserId: string,
+): Promise<{ ok: true; value: TokenLoginAccounts } | DepFailure> {
+  const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, idpUserId);
+  if (!accounts.ok) return { ok: false, error: accounts.error };
+  const shared = await isSharedLogin(idpUserId, accounts.value);
+  if (!shared.ok) return { ok: false, error: shared.error };
+  return { ok: true, value: { ...accounts.value, shared: shared.value } };
+}
+
 /** The app's real dependencies. */
 export function defaultTokenRolesDeps(): TokenRolesDeps {
   const resolver = new StoreActorResolver();
   return {
     actorOf: (userId) => resolver.byUserId(userId),
+    async loginAccountsOf(userId) {
+      const linked = await getIdentityStore().subjectOf(userId, IDP_PROVIDER);
+      if (!linked.ok) return { ok: false, error: linked.error };
+      if (!linked.value) {
+        return { ok: true, value: { admin: null, coordinator: null, shared: false } };
+      }
+      return tokenLoginAccounts(linked.value);
+    },
+    accountsOfLogin: tokenLoginAccounts,
     async idpUserOf(userId, actor) {
       const linked = await getIdentityStore().subjectOf(userId, IDP_PROVIDER);
       if (!linked.ok) return { ok: false, error: linked.error };
@@ -209,6 +260,23 @@ export async function syncTokenRoles(
   return run(userId, reason, deps ?? defaultTokenRolesDeps());
 }
 
+/**
+ * The account whose lock and Keycloak user a sync of `userId` uses, and the
+ * coordinator account whose roles ride along tagged: the admin account and
+ * its coordinator on an owner's shared login, else `userId` alone.
+ */
+function syncTarget(
+  userId: string,
+  accounts: TokenLoginAccounts,
+): { target: string; acting: string | null } {
+  const { admin, coordinator } = accounts;
+  if (!accounts.shared || admin === null || coordinator === null) {
+    return { target: userId, acting: null };
+  }
+  const onLogin = userId === admin || userId === coordinator;
+  return onLogin ? { target: admin, acting: coordinator } : { target: userId, acting: null };
+}
+
 /** One sync with resolved dependencies. */
 async function run(
   userId: string,
@@ -216,11 +284,14 @@ async function run(
   deps: TokenRolesDeps,
 ): Promise<TokenRolesOutcome> {
   const start = Date.now();
+  // The account whose Keycloak user is written; differs on a shared login.
+  let target = userId;
   const log = (status: 'success' | 'failure' | 'skipped', extra: Record<string, unknown>) =>
     (status === 'failure' ? logger.warn : logger.info).call(logger, {
       operation: 'rbac.token_roles.sync',
       status,
       user_id: userId,
+      ...(target !== userId ? { login_user_id: target } : {}),
       reason,
       latency_ms: Date.now() - start,
       ...extra,
@@ -232,19 +303,42 @@ async function run(
   };
 
   try {
-    const locked = await deps.withLock(userId, async (): Promise<TokenRolesOutcome> => {
-      const actor = await deps.actorOf(userId);
+    const accounts = await deps.loginAccountsOf(userId);
+    if (!accounts.ok) return await fail('loginAccountsOf', accounts.error);
+    const resolved = syncTarget(userId, accounts.value);
+    target = resolved.target;
+    const acting = resolved.acting;
+    const locked = await deps.withLock(target, async (): Promise<TokenRolesOutcome> => {
+      const actor = await deps.actorOf(target);
       if (!actor.ok) return fail('actorOf', actor.error);
       if (!actor.value) {
         log('skipped', { reasons: ['no_account'] });
         return 'no_login';
       }
-      const roles = tokenRolesOf(actor.value, deps.now());
-      const idp = await deps.idpUserOf(userId, actor.value);
+      const now = deps.now();
+      let roles = tokenRolesOf(actor.value, now);
+      if (acting) {
+        // A removed or inactive coordinator account contributes nothing.
+        const coord = await deps.actorOf(acting);
+        if (!coord.ok) return fail('actorOf', coord.error);
+        const tagged = tokenRolesOf(coord.value, now).map((key) => actingRoleEntry(acting, key));
+        roles = [...roles, ...tagged].sort((a, b) => a.localeCompare(b));
+      }
+      const idp = await deps.idpUserOf(target, actor.value);
       if (!idp.ok) return fail('idpUserOf', idp.error);
       if (!idp.value) {
         log('skipped', { reasons: ['no_login'], roles: roles.length });
         return 'no_login';
+      }
+      if (!acting && actor.value.userType === 'coordinator') {
+        // The user may belong to an owner's login; its attribute then holds
+        // only the admin's keys and tagged entries, never a coordinator's own.
+        const owners = await deps.accountsOfLogin(idp.value);
+        if (!owners.ok) return fail('accountsOfLogin', owners.error);
+        if (owners.value.shared) {
+          log('skipped', { reasons: ['shared_login'], roles: roles.length });
+          return 'no_login';
+        }
       }
       const written = await deps.writeRoles(idp.value, roles.length > 0 ? roles : null);
       if (!written.ok) return fail('writeRoles', written.error);

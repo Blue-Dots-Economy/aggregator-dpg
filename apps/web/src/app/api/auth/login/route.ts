@@ -24,8 +24,8 @@ import {
   signinBrowserCookieOptions,
 } from '@/lib/cookies';
 import { getSessionStore } from '@/lib/session';
+import { safeReturnPath } from '@/lib/return-to';
 import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
-import { isSafeReturnTo } from '@/lib/safe-return';
 
 export const runtime = 'nodejs';
 
@@ -39,7 +39,7 @@ function safeLoginHint(value: string | null): string | null {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const returnTo = isSafeReturnTo(req.nextUrl.searchParams.get('returnTo'));
+  const returnTo = safeReturnPath(req.nextUrl.searchParams.get('returnTo'), '/');
   const loginHint = safeLoginHint(req.nextUrl.searchParams.get('login_hint'));
 
   const state = oidcGenerators.state();

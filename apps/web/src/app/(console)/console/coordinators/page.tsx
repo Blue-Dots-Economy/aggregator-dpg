@@ -6,7 +6,9 @@
  * coordinator belongs to, with its "known as" label when `ORG_KNOWN_AS_ENABLED`
  * is on. With access control on,
  * an Access column shows each coordinator's additional roles. The invite
- * button is hidden from a viewer who cannot invite.
+ * button is hidden from a viewer who cannot invite. An owner without a
+ * coordinator account of their own gets "Add myself to My Team" beside it, and
+ * the owner's own account is tagged "You".
  */
 
 import Link from 'next/link';
@@ -17,9 +19,11 @@ import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-o
 
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
-import { getConsoleActor } from '@/lib/console-actor';
+import { getConsoleActor, type ConsoleActorResult } from '@/lib/console-actor';
 import { isKnownAsEnabled } from '@/lib/known-as-flag';
-import { canInvite, canViewCoordinators } from '@/lib/capabilities';
+import { canInvite, canViewCoordinators, selfAddOrgs } from '@/lib/capabilities';
+import { AddMyselfButton } from '@/components/console/SelfAddDialog';
+import { loadConsentContent } from '@/app/(public)/register/register-server';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { DomainChips } from '@/components/console/DomainChips';
@@ -29,7 +33,12 @@ import { CountTile, type TileTone } from '@/components/console/CountTile';
 import { CoordinatorFilters } from '@/components/console/CoordinatorFilters';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgOptionsInTreeOrder } from '@/lib/console-org-options';
-import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
+import {
+  ConsoleSection,
+  ConsoleStatusPill,
+  EmptyState,
+  YouTag,
+} from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
@@ -110,6 +119,33 @@ function filterChips(
   return chips;
 }
 
+/**
+ * The orgs the viewer owns, what it may do on the page, and which row is theirs.
+ *
+ * @param actor - The viewer, from `read/me`; nothing is offered when it could not be read.
+ * @param hasDomains - Whether the network has domains; without them there are no profile types to offer.
+ */
+function viewerOf(
+  actor: ConsoleActorResult,
+  hasDomains: boolean,
+): {
+  ownedIds: ReadonlySet<string>;
+  showInvite: boolean;
+  addSelfOrgs: Array<{ id: string; name: string }>;
+  ownAccountId: string | null;
+} {
+  if (!actor.ok) {
+    return { ownedIds: new Set(), showInvite: false, addSelfOrgs: [], ownAccountId: null };
+  }
+  return {
+    ownedIds: new Set(actor.me.orgs.map((o) => o.id)),
+    // Same gate the sidebar link used to apply, now checked here instead.
+    showInvite: canInvite(actor.me),
+    addSelfOrgs: hasDomains ? selfAddOrgs(actor.me) : [],
+    ownAccountId: actor.me.own_coordinator_account_id ?? null,
+  };
+}
+
 export default async function ConsoleCoordinatorsPage({
   searchParams,
 }: Readonly<{
@@ -143,15 +179,13 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
+  const { ownedIds, showInvite, addSelfOrgs, ownAccountId } = viewerOf(actor, domains.length > 0);
   // Users are visible only in the orgs the viewer owns, so filters and counts use those.
-  const ownedIds = new Set(actor.ok ? actor.me.orgs.map((o) => o.id) : []);
   const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
   const counts = await countCoordinators(ownOrgs, orgId, serves);
   const knownAs = isKnownAsEnabled();
   const orgOptions = orgOptionsInTreeOrder(ownOrgs, knownAs);
   const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
-  // Same gate the sidebar link used to apply, now checked here instead.
-  const showInvite = actor.ok && canInvite(actor.me);
   const keep = activeFilters(orgId, status, serves);
   const chips = filterChips(t, {
     orgId,
@@ -162,7 +196,10 @@ export default async function ConsoleCoordinatorsPage({
   });
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
-  const catalogue = showAccess ? await consoleReadOptional('/v1/roles', RolesResponseSchema) : null;
+  const [catalogue, consent] = await Promise.all([
+    showAccess ? consoleReadOptional('/v1/roles', RolesResponseSchema) : null,
+    addSelfOrgs.length > 0 ? loadConsentContent() : null,
+  ]);
   const roleNames = Object.fromEntries(
     withRoleDisplayNames(catalogue?.roles ?? [], t('roles.base_role_name')).map((r) => [
       r.key,
@@ -215,6 +252,13 @@ export default async function ConsoleCoordinatorsPage({
                 orgs={orgOptions}
                 domains={domains}
               />
+              {addSelfOrgs.length > 0 ? (
+                <AddMyselfButton
+                  orgs={addSelfOrgs}
+                  domains={domains}
+                  consent={consent?.aggregator ?? null}
+                />
+              ) : null}
               {showInvite ? (
                 <Link className={buttonClass('primary')} href="/console/invite">
                   <I.mail size={14} />
@@ -272,12 +316,15 @@ export default async function ConsoleCoordinatorsPage({
                             {initialsOf(u.contact.name ?? u.contact.email)}
                           </span>
                           <div className="min-w-0">
-                            <Link
-                              className="block truncate font-bold text-ink-900 hover:text-(--bd-primary-600) hover:underline"
-                              href={`/console/coordinators/${u.id}`}
-                            >
-                              {u.contact.name ?? u.contact.email}
-                            </Link>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Link
+                                className="block truncate font-bold text-ink-900 hover:text-(--bd-primary-600) hover:underline"
+                                href={`/console/coordinators/${u.id}`}
+                              >
+                                {u.contact.name ?? u.contact.email}
+                              </Link>
+                              {u.id === ownAccountId ? <YouTag label={t('org_home.you')} /> : null}
+                            </div>
                             {u.contact.name ? (
                               <div className="truncate text-[12.5px] text-ink-500">
                                 {u.contact.email}

@@ -154,6 +154,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/links/voice-bots",
+      "access": {
+        "capability": "profiles.onboard"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/onboarding/by-source",
       "access": {
         "capability": "profiles.view"
@@ -342,6 +349,13 @@
     },
     {
       "method": "POST",
+      "path": "/public/v1/aggregators/:orgSlug/voice-requests/:slug",
+      "access": {
+        "access": "public"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/v1/bulk-uploads",
       "access": {
         "capability": "profiles.onboard"
@@ -521,6 +535,13 @@
           "org.manage",
           "network.administer"
         ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/self/add",
+      "access": {
+        "capability": "org.manage"
       }
     }
   ]

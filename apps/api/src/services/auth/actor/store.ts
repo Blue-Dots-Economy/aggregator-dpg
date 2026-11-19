@@ -11,6 +11,7 @@ import { getIdentityStore } from '../../identity-store/index.js';
 import { getRoleStore } from '../../role-store/index.js';
 import { getRbacRuntime } from '../../authz/runtime.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
+import { logActing, resolveActingAccount } from '../acting.js';
 import {
   ActorResolverBase,
   type Actor,
@@ -22,6 +23,11 @@ import {
 const unavailable = (message: string): ActorResult => ({
   ok: false,
   error: { code: 'UNAVAILABLE', message },
+});
+
+const actingInvalid = (message: string): ActorResult => ({
+  ok: false,
+  error: { code: 'ACTING_ACCOUNT_INVALID', message },
 });
 
 /** The coordinator actor of a stored coordinator row. */
@@ -75,15 +81,38 @@ async function withRoles(actor: Actor): Promise<ActorResult> {
 /** Resolves actors from the application's stores. */
 export class StoreActorResolver extends ActorResolverBase {
   async resolve(input: ResolveActorInput): Promise<ActorResult> {
-    if (input.aggregatorId) return this.claimedCoordinator(input.aggregatorId, input.subject);
+    const actingId = input.actingAccountId?.toLowerCase();
+    if (input.aggregatorId) {
+      if (actingId !== undefined && actingId !== input.aggregatorId.toLowerCase()) {
+        logActing('CLAIM_MISMATCH');
+        return actingInvalid('acting account differs from the aggregator_id claim');
+      }
+      return this.claimedCoordinator(input.aggregatorId, input.subject);
+    }
+    if (actingId !== undefined) return this.actingCoordinator(input.subject, actingId);
 
+    // Without the claim and the header, a login that links an admin account
+    // resolves to the admin; a coordinator-only login to the coordinator.
     const linked = await getIdentityStore().userOf(IDP_PROVIDER, input.subject);
     if (!linked.ok) return unavailable(linked.error.message);
     if (!linked.value) return { ok: true, value: null };
-    const userId = linked.value;
+    return this.byUserId(linked.value);
+  }
 
-    // A coordinator login without the claim is still a coordinator, never an admin.
-    return this.byUserId(userId);
+  /**
+   * Resolves the owner's own coordinator account named by `x-acting-account`,
+   * after the checks of {@link resolveActingAccount}.
+   */
+  private async actingCoordinator(subject: string, accountId: string): Promise<ActorResult> {
+    const acting = await resolveActingAccount(subject, accountId);
+    if (!acting.success) {
+      logActing(acting.error.code);
+      return acting.error.code === 'UNAVAILABLE'
+        ? unavailable(acting.error.message)
+        : actingInvalid(acting.error.message);
+    }
+    logActing(null);
+    return withRoles(coordinatorActor(acting.value));
   }
 
   /**

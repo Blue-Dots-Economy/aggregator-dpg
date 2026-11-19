@@ -12,6 +12,7 @@ export { SENSITIVE, NOT_THROUGH_ROOT, permissionDefinitions } from './catalogue.
 export { BUILTIN_ROLES } from './builtin-roles.js';
 export { evaluate, listCapabilities } from './evaluate.js';
 export { compareCodeUnits } from './order.js';
+export { ACTING_ROLE_PREFIX, actingRoleEntry, parseActingRoleEntry } from './acting.js';
 export { OpaAuthorizer } from './opa/index.js';
 export type { OpaAuthorizerOptions } from './opa/index.js';
 export { InMemoryAuthorizer } from './in-memory/index.js';

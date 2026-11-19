@@ -44,6 +44,8 @@ declare module 'fastify' {
 export interface RouteCaller extends TokenIdentity {
   /** `preferred_username`; `service-account-<client>` for a service account. */
   preferredUsername?: string | undefined;
+  /** An owner acting as its own coordinator account: the login is the owner's. */
+  acting?: boolean | undefined;
 }
 
 /**
@@ -57,6 +59,7 @@ export function callerFromAuth(ctx: AuthContext): RouteCaller {
     ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
     subject: ctx.userId,
     preferredUsername: ctx.preferredUsername,
+    ...(ctx.acting ? { acting: true } : {}),
   };
 }
 
@@ -219,7 +222,8 @@ export function assertRouteDeclared(route: RouteOptions): void {
 export async function recordRouteCaller(req: FastifyRequest, caller: RouteCaller): Promise<void> {
   if (!getRbacRuntime()) return;
   const decl = req.routeOptions.config.rbac;
-  if (!decl || !caller.aggregatorId) return;
+  // An acting owner's login is already linked; it is not the coordinator's own login.
+  if (!decl || !caller.aggregatorId || caller.acting) return;
   // The actor resolver accepts a coordinator only through its recorded login.
   // Best effort; never overwrites a different link.
   if ('access' in decl && decl.access === 'service') return;

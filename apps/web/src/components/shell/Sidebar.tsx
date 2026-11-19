@@ -20,6 +20,63 @@ import {
 } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
+import { actingLeaveHref, CONSOLE_HOME } from '@/lib/acting';
+
+/**
+ * One nav entry's control: a `Link`, a plain `<a>` for a {@link NavItem.fullPage}
+ * item, or a button for a {@link NavItem.onSelect} item.
+ */
+function NavLink({
+  item,
+  children,
+  ...rest
+}: Readonly<{
+  item: NavItem;
+  children: ReactNode;
+  className: string;
+  onClick?: () => void;
+}>) {
+  const { onSelect } = item;
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        className={cn(rest.className, 'w-full text-left')}
+        onClick={() => {
+          rest.onClick?.();
+          onSelect();
+        }}
+      >
+        {children}
+      </button>
+    );
+  }
+  if (item.fullPage) {
+    return (
+      <a href={item.to} {...rest}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={item.to} {...rest}>
+      {children}
+    </Link>
+  );
+}
+
+/** The message under a nav entry, such as why its action failed; nothing without one. */
+function NavAlert({ item }: Readonly<{ item: NavItem }>) {
+  if (!item.alert) return null;
+  return (
+    <p
+      role="alert"
+      className={cn('px-3 pb-1 text-[12px] text-rose-600', item.section !== undefined && 'ml-5')}
+    >
+      {item.alert}
+    </p>
+  );
+}
 
 /** The icon of a group heading, drawn like a link's icon. */
 function SectionIcon({ name }: Readonly<{ name: IconName }>) {
@@ -41,6 +98,24 @@ export interface NavItem {
   section?: string;
   /** Icon of the group heading, on the group's first link. */
   sectionIcon?: IconName;
+  /**
+   * Render a plain anchor (a full page load, no prefetch), for a target that
+   * changes the session on the way, such as a page outside acting mode.
+   */
+  fullPage?: boolean;
+  /**
+   * Run this instead of following `to`, rendered as a button; `to` then only
+   * keys the entry. For an entry that calls a route before it navigates.
+   */
+  onSelect?: () => void;
+  /** A message shown under the entry, such as why its action failed. */
+  alert?: string | null;
+}
+
+/** A link shown above the Overview label, such as "Back to console". */
+export interface SidebarTopLink {
+  href: string;
+  label: string;
 }
 
 /** The account card at the foot of the sidebar. */
@@ -135,6 +210,8 @@ interface SidebarPanelProps {
   /** Show the "Overview" label above the links. */
   overviewLabel: boolean;
   account: SidebarAccount;
+  /** Shown above the Overview label. */
+  topLink?: SidebarTopLink | undefined;
   pathname: string | null;
   /** Rendered beside the brand, such as the drawer's close button on mobile. */
   headerAction?: ReactNode;
@@ -152,6 +229,7 @@ function SidebarPanel({
   nav,
   overviewLabel,
   account,
+  topLink,
   pathname,
   headerAction,
   onNavigate,
@@ -193,6 +271,8 @@ function SidebarPanel({
     };
   }, [detailsOpen]);
 
+  const navigateProps = onNavigate ? { onClick: onNavigate } : {};
+
   return (
     <>
       <div className="px-5 pt-6 pb-5 flex items-start gap-2">
@@ -201,6 +281,18 @@ function SidebarPanel({
       </div>
 
       <div className="px-3">
+        {topLink ? (
+          // A plain anchor: the target is a Route Handler that changes the
+          // session, so it must never be prefetched.
+          <a
+            href={topLink.href}
+            {...navigateProps}
+            className="mb-1 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium text-(--bd-fg-muted) transition-all hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
+          >
+            <I.arrowL size={18} stroke={1.7} />
+            <span>{topLink.label}</span>
+          </a>
+        ) : null}
         {overviewLabel ? (
           <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
             {t('overview')}
@@ -230,9 +322,9 @@ function SidebarPanel({
                   </button>
                 ) : null}
                 {sectionOpen ? (
-                  <Link
-                    href={n.to}
-                    {...(onNavigate ? { onClick: onNavigate } : {})}
+                  <NavLink
+                    item={n}
+                    {...navigateProps}
                     className={cn(
                       'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
                       n.section !== undefined &&
@@ -256,8 +348,9 @@ function SidebarPanel({
                         {n.badge}
                       </span>
                     )}
-                  </Link>
+                  </NavLink>
                 ) : null}
+                {sectionOpen ? <NavAlert item={n} /> : null}
               </Fragment>
             );
           })}
@@ -398,6 +491,8 @@ export interface AppSidebarProps {
   /** Under the brand name when the brand has no logo, e.g. "Aggregator Portal". */
   portalLabel: string;
   account: SidebarAccount;
+  /** A link above the Overview label, such as "Back to console". */
+  topLink?: SidebarTopLink;
 }
 
 /**
@@ -412,7 +507,13 @@ export interface AppSidebarProps {
  *
  * @param props - The links, the label under the brand and the account card.
  */
-export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: AppSidebarProps) {
+export function AppSidebar({
+  nav,
+  overviewLabel = true,
+  portalLabel,
+  account,
+  topLink,
+}: Readonly<AppSidebarProps>) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
@@ -505,6 +606,7 @@ export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: 
           nav={nav}
           overviewLabel={overviewLabel}
           account={account}
+          topLink={topLink}
           pathname={pathname}
           onOpenSupport={openSupport}
         />
@@ -531,6 +633,7 @@ export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: 
               nav={nav}
               overviewLabel={overviewLabel}
               account={account}
+              topLink={topLink}
               pathname={pathname}
               onNavigate={closeMenu}
               onOpenSupport={openSupport}
@@ -561,13 +664,23 @@ function sumTotals(counts: readonly (number | undefined)[]): number | undefined 
   return known.length === 0 ? undefined : known.reduce((a, b) => a + b, 0);
 }
 
+/** Account Details while acting: leaves acting mode for the owner's console profile, since the profile edit is not open to acting mode. */
+const ACTING_PROFILE_HREF = actingLeaveHref('/console/profile');
+
+/** "Back to console": ends acting mode and returns to the console home. */
+const BACK_TO_CONSOLE_HREF = actingLeaveHref(CONSOLE_HOME);
+
 /**
  * The coordinator portal's sidebar: Onboarding (with `profiles.onboard`),
  * Profile and the participant dashboard with its count badge.
+ *
+ * While an org owner acts as their own coordinator account it adds "Back to
+ * console" above Overview, links Account Details to the console profile and
+ * names the account's organisation in the footer.
  */
 export function Sidebar() {
   const t = useTranslations('nav');
-  const { user } = useAuth();
+  const { user, acting, actingOrgName } = useAuth();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // The participant-count badge. `active` is undefined until the profile and
   // network config have loaded, so useDashboard skips the fetch until then.
@@ -596,13 +709,24 @@ export function Sidebar() {
       ...(n.to === '/dashboard' && participantsBadge !== undefined
         ? { badge: participantsBadge }
         : {}),
+      ...(acting && n.to === '/profile' ? { to: ACTING_PROFILE_HREF, fullPage: true } : {}),
     }));
 
   return (
     <AppSidebar
       nav={nav}
       portalLabel={t('portal_label')}
-      account={{ title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }}
+      account={
+        acting
+          ? {
+              title: user?.name ?? '',
+              subtitle: actingOrgName
+                ? t('acting_sublabel', { org: actingOrgName })
+                : t('acting_sublabel_no_org'),
+            }
+          : { title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }
+      }
+      {...(acting ? { topLink: { href: BACK_TO_CONSOLE_HREF, label: t('back_to_console') } } : {})}
     />
   );
 }

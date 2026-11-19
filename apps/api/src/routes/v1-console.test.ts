@@ -21,7 +21,10 @@ import {
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import type { Organisation } from '../services/organisation-store/index.js';
-import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  ACTING_ACCOUNT_HEADER,
+  type KnownAsValues,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -36,6 +39,8 @@ import {
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
 import { err } from '@aggregator-dpg/shared-primitives/result';
+import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
+import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** A store `err` result (the aggregator / org fakes use `{ ok, ... }`). */
@@ -230,10 +235,14 @@ describe('console routes /v1/user, /v1/org', () => {
       [OWNER_A, 'sub-a'],
       [OWNER_B, 'sub-b'],
       [OWNER_P, 'sub-p'],
+    ] as const) {
+      await identities.link(user, 'keycloak', sub, 'admin');
+    }
+    for (const [user, sub] of [
       [C1, 'sub-c1'],
       [C3, 'sub-c3'],
     ] as const) {
-      await identities.link(user, 'keycloak', sub);
+      await identities.link(user, 'keycloak', sub, 'coordinator');
     }
 
     _setUserStore(coordinators);
@@ -339,6 +348,75 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(body.kind).toBe('coordinator');
       expect(body.orgs).toEqual([expect.objectContaining({ id: ORG_A, role: 'member' })]);
       expect(body.user.contact.email).toBe('c3@x.org');
+    });
+
+    it("names an owner's own coordinator account, and resolves to it with the header", async () => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      coordinators.seed([coordinator(C4, ORG_A, 'active', 4)]);
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+
+      const plain = (await get('/v1/user/read/me', 'a')).json() as {
+        kind: string;
+        own_coordinator_account_id?: string | null;
+      };
+      expect(plain.kind).toBe('admin');
+      expect(plain.own_coordinator_account_id).toBe(C4);
+
+      const acting = await app.inject({
+        method: 'GET',
+        url: '/v1/user/read/me',
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C4 },
+      });
+      expect(acting.statusCode).toBe(200);
+      expect(acting.json()).toMatchObject({ kind: 'coordinator', user: { id: C4 } });
+
+      // Console admin routes refuse the acting coordinator, as any coordinator.
+      const admin = await app.inject({
+        method: 'GET',
+        url: `/v1/user/read/${C1}`,
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C4 },
+      });
+      expect(admin.statusCode).toBe(403);
+    });
+
+    it.each([
+      ['an inactive coordinator', 'inactive', 'active'],
+      ['an inactive org', 'active', 'inactive'],
+    ] as const)('gives null own_coordinator_account_id for %s', async (_, status, orgStatus) => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      const ORG_X = '00000000-0000-4000-8000-00000000000d';
+      orgs.seed([
+        buildOrganisation({
+          id: ORG_X,
+          parentId: ROOT,
+          slug: 'org-x',
+          status: orgStatus,
+          ownerUserId: OWNER_A,
+        }),
+      ]);
+      coordinators.seed([coordinator(C4, ORG_X, status, 4)]);
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+      const body = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(body.own_coordinator_account_id).toBeNull();
+    });
+
+    it('gives an owner with no coordinator account a null own_coordinator_account_id', async () => {
+      const body = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(body.own_coordinator_account_id).toBeNull();
+    });
+
+    it('403 ACTING_ACCOUNT_INVALID for a coordinator not linked to the login', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/user/read/me',
+        headers: { ...auth('a'), [ACTING_ACCOUNT_HEADER]: C3 },
+      });
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('ACTING_ACCOUNT_INVALID');
     });
   });
 
@@ -577,6 +655,142 @@ describe('console routes /v1/user, /v1/org', () => {
     it('answers 404 out of reach', async () => {
       const res = await patch(`/v1/user/metadata/update/${C2}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /v1/user/self/add', () => {
+    const OWNER_PHONE = '+919000000199';
+    const consent = {
+      value: true,
+      given_at: '2026-11-19T00:00:00.000Z',
+      valid_till: '2099-01-01T00:00:00.000Z',
+    };
+    const selfAdd = (who: keyof typeof TOKENS, payload: object) =>
+      post('/v1/user/self/add', who, { serves: ['seeker'], consent, ...payload });
+    const codeOf = (res: { json: () => unknown }) =>
+      (res.json() as { error: { code: string } }).error.code;
+    /** Every Keycloak user write a coordinator path could make. */
+    const spyUserWrites = () =>
+      (
+        [
+          'enableUser',
+          'disableUser',
+          'setUserDecision',
+          'setAttributes',
+          'logoutSessions',
+          'createUser',
+        ] as const
+      ).map((m) => vi.spyOn(idp, m));
+
+    beforeEach(async () => {
+      _setConsentLedger(new ConsentLedgerFake());
+      await setOrg(ORG_A, { ownerPhone: OWNER_PHONE, ownerName: 'Alice Owner' });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      _setConsentLedger(null);
+    });
+
+    it('adds the owner as an active coordinator of its org, with no Keycloak write', async () => {
+      const spies = spyUserWrites();
+
+      const res = await selfAdd('a', { org_id: ORG_A });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json() as { id: string; status: string; serves: string[] };
+      expect(body).toMatchObject({ status: 'active', serves: ['seeker'] });
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(await getIdentityStore().accountsOf('keycloak', 'sub-a')).toEqual({
+        ok: true,
+        value: { admin: OWNER_A, coordinator: body.id },
+      });
+      const me = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(me.own_coordinator_account_id).toBe(body.id);
+    });
+
+    it('409 ALREADY_COORDINATOR on a second self-add', async () => {
+      expect((await selfAdd('a', { org_id: ORG_A })).statusCode).toBe(201);
+      const again = await selfAdd('a', { org_id: ORG_A });
+      expect(again.statusCode).toBe(409);
+      expect(codeOf(again)).toBe('ALREADY_COORDINATOR');
+    });
+
+    it('403 NOT_ORG_OWNER for an org the caller does not own', async () => {
+      const res = await selfAdd('a', { org_id: ORG_B });
+      expect(res.statusCode).toBe(403);
+      expect(codeOf(res)).toBe('NOT_ORG_OWNER');
+    });
+
+    it('403 ORG_NOT_ELIGIBLE for the network admin on the Default org', async () => {
+      await setOrg(DEFAULT, { ownerPhone: '+919000000198', status: 'active' });
+      const res = await selfAdd('na', { org_id: DEFAULT });
+      expect(res.statusCode).toBe(403);
+      expect(codeOf(res)).toBe('ORG_NOT_ELIGIBLE');
+    });
+
+    it.each([
+      ['an empty serves', { serves: [] }],
+      ['a domain the network does not have', { serves: ['pilot'] }],
+      ['no consent', { consent: undefined }],
+      [
+        'a consent that already expired',
+        { consent: { ...consent, valid_till: '2020-01-01T00:00:00.000Z' } },
+      ],
+    ])('400 for %s', async (_label, extra) => {
+      const res = await selfAdd('a', { org_id: ORG_A, ...extra });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('400 OWNER_PHONE_REQUIRED when the owner contact has no phone', async () => {
+      await setOrg(ORG_A, { ownerPhone: null });
+      const res = await selfAdd('a', { org_id: ORG_A });
+      expect(res.statusCode).toBe(400);
+      expect(codeOf(res)).toBe('OWNER_PHONE_REQUIRED');
+    });
+
+    it('refuses a coordinator token', async () => {
+      const res = await selfAdd('coord', { org_id: ORG_A });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("changes the self account's profile types without touching the owner's Keycloak user", async () => {
+      const added = (await selfAdd('a', { org_id: ORG_A })).json() as { id: string };
+      const ss = new SignalStackWriterFake();
+      _setSignalStackWriter(ss);
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      const spies = [...spyUserWrites(), vi.spyOn(idp, 'findByAttribute')];
+
+      const res = await patch(`/v1/user/metadata/update/${added.id}`, 'a', {
+        serves: ['seeker', 'provider'],
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { serves: string[] }).serves).toEqual(['seeker', 'provider']);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ external_id: added.id, domains: ['seeker', 'provider'] }),
+      );
+    });
+
+    it("writes Keycloak for a legacy coordinator on the owner's login whose user carries aggregator_id", async () => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      coordinators.seed([{ ...coordinator(C4, ORG_A, 'active', 4), serves: ['provider'] }]);
+      const kc = await idp.createUser({
+        email: 'legacy@x.org',
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 },
+      });
+      if (!kc.ok) throw new Error('seed');
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+      // The owner's login is that Keycloak user: it carries the coordinator's pointer.
+      vi.spyOn(idp, 'findById').mockResolvedValue({ ok: true, value: kc.value });
+      _setSignalStackWriter(new SignalStackWriterFake());
+
+      const res = await patch(`/v1/user/metadata/update/${C4}`, 'a', { serves: ['seeker'] });
+
+      expect(res.statusCode).toBe(200);
+      expect((await kcUserOf(C4)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['seeker']);
     });
   });
 

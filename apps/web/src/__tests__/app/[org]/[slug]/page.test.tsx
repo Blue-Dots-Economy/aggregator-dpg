@@ -29,6 +29,8 @@ const { logError } = vi.hoisted(() => ({ logError: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ logger: { error: logError, warn: vi.fn(), info: vi.fn() } }));
 
 import PublicRegistrationPage from '@/app/[org]/[slug]/page';
+import { PublicRegistrationView } from '@/app/[org]/[slug]/PublicRegistrationView';
+import { VoiceOrFormView } from '@/app/[org]/[slug]/VoiceOrFormView';
 
 const baseResolved = {
   slug: 'winter25',
@@ -300,6 +302,45 @@ describe('PublicRegistrationPage (server component)', () => {
         params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
       });
       expect(el.props.uiSchema).toEqual({});
+    });
+  });
+
+  describe('offers', () => {
+    const bot = { display_name: 'UP Rozgar Sahayak', languages: ['hi'] };
+
+    function mockResolved(body: unknown): void {
+      globalThis.fetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ) as unknown as typeof fetch;
+    }
+
+    it.each([
+      ['no offers field', baseResolved],
+      ["offers ['form']", { ...baseResolved, offers: ['form'], voice_bot: null }],
+      [
+        'voice offered with no bot',
+        { ...baseResolved, offers: ['voice', 'form'], voice_bot: null },
+      ],
+    ])('renders PublicRegistrationView for %s', async (_label, body) => {
+      mockResolved(body);
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.type).toBe(PublicRegistrationView);
+    });
+
+    it('renders VoiceOrFormView with the bot when voice is offered', async () => {
+      mockResolved({ ...baseResolved, offers: ['voice', 'form'], voice_bot: bot });
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.type).toBe(VoiceOrFormView);
+      expect(el.props.voiceBot).toEqual(bot);
+      expect(el.props.domain).toBe('seeker');
     });
   });
 });

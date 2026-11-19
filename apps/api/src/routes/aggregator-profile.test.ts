@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
@@ -9,6 +9,10 @@ import {
   buildOrganisation,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { IdentityStoreFake } from '../services/identity-store/testing.js';
+import { _setIdentityStore } from '../services/identity-store/index.js';
+import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 
 const aggregatorId = '22222222-2222-2222-2222-222222222222';
 
@@ -642,5 +646,126 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+});
+
+describe('aggregator profile routes, owner acting as its coordinator account', () => {
+  const SUB = 'kc-owner-1';
+  const ADMIN = '00000000-0000-4000-8000-0000000000a1';
+  const COORD = '00000000-0000-4000-8000-0000000000c1';
+  const ORG = '00000000-0000-4000-8000-0000000000b1';
+  let app: FastifyInstance;
+  let identities: IdentityStoreFake;
+  let idp: IdpAdminFake;
+
+  beforeEach(async () => {
+    _resetJwks();
+    process.env.KEYCLOAK_URL = 'http://kc.local';
+    process.env.KEYCLOAK_REALM = 'bluedots';
+    identities = new IdentityStoreFake();
+    identities.seed([
+      { userId: COORD, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUB },
+      { userId: ADMIN, userType: 'admin', provider: IDP_PROVIDER, subject: SUB },
+    ]);
+    _setIdentityStore(identities);
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: COORD,
+        status: 'active',
+        parentOrgId: ORG,
+        serves: ['seeker', 'provider'],
+        contact: { name: 'Asha Rao', email: 'owner@example.org', phone: '+919800000000' },
+      }),
+    ]);
+    _setUserStore(users);
+    const orgs = new OrganisationStoreFake();
+    orgs.seed([buildOrganisation({ id: ORG, status: 'active' })]);
+    _setOrganisationStore(orgs);
+    idp = new IdpAdminFake();
+    _setIdpAdmin(idp);
+    // Owner token: no aggregator_id.
+    _setAccessTokenVerifier(async () => ({
+      sub: SUB,
+      email: 'owner@example.org',
+      email_verified: true,
+      given_name: 'Owner',
+      family_name: 'Token',
+      phone_number: '+919811111111',
+    }));
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    _setUserStore(null);
+    _setOrganisationStore(null);
+    _setIdentityStore(null);
+    _setAccessTokenVerifier(null);
+    _setIdpAdmin(null);
+  });
+
+  it('GET returns the coordinator profile with identity from the row', async () => {
+    const findById = vi.spyOn(idp, 'findById');
+    const link = vi.spyOn(identities, 'link');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: COORD },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      aggregator_id: string;
+      serves: string[];
+      identity: Record<string, unknown>;
+    };
+    expect(body.aggregator_id).toBe(COORD);
+    expect(body.serves).toEqual(['seeker', 'provider']);
+    expect(body.identity).toEqual({
+      first_name: 'Asha Rao',
+      last_name: null,
+      email: 'owner@example.org',
+      email_verified: true,
+      phone: '+919800000000',
+      // The token's phone is not the row's.
+      phone_verified: false,
+      active: true,
+    });
+    expect(findById).not.toHaveBeenCalled();
+    expect(link).not.toHaveBeenCalled();
+  });
+
+  it('GET refuses an account this login may not act as', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: {
+        authorization: 'Bearer owner',
+        [ACTING_ACCOUNT_HEADER]: '00000000-0000-4000-8000-0000000000c9',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('ACTING_ACCOUNT_INVALID');
+  });
+
+  it('GET without the header is still refused for an owner token', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('PATCH refuses acting: it writes the login’s Keycloak attributes', async () => {
+    const setAttributes = vi.spyOn(idp, 'setAttributes');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: COORD },
+      payload: { aggregator: { name: 'Renamed' } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(setAttributes).not.toHaveBeenCalled();
   });
 });

@@ -16,6 +16,23 @@ const OutcomeCountsSchema = z.object({
   skipped: z.number(),
 });
 
+/** A voice bot a link can point callers to. */
+export const VoiceBotSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  phone: z.string(),
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+export type VoiceBotOption = z.infer<typeof VoiceBotSchema>;
+
+/** Response of `GET /api/links/voice-bots`. */
+export const ListVoiceBotsResponseSchema = z.object({
+  voice_bots: z.array(VoiceBotSchema),
+  default_voice_bot_key: z.string().nullable(),
+});
+export type ListVoiceBotsResponse = z.infer<typeof ListVoiceBotsResponseSchema>;
+
 export const ApiRegistrationLinkSchema = z.object({
   link_id: z.string(),
   slug: z.string(),
@@ -26,6 +43,10 @@ export const ApiRegistrationLinkSchema = z.object({
    * immutable. The network config maps modes to form shapes.
    */
   registration_mode: z.string().optional(),
+  /** Key of the voice bot the link points to. Absent in older API responses. */
+  voice_bot_key: z.string().nullable().optional(),
+  /** The voice bot's details, `null` when the link has none. Absent in older API responses. */
+  voice_bot: VoiceBotSchema.nullable().optional(),
   context: z.record(z.string(), z.unknown()),
   expires_at: z.string().nullable(),
   /** Set only while the link is live; `null` for drafts and retired links. */
@@ -60,6 +81,8 @@ export interface CreateLinkInput {
    * the network config. Defaults to `form`. Immutable after creation.
    */
   registration_mode?: string;
+  /** Key of the voice bot the link points to, checked by the API against the domain's list. */
+  voice_bot_key?: string;
   expires_at?: string | null;
 }
 
@@ -239,6 +262,11 @@ export const onboardingService = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+
+  async listVoiceBots(domain: string): Promise<ListVoiceBotsResponse> {
+    const params = new URLSearchParams({ domain });
+    return jsonFetch(withQuery('/api/links/voice-bots', params), ListVoiceBotsResponseSchema);
   },
 
   async updateLink(id: string, patch: UpdateLinkInput): Promise<ApiRegistrationLink> {

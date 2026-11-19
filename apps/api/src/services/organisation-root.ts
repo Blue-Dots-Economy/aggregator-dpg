@@ -12,7 +12,11 @@
  * - Default owner ← `DEFAULT_ORG_OWNER_EMAIL`, else the root's owner.
  *
  * A configured owner who is a coordinator, or a Default owner who already
- * owns another org, is refused: logged, and the current owner kept.
+ * owns another org, is refused: logged, and the current owner kept. A login
+ * may hold one admin and one coordinator account, but the root and Default
+ * owners never hold a coordinator account.
+ * In the IdP, an existing user that carries an `aggregator_id` (a coordinator
+ * login) is not granted owner access: logged, and nothing linked or enabled.
  *
  * Then, best-effort, it mirrors both orgs and their owners into the IdP (a
  * group per org, a user per owner) and gives owners sign-in access (enabled,
@@ -65,11 +69,6 @@ export interface RootOrgState {
   ownerEmail: string;
   /** The owner's recorded IdP subject, if any. */
   ownerSubject: string | null;
-  /**
-   * Whether the owner also has a coordinator account. If so, the IdP user
-   * belongs to that login and is not linked to the admin account.
-   */
-  ownerIsCoordinator: boolean;
 }
 
 /** An owner replaced by the reconcile: removed from the org's group. */
@@ -198,11 +197,8 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
     org_owner: string;
     email: string;
     subject: string | null;
-    is_coordinator: boolean;
   }>(sql`
-    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject,
-           EXISTS (SELECT 1 FROM users x
-                    WHERE x.contact_id = u.contact_id AND x.user_type = 'coordinator') AS is_coordinator
+    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject
       FROM organisations o
       JOIN users u ON u.id = o.org_owner
       JOIN contact c ON c.id = u.contact_id
@@ -219,7 +215,6 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
         ownerUserId: r.org_owner,
         ownerEmail: r.email,
         ownerSubject: r.subject,
-        ownerIsCoordinator: Boolean(r.is_coordinator),
       }
     : null;
 }
@@ -520,24 +515,11 @@ async function removeReplacedOwners(
 /**
  * The org owner's IdP subject: the recorded one, else the existing user for
  * the owner's email, else a new disabled user, linked to the owner's admin
- * account. `null` for the placeholder owner, an owner who is a coordinator,
- * or on failure.
+ * account. `null` for the placeholder owner or on failure.
  */
 async function ownerSubject(ctx: MirrorContext, org: RootOrgState): Promise<string | null> {
   if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) return null;
   if (org.ownerSubject) return org.ownerSubject;
-  // If the owner is also a coordinator, do not link that IdP user to the admin account.
-  if (org.ownerIsCoordinator) {
-    logger.warn(
-      {
-        operation: 'ensureRootOrganisation.idp',
-        status: 'skipped',
-        reason: 'owner_is_coordinator',
-      },
-      'the configured owner also holds a coordinator account — no admin IdP user is linked',
-    );
-    return null;
-  }
   const subject = await findOrCreateOwner(ctx, org.ownerEmail);
   if (!subject) return null;
   if (!(await ctx.recorder.linkSubject(org.ownerUserId, subject))) {
@@ -555,6 +537,18 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
     return null;
   }
   if (existing.value) {
+    const aggregatorId = existing.value.attributes?.[KC_ATTR.AGGREGATOR_ID] ?? [];
+    if (aggregatorId.some((v) => v !== '')) {
+      logger.warn(
+        {
+          operation: 'ensureRootOrganisation.idp',
+          status: 'skipped',
+          reason: 'owner_is_coordinator_login',
+        },
+        'the configured owner address is a coordinator login in the IdP — no owner access granted',
+      );
+      return null;
+    }
     ctx.report.usersReused += 1;
     return existing.value.id;
   }

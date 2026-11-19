@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
+import { ActingBanner } from '@/components/shell/ActingBanner';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useActiveDomain } from '../../../hooks/useActiveDomain';
@@ -34,6 +35,7 @@ export default function OnboardingPage() {
           </button>
         }
       />
+      <ActingBanner />
       <DomainAccessGate>
         <ActiveDomainTabs className="-mt-2 mb-3" />
         {/* Onboarding summary and joins by entry mode. */}

@@ -21,6 +21,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
@@ -674,6 +675,7 @@ function toResponse(
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
   if (!result.ok) {
+    throwIfActingError(result.error);
     if (result.error.code === 'NOT_APPROVED') {
       throw httpError('NOT_APPROVED', { detail: result.error.message });
     }

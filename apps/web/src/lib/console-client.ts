@@ -8,13 +8,16 @@
  */
 
 import {
+  UserSchema,
+  type SelfAddRequest,
+  type User,
   KnownAsValuesSchema,
   OrgKnownAsUpdateResponseSchema,
   type KnownAsValuesRequest,
   type OrgKnownAsUpdateRequest,
   type OrgKnownAsUpdateResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { type z } from 'zod';
+import { z } from 'zod';
 import { readErrorEnvelope, type ErrorEnvelope } from './api-error';
 import { parseResponseBody, ResponseShapeError } from './response-shape-error';
 
@@ -140,6 +143,10 @@ const CODE_KEYS: Readonly<Record<string, string>> = {
   ORG_CHILD_LIMIT: 'errors.child_limit',
   ORG_TOTAL_LIMIT: 'errors.total_limit',
   ORG_PARENT_CYCLE: 'errors.parent_cycle',
+  ALREADY_COORDINATOR: 'errors.already_coordinator',
+  ORG_NOT_ELIGIBLE: 'errors.org_not_eligible',
+  NOT_ORG_OWNER: 'errors.not_org_owner',
+  OWNER_PHONE_REQUIRED: 'errors.owner_phone_required',
 };
 
 /** Message keys for error codes that name the cause in `fields`, as `[field, value, key]`. */
@@ -228,4 +235,32 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
   const byField = FIELD_KEYS[code]?.find(([field, value]) => fields[field] === value);
   if (byField) return byField[2];
   return statusKey(r.status);
+}
+
+/**
+ * Adds the signed-in owner's own coordinator account to an organisation they own.
+ *
+ * @param body - Organisation, profile types and the stamped consent.
+ * @returns The outcome, with the new account on success.
+ */
+export function addMyself(body: SelfAddRequest): Promise<ConsoleSendResult<User>> {
+  return sendConsole('/api/console/user/self-add', 'POST', UserSchema, body);
+}
+
+/** The reply to starting acting mode: where the owner works next. */
+const ActingStartResponseSchema = z.object({ redirect: z.string() });
+
+/** The BFF's `409` code while the owner's token does not yet carry the account's roles. */
+export const ACTING_NOT_READY = 'ACTING_NOT_READY';
+
+/**
+ * Starts acting as the owner's own coordinator account (`POST /api/auth/acting`).
+ *
+ * @param accountId - The owner's own coordinator account, from `read/me`.
+ * @returns The outcome, with the page to open on success.
+ */
+export function startActing(
+  accountId: string,
+): Promise<ConsoleSendResult<z.infer<typeof ActingStartResponseSchema>>> {
+  return sendConsole('/api/auth/acting', 'POST', ActingStartResponseSchema, { accountId });
 }
