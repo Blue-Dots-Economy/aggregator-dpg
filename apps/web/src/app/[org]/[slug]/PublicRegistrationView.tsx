@@ -20,7 +20,12 @@ import type { ResolvedPlace } from '../../../components/forms/custom-widgets/Loc
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { registrationShowsConsent, domainRequiresBirthYear } from '../../../lib/registration-gates';
+import {
+  registrationShowsConsent,
+  domainRequiresBirthYear,
+  isMinorBirthYear,
+  isValidBirthYear,
+} from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
 import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
@@ -70,6 +75,13 @@ export interface PublicRegistrationViewProps {
    * statement. `null` when unavailable.
    */
   consentContent?: ParticipantConsent | null;
+  /** Open on the form instead of the Register / Sign in chooser. Defaults to false. */
+  startWithForm?: boolean;
+  /**
+   * Called by the form's Back control in place of returning to the chooser.
+   * When set, the Back control is always shown on the form.
+   */
+  onBack?: () => void;
 }
 
 type SubmitState =
@@ -246,6 +258,8 @@ export function PublicRegistrationView({
   publicHintI18nKey,
   registrationMode,
   consentContent = null,
+  startWithForm = false,
+  onBack,
 }: PublicRegistrationViewProps): JSX.Element {
   const t = useTranslations('profile.public_reg');
   const tRequest = useTranslations('form.request_error');
@@ -258,7 +272,7 @@ export function PublicRegistrationView({
    * a route change, because printed QR codes encode `/<org>/<slug>` exactly.
    * Not used when the Signals hand-off is not configured.
    */
-  const [formRevealed, setFormRevealed] = useState(false);
+  const [formRevealed, setFormRevealed] = useState(startWithForm);
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   // Post-submit hand-off. `null` means no countdown is running.
   const [handoff, setHandoff] = useState<SignalsHandoff | null>(null);
@@ -293,11 +307,8 @@ export function PublicRegistrationView({
   // Signalstack app.
   const [yearOfBirth, setYearOfBirth] = useState('');
   const currentYear = new Date().getFullYear();
-  const yobNum = Number(yearOfBirth.trim());
-  const yobValid =
-    /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
-  const isMinor = yobValid && derivedAge <= 18;
+  const yobValid = isValidBirthYear(yearOfBirth, currentYear);
+  const isMinor = isMinorBirthYear(yearOfBirth, currentYear);
   const yobFe = useHandFieldErrors<'year_of_birth'>('public-reg', {
     year_of_birth: yobValid
       ? null
@@ -769,12 +780,7 @@ export function PublicRegistrationView({
     // from this component's state (full-profile form).
     const yobRaw = values['year_of_birth'];
     const yobForSubmit = typeof yobRaw === 'string' ? yobRaw : yearOfBirth;
-    const yobNumForSubmit = Number(yobForSubmit.trim());
-    const yobValidForSubmit =
-      /^\d{4}$/.test(yobForSubmit.trim()) &&
-      yobNumForSubmit >= currentYear - 120 &&
-      yobNumForSubmit <= currentYear;
-    const isMinorForSubmit = yobValidForSubmit && currentYear - yobNumForSubmit <= 18;
+    const isMinorForSubmit = isMinorBirthYear(yobForSubmit, currentYear);
     // Open the consent gate unless the registrant is a minor, the domain has
     // no consent step, or consent was already accepted this session.
     const needsConsentNow = showConsent && !isMinorForSubmit && !consentAccepted;
@@ -875,12 +881,12 @@ export function PublicRegistrationView({
     </div>
   ) : null;
 
-  // Lets the user go back from the form to the chooser.
+  // Lets the user go back from the form to the chooser, or to the caller's screen.
   const backToChooser =
-    signalsHandoffUrl && formRevealed ? (
+    onBack || (signalsHandoffUrl && formRevealed) ? (
       <button
         type="button"
-        onClick={() => setFormRevealed(false)}
+        onClick={onBack ?? (() => setFormRevealed(false))}
         className="mb-4 inline-flex items-center gap-1 text-[13px] font-semibold text-ink-500 hover:text-ink-700"
       >
         <I.arrowL size={14} />
