@@ -58,9 +58,13 @@ import {
 } from './interface.js';
 import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { isProvisioned } from '../provisioned.js';
+import { ACCEPTED_CONSENT_SOURCES } from '../consent-sources.js';
 
-/** Ledger sources that record a registration consent (the others are attestations). */
-const REGISTRATION_CONSENT_SOURCES = sql`('registration', 'registration-backfill')`;
+/** Ledger sources that record an acceptance (bulk-upload attestations are not). One list, shared with the consent status read. */
+const REGISTRATION_CONSENT_SOURCES = sql`(${sql.join(
+  ACCEPTED_CONSENT_SOURCES.map((source) => sql`${source}`),
+  sql`, `,
+)})`;
 
 /** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
 class ConsentHookError extends Error {

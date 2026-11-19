@@ -1103,6 +1103,20 @@ describe('PostgresUserStore — consent in the create transaction (0029)', () =>
     expect(found.ok && found.value?.consent).toBeNull();
   });
 
+  it('counts a first-login acceptance as the profile consent source', async () => {
+    let selected: { consent: SQL } | undefined;
+    const db = makeFakeDb((chain) => {
+      selected = callArgs(chain, 'select')?.[0] as { consent: SQL } | undefined;
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    await new PostgresUserStore().findById('agg-1');
+    const query = new PgDialect().sqlToQuery(selected!.consent);
+    expect(query.params).toEqual(
+      expect.arrayContaining(['registration', 'registration-backfill', 'first-login']),
+    );
+  });
+
   it('derives type and actorType from serves', async () => {
     const db = makeFakeDb(() => [makeRow({ serves: ['provider'] })]);
     _setDbClients(null, db as never);

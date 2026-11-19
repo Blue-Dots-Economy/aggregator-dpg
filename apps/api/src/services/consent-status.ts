@@ -15,6 +15,7 @@ import { ok, err, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { getDb } from '../db/client.js';
 import { consentRecord } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { ACCEPTED_CONSENT_SOURCES } from './consent-sources.js';
 import type { Actor } from './auth/actor/index.js';
 
 /** The consent audience whose document versions apply: coordinators or org owners. */
@@ -36,16 +37,7 @@ export interface ConsentStatus {
   outstandingOrgIds: string[];
 }
 
-/**
- * Ledger sources that record an acceptance of the terms.
- *
- * Bulk-upload attestations (`bulk_upload:<id>:v<n>`) are not an acceptance.
- */
-export const ACCEPTED_CONSENT_SOURCES = [
-  'registration',
-  'registration-backfill',
-  'first-login',
-] as const;
+export { ACCEPTED_CONSENT_SOURCES };
 
 /** Current terms and privacy versions of one audience. */
 interface AudienceVersions {
