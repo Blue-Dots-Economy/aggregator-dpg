@@ -58,14 +58,10 @@ const USAGE = [
 /** How often the upload status is read while waiting. */
 const POLL_INTERVAL_MS = 5_000;
 
-/** How long to wait for processing; a large file can take tens of minutes. */
-const POLL_TIMEOUT_MS = 60 * 60 * 1000;
-
-/** Upper bound on any single storage, database or queue call, so a hung call cannot stall the run. */
-const CALL_TIMEOUT_MS = 30_000;
-
+/** A user id or upload id; any other `--coordinator` value is looked up as an email. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Upload statuses the worker never leaves; waiting stops at one of them. */
 const TERMINAL: ReadonlySet<BulkUploadStatus> = new Set(['completed', 'failed', 'file_failed']);
 
 /** A refusal. Printed as `REFUSED: …` with exit code 1. */
@@ -472,13 +468,15 @@ if (isEntry()) {
     csvOut: process.stdout,
     stdin: process.stdin,
     pollIntervalMs: POLL_INTERVAL_MS,
-    pollTimeoutMs: POLL_TIMEOUT_MS,
-    callTimeoutMs: CALL_TIMEOUT_MS,
+    pollTimeoutMs: config.BULK_UPLOAD_CMD_WAIT_MS,
+    callTimeoutMs: config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   });
-  await withTimeout(closeAll(), CALL_TIMEOUT_MS, 'shutdown').catch((err: unknown) => {
-    logger.warn({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
-  });
+  await withTimeout(closeAll(), config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS, 'shutdown').catch(
+    (err: unknown) => {
+      logger.warn({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
+    },
+  );
   // A call that timed out may still hold a connection open.
   process.exit(code);
 }
