@@ -165,6 +165,26 @@ suite('typed identity links (migration 0040) — integration', () => {
     await userStore.deleteById(coord.id);
   });
 
+  it('fills user_type from the account when an insert leaves it out', async () => {
+    const { coord, org, adminId } = await adminAndCoordinator();
+    const sub = randomUUID();
+    // The insert of an API image that predates the column.
+    await pool.query(
+      `INSERT INTO user_identities (user_id, provider, subject) VALUES ($1, 'keycloak', $2), ($3, 'keycloak', $2)`,
+      [adminId, sub, coord.id],
+    );
+    const rows = await pool.query(
+      `SELECT user_id, user_type FROM user_identities WHERE subject = $1 ORDER BY user_type`,
+      [sub],
+    );
+    expect(rows.rows).toEqual([
+      { user_id: adminId, user_type: 'admin' },
+      { user_id: coord.id, user_type: 'coordinator' },
+    ]);
+    await userStore.deleteById(coord.id);
+    await orgStore.deleteById(org.id);
+  });
+
   it('keeps user_type equal to the account type (composite FK)', async () => {
     const coord = await newCoordinator();
     await expect(

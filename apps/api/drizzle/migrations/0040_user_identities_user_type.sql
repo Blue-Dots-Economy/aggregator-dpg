@@ -5,12 +5,18 @@
 --   so an admin and a coordinator may share one Keycloak login while two
 --   accounts of the same type may not.
 -- * `users (id, user_type)` is unique so the composite FK has a target.
+-- * A `BEFORE INSERT` trigger fills `user_type` from `users` when an insert
+--   leaves it NULL, so pods running an image without the column, and an
+--   image rollback, keep recording logins.
 -- The primary key `(user_id, provider)` is unchanged: one login per provider
 -- per account. Existing rows keep their meaning; the new unique is looser than
 -- the old one, so no existing row can violate it.
--- Rollback: drop the composite FK and the new unique, re-add
--- `user_identities_provider_subject_unique`, drop `user_identities.user_type`
--- and `users_id_type_unique` (only valid while no login is shared).
+-- Rollback: an image rollback alone needs no schema change (the trigger fills
+-- `user_type`). A schema rollback drops the trigger
+-- `user_identities_set_user_type` and its function, the composite FK and the
+-- new unique, re-adds `user_identities_provider_subject_unique`, and drops
+-- `user_identities.user_type` and `users_id_type_unique` (only valid while no
+-- login is shared).
 
 SELECT set_config('aggregator_dpg.prev_lock_timeout', current_setting('lock_timeout'), true),
        set_config('aggregator_dpg.prev_statement_timeout', current_setting('statement_timeout'), true);
@@ -69,6 +75,24 @@ BEGIN
       FOREIGN KEY (user_id, user_type) REFERENCES users (id, user_type) ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- 4. Fill user_type on inserts that leave it out (older images). A BEFORE
+--    trigger runs before the NOT NULL check.
+CREATE OR REPLACE FUNCTION user_identities_set_user_type() RETURNS trigger
+  LANGUAGE plpgsql AS
+$fn$
+BEGIN
+  IF NEW.user_type IS NULL THEN
+    SELECT u.user_type INTO NEW.user_type FROM users u WHERE u.id = NEW.user_id;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+DROP TRIGGER IF EXISTS user_identities_set_user_type ON user_identities;
+CREATE TRIGGER user_identities_set_user_type
+  BEFORE INSERT ON user_identities
+  FOR EACH ROW EXECUTE FUNCTION user_identities_set_user_type();
 
 -- Leave the transaction as the role that started it (drizzle writes its
 -- metadata right after this file).
