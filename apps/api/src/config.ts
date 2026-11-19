@@ -130,6 +130,29 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(10 * 1024 * 1024),
+  /**
+   * Upper bound (ms) on each storage, database or queue call made by the
+   * bulk-upload operator command, so a hung call cannot stall the run.
+   * Capped at 10 minutes: a call slower than that is hung, and the value goes
+   * to `setTimeout`, which fires at once above 2^31-1 ms.
+   */
+  BULK_UPLOAD_CMD_CALL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(10 * 60 * 1000)
+    .default(30_000),
+  /**
+   * How long (ms) the bulk-upload operator command waits for an upload to
+   * finish processing; a large file can take tens of minutes. Capped at one
+   * day: a longer wait is better done later with `--upload-id`.
+   */
+  BULK_UPLOAD_CMD_WAIT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(24 * 60 * 60 * 1000)
+    .default(60 * 60 * 1000),
 
   // ─── Registration links ─────────────────────────────────────────────────
   /**

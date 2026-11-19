@@ -19,6 +19,8 @@ import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let connection: Redis | null = null;
 let fileProcessQueue: Queue<BulkFileProcessJob> | null = null;
+/** Replaces the BullMQ enqueue in tests; `null` uses the queue. */
+let enqueueOverride: ((payload: BulkFileProcessJob) => Promise<void>) | null = null;
 
 function getConnection(): Redis {
   if (connection) return connection;
@@ -47,6 +49,7 @@ function getFileProcessQueue(): Queue<BulkFileProcessJob> {
  * Idempotent: `jobId = uploadId`, so a second enqueue for the same upload does nothing.
  */
 export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promise<void> {
+  if (enqueueOverride) return enqueueOverride(payload);
   const start = Date.now();
   try {
     await getFileProcessQueue().add(QueueName.BulkFileProcess, payload, {
@@ -79,6 +82,13 @@ export async function closeBulkQueue(): Promise<void> {
   await connection?.quit().catch(() => undefined);
   fileProcessQueue = null;
   connection = null;
+}
+
+/** Test helper — replace the enqueue with `fn`; `null` restores the queue. */
+export function _setBulkFileEnqueuer(
+  fn: ((payload: BulkFileProcessJob) => Promise<void>) | null,
+): void {
+  enqueueOverride = fn;
 }
 
 /** Test-only — disconnect and clear cached singletons. */

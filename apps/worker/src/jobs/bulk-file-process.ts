@@ -23,7 +23,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
-import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import { bulkHeaderColumns } from '@aggregator-dpg/shared-primitives/bulk-columns';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 export type { FileFailureReason };
@@ -119,9 +119,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     return { status: 'failed', reason: 'system_error' };
   }
 
-  const required = extractRequiredFields(schemaResult.value);
-  // Well-known columns are allowed but never required.
-  const allowed = new Set([...extractAllProperties(schemaResult.value), ...WELL_KNOWN_COLUMNS]);
+  const { required, allowed } = bulkHeaderColumns(schemaResult.value);
   const parsed = await streamCsvParse(stream, {
     required,
     allowed,
@@ -233,15 +231,4 @@ async function markStatus(
       updatedAt: new Date(),
     })
     .where(eq(schema.bulkUploads.id, uploadId));
-}
-
-function extractRequiredFields(s: Record<string, unknown>): string[] {
-  const required = s['required'];
-  return Array.isArray(required) ? required.filter((x): x is string => typeof x === 'string') : [];
-}
-
-function extractAllProperties(s: Record<string, unknown>): string[] {
-  const props = s['properties'];
-  if (!props || typeof props !== 'object') return [];
-  return Object.keys(props);
 }

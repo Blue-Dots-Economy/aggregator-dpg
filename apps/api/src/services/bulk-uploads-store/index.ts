@@ -30,4 +30,6 @@ export type {
   StoreError,
   StoreResult,
 } from './interface.js';
+export { InMemoryBulkUploadsStore } from './memory.js';
 export { PostgresBulkUploadsStore } from './postgres.js';
+export { BulkUploadsStoreFake, buildBulkUpload } from './testing.js';

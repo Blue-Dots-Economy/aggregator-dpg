@@ -20,7 +20,7 @@ import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/error
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { logger } from '../logger.js';
-import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
+import { CSV_FIELD_DELIMITER } from '@aggregator-dpg/shared-primitives/bulk-columns';
 import {
   FIX_ADVICE_COLUMN,
   SURPLUS_CELLS_ADVICE,
