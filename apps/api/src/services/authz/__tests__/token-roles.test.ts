@@ -2,13 +2,14 @@
  * Unit tests for keeping the token's `roles` claim in step with the database
  * (`@aggregator-dpg/api`; docs/rbac/rbac-edge-enforcement.md §3.2).
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { buildAdminActor, type Actor, type ActorResult } from '../../auth/actor/index.js';
 import { _setIdpAdmin } from '../../idp-admin/index.js';
 import { IdpAdminFake } from '../../idp-admin/testing.js';
 import { _setIdentityStore } from '../../identity-store/index.js';
 import { IdentityStoreFake, buildIdentity } from '../../identity-store/testing.js';
+import { logger } from '../../../logger.js';
 import { _setRbacRuntime } from '../runtime.js';
 import { shippedRoleIndex } from '../testing.js';
 import {
@@ -38,6 +39,7 @@ function fakeDeps(actor: ActorResult, over: Partial<TokenRolesDeps> = {}) {
   const deps: TokenRolesDeps = {
     actorOf: async () => actor,
     loginAccountsOf: async () => ({ ok: true, value: { admin: null, coordinator: null } }),
+    accountsOfLogin: async () => ({ ok: true, value: { admin: null, coordinator: null } }),
     idpUserOf: async () => ({ ok: true, value: 'kc-1' }),
     writeRoles: async (idp, roles) => {
       writes.push({ idp, roles });
@@ -313,6 +315,56 @@ describe('syncTokenRoles on a shared login', () => {
   });
 });
 
+describe('syncTokenRoles for a coordinator outside a shared login', () => {
+  it('never writes untagged coordinator roles to a Keycloak user that also holds an admin account', async () => {
+    const info = vi.spyOn(logger, 'info');
+    const { deps, writes } = fakeDeps(
+      { ok: true, value: coordinator() },
+      {
+        // The coordinator has no recorded login; the user found for it is shared.
+        idpUserOf: async () => ({ ok: true, value: 'kc-shared' }),
+        accountsOfLogin: async () => ({ ok: true, value: { admin: 'a1', coordinator: null } }),
+      },
+    );
+    expect(await syncTokenRoles('c1', 'test', deps)).toBe('no_login');
+    expect(writes).toEqual([]);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'skipped', reasons: ['shared_login'] }),
+    );
+  });
+
+  it('marks the user for the sweep when the login check fails', async () => {
+    const { deps, writes, dirty } = fakeDeps(
+      { ok: true, value: coordinator() },
+      {
+        accountsOfLogin: async () => ({
+          ok: false,
+          error: { code: 'UNAVAILABLE', message: 'db down' },
+        }),
+      },
+    );
+    expect(await syncTokenRoles('c1', 'test', deps)).toBe('failed');
+    expect(writes).toEqual([]);
+    expect(dirty).toEqual(['c1']);
+  });
+
+  it('does not check an admin account', async () => {
+    let checked = false;
+    const { deps, writes } = fakeDeps(
+      { ok: true, value: buildAdminActor({ userId: 'a1' }) },
+      {
+        accountsOfLogin: async () => {
+          checked = true;
+          return { ok: true, value: { admin: 'a1', coordinator: null } };
+        },
+      },
+    );
+    expect(await syncTokenRoles('a1', 'test', deps)).toBe('synced');
+    expect(checked).toBe(false);
+    expect(writes).toHaveLength(1);
+  });
+});
+
 describe('the default dependencies', () => {
   async function kcUser(idp: IdpAdminFake, aggregatorId?: string): Promise<string> {
     const created = await idp.createUser({
@@ -360,6 +412,16 @@ describe('the default dependencies', () => {
     const shared = { ok: true, value: { admin: 'a1', coordinator: 'c1' } };
     expect(await deps.loginAccountsOf('c1')).toEqual(shared);
     expect(await deps.loginAccountsOf('a1')).toEqual(shared);
+  });
+
+  it("lists the accounts on a Keycloak user's login", async () => {
+    const store = new IdentityStoreFake();
+    store.seed([buildIdentity({ userId: 'a1', subject: 'kc-s' })]);
+    _setIdentityStore(store);
+    expect(await defaultTokenRolesDeps().accountsOfLogin('kc-s')).toEqual({
+      ok: true,
+      value: { admin: 'a1', coordinator: null },
+    });
   });
 
   it('lists no accounts for an account with no recorded login', async () => {

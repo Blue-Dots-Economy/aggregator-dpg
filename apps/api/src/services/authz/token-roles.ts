@@ -13,7 +13,9 @@
  * Keycloak user) has one attribute for two accounts. The admin account owns
  * it: a sync of either account writes the admin's role keys plus the
  * coordinator's as `acting:<coordinatorId>:<roleKey>` entries, under the
- * admin account's lock.
+ * admin account's lock. A coordinator sync that is not on such a login but
+ * finds a Keycloak user holding an admin account is skipped (logged), so a
+ * coordinator's untagged keys never reach an owner's login.
  *
  * Runs only with `RBAC_MODE` other than `off`. Never throws and never
  * fails the request that triggered it: a failure is logged and the user is
@@ -63,6 +65,15 @@ export interface TokenRolesDeps {
    */
   loginAccountsOf(
     userId: string,
+  ): Promise<
+    { ok: true; value: { admin: string | null; coordinator: string | null } } | DepFailure
+  >;
+  /**
+   * The admin and coordinator accounts recorded for a Keycloak user (its
+   * `sub`); both null when none is.
+   */
+  accountsOfLogin(
+    idpUserId: string,
   ): Promise<
     { ok: true; value: { admin: string | null; coordinator: string | null } } | DepFailure
   >;
@@ -130,6 +141,11 @@ export function defaultTokenRolesDeps(): TokenRolesDeps {
       if (!linked.ok) return { ok: false, error: linked.error };
       if (!linked.value) return { ok: true, value: { admin: null, coordinator: null } };
       const accounts = await store.accountsOf(IDP_PROVIDER, linked.value);
+      if (!accounts.ok) return { ok: false, error: accounts.error };
+      return { ok: true, value: accounts.value };
+    },
+    async accountsOfLogin(idpUserId) {
+      const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, idpUserId);
       if (!accounts.ok) return { ok: false, error: accounts.error };
       return { ok: true, value: accounts.value };
     },
@@ -300,6 +316,16 @@ async function run(
       if (!idp.value) {
         log('skipped', { reasons: ['no_login'], roles: roles.length });
         return 'no_login';
+      }
+      if (!acting && actor.value.userType === 'coordinator') {
+        // The user may belong to an owner's login; its attribute then holds
+        // only the admin's keys and tagged entries, never a coordinator's own.
+        const owners = await deps.accountsOfLogin(idp.value);
+        if (!owners.ok) return fail('accountsOfLogin', owners.error);
+        if (owners.value.admin !== null) {
+          log('skipped', { reasons: ['shared_login'], roles: roles.length });
+          return 'no_login';
+        }
       }
       const written = await deps.writeRoles(idp.value, roles.length > 0 ? roles : null);
       if (!written.ok) return fail('writeRoles', written.error);
