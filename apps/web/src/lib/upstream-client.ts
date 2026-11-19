@@ -67,7 +67,7 @@ export interface UpstreamCallOptions {
  */
 export async function callApi(path: string, opts: UpstreamCallOptions = {}): Promise<Response> {
   // While the terms are outstanding only the terms, actor and support calls
-  // go upstream; the API also refuses gated calls on its own.
+  // go upstream. The API has no terms check; this is the only block.
   const session = await getSession();
   if (session?.termsStatus === 'outstanding' && !isTermsAllowedApiPath(path)) {
     return Response.json(

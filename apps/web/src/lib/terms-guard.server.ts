@@ -21,8 +21,8 @@ export { TERMS_ALLOWED_API_PATHS, isTermsAllowedApiPath } from './terms-status.s
 /**
  * Redirects to the terms page when the signed-in user still has to accept the terms.
  *
- * Fails open: when the status cannot be read the page loads, and the API
- * still refuses gated calls. Never redirects from the terms page itself.
+ * Fails open: when the status cannot be read the page loads and the
+ * session is not marked outstanding, so `callApi` does not block it. Never redirects from the terms page itself.
  *
  * @param path - The current page path with its query, used as `returnTo`.
  * @throws {Error} Next.js's redirect signal when the terms are outstanding.

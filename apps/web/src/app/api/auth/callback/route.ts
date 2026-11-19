@@ -134,7 +134,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return failure(req, reason);
   }
 
-  // A failed check (`unknown`) lets the user in; the API still refuses gated calls.
+  // A failed check (`unknown`) lets the user in and the session is not marked outstanding, so `callApi` does not block it.
   const { status: termsStatus } = await fetchTermsStatus(tokens.accessToken, log);
 
   const now = Date.now();

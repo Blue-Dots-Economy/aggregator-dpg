@@ -683,7 +683,7 @@
     "cap_profile": "Profile"
   },
   "accept_terms": {
-    "title": "Review the updated terms",
+    "title": "Review the terms",
     "intro": "Before you continue, read and accept the current Terms of Service and Privacy Policy.",
     "agree_label": "I have read and accept the Privacy Policy and Terms of Service.",
     "log_out": "Log out",

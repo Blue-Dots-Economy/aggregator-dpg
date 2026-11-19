@@ -204,6 +204,7 @@ describe('AcceptTermsPage (server component)', () => {
 describe('AcceptTermsView', () => {
   const fetchMock = vi.fn();
   const assign = vi.fn();
+  const reload = vi.fn();
   const originalLocation = window.location;
 
   beforeEach(() => {
@@ -211,7 +212,7 @@ describe('AcceptTermsView', () => {
     vi.stubGlobal('fetch', fetchMock);
     Object.defineProperty(window, 'location', {
       configurable: true,
-      value: { ...originalLocation, assign },
+      value: { ...originalLocation, assign, reload },
     });
   });
   afterEach(() => {
@@ -261,6 +262,8 @@ describe('AcceptTermsView', () => {
     expect(await screen.findByText(messages.accept_terms.failed)).toBeInTheDocument();
     expect(screen.queryByTestId('gate')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: messages.accept_terms.log_out })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: messages.accept_terms.reload }));
+    expect(reload).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
   });

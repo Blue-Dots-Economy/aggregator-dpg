@@ -17,7 +17,7 @@ export const ACCEPT_TERMS_PATH = '/accept-terms';
  *
  * Short on purpose: it sits on the sign-in path, and a slow or down API
  * must not hold the login. On timeout the status is `unknown` and the user
- * gets in; the API still refuses gated calls until the terms are accepted.
+ * gets in. Only a session marked `outstanding` is blocked, by the BFF `callApi` check; the API has no terms check of its own.
  */
 export const TERMS_STATUS_TIMEOUT_MS = 5_000;
 

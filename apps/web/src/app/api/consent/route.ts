@@ -26,6 +26,12 @@ const ConsentBodySchema = z
   })
   .strict();
 
+/**
+ * Records the caller's acceptance of the current terms and privacy policy.
+ *
+ * @param req - Same-origin JSON request with `terms_version` and `privacy_version`.
+ * @returns The API's answer passed through; 400 for a malformed body, 403 for a cross-site request.
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const refused = rejectCrossSite(req);
   if (refused) return refused;

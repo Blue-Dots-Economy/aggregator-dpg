@@ -33,7 +33,7 @@ const LOGOUT_PATH = '/api/auth/logout';
  *
  * On accept it posts the versions to `/api/consent`. 200 opens `returnTo`;
  * 409 says the terms changed and reloads the server page for the new text;
- * any other answer shows a failure with only the log-out link.
+ * any other answer shows a failure with a reload button and the log-out link.
  *
  * @param props - Documents, their versions, and where to go next.
  * @returns The page body.
@@ -102,12 +102,16 @@ export function AcceptTermsView({
     );
   } else if (outcome === 'failed') {
     body = (
-      <p
-        role="alert"
-        className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
-      >
-        {t('failed')}
-      </p>
+      <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4">
+        <p className="text-sm text-red-700">{t('failed')}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-3 rounded-lg bg-(--bd-primary-600) px-4 py-2 text-sm font-semibold text-white"
+        >
+          {t('reload')}
+        </button>
+      </div>
     );
   } else {
     body = (
