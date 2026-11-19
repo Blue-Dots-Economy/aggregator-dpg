@@ -9,7 +9,7 @@
 import type { FastifyRequest } from 'fastify';
 import { authenticateAny, type AnyAuthContext } from '../access-token.js';
 import { httpError } from '../../../errors/http-error.js';
-import { logActing, readActingHeader } from '../acting.js';
+import { ACTING_INVALID_DETAIL, logActing, readActingHeader } from '../acting.js';
 import { getActorResolver } from './resolver.js';
 import type { Actor } from './interface.js';
 
@@ -61,7 +61,7 @@ export async function requireActor(
   const acting = readActingHeader(req);
   if (acting.kind === 'malformed') {
     logActing('MALFORMED');
-    throw httpError('ACTING_ACCOUNT_INVALID');
+    throw httpError('ACTING_ACCOUNT_INVALID', { detail: ACTING_INVALID_DETAIL });
   }
 
   const resolved = await getActorResolver().resolve({
@@ -71,7 +71,7 @@ export async function requireActor(
   });
   if (!resolved.ok) {
     if (resolved.error.code === 'ACTING_ACCOUNT_INVALID') {
-      throw httpError('ACTING_ACCOUNT_INVALID', { detail: resolved.error.message });
+      throw httpError('ACTING_ACCOUNT_INVALID', { detail: ACTING_INVALID_DETAIL });
     }
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(resolved.error.message),

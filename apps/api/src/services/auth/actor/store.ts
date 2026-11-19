@@ -81,16 +81,15 @@ async function withRoles(actor: Actor): Promise<ActorResult> {
 /** Resolves actors from the application's stores. */
 export class StoreActorResolver extends ActorResolverBase {
   async resolve(input: ResolveActorInput): Promise<ActorResult> {
+    const actingId = input.actingAccountId?.toLowerCase();
     if (input.aggregatorId) {
-      if (input.actingAccountId !== undefined && input.actingAccountId !== input.aggregatorId) {
+      if (actingId !== undefined && actingId !== input.aggregatorId.toLowerCase()) {
         logActing('CLAIM_MISMATCH');
         return actingInvalid('acting account differs from the aggregator_id claim');
       }
       return this.claimedCoordinator(input.aggregatorId, input.subject);
     }
-    if (input.actingAccountId !== undefined) {
-      return this.actingCoordinator(input.subject, input.actingAccountId);
-    }
+    if (actingId !== undefined) return this.actingCoordinator(input.subject, actingId);
 
     // Without the claim and the header, a login that links an admin account
     // resolves to the admin; a coordinator-only login to the coordinator.

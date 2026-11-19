@@ -373,6 +373,29 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(admin.statusCode).toBe(403);
     });
 
+    it.each([
+      ['an inactive coordinator', 'inactive', 'active'],
+      ['an inactive org', 'active', 'inactive'],
+    ] as const)('gives null own_coordinator_account_id for %s', async (_, status, orgStatus) => {
+      const C4 = '00000000-0000-4000-8000-0000000000c4';
+      const ORG_X = '00000000-0000-4000-8000-00000000000d';
+      orgs.seed([
+        buildOrganisation({
+          id: ORG_X,
+          parentId: ROOT,
+          slug: 'org-x',
+          status: orgStatus,
+          ownerUserId: OWNER_A,
+        }),
+      ]);
+      coordinators.seed([coordinator(C4, ORG_X, status, 4)]);
+      await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
+      const body = (await get('/v1/user/read/me', 'a')).json() as {
+        own_coordinator_account_id?: string | null;
+      };
+      expect(body.own_coordinator_account_id).toBeNull();
+    });
+
     it('gives an owner with no coordinator account a null own_coordinator_account_id', async () => {
       const body = (await get('/v1/user/read/me', 'a')).json() as {
         own_coordinator_account_id?: string | null;

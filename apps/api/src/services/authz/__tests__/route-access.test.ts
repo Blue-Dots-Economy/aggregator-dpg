@@ -147,6 +147,15 @@ describe('recordRouteCaller', () => {
     expect(await linked('c-3')).toBeNull();
   });
 
+  it('records nothing for an owner acting as its coordinator account', async () => {
+    setup('enforce');
+    await recordRouteCaller(req({ capability: 'profiles.view' }).r, {
+      ...caller('c-5'),
+      acting: true,
+    });
+    expect(await linked('c-5')).toBeNull();
+  });
+
   it('does nothing when RBAC is off', async () => {
     await recordRouteCaller(req({ capability: 'profiles.view' }).r, caller('c-4'));
     expect(await linked('c-4')).toBeNull();

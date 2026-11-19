@@ -75,10 +75,17 @@ export type ActingHeader =
 const AccountIdSchema = z.guid();
 
 /**
+ * The detail of every `403 ACTING_ACCOUNT_INVALID`. The reason is logged
+ * (`auth.acting`), never returned.
+ */
+export const ACTING_INVALID_DETAIL = 'acting account not usable';
+
+/**
  * Reads the `x-acting-account` header once.
  *
  * A repeated header, an empty value or a value that is not a guid is
- * `malformed`; callers refuse it with `403 ACTING_ACCOUNT_INVALID`.
+ * `malformed`; callers refuse it with `403 ACTING_ACCOUNT_INVALID`. The id is
+ * returned lower-cased, the form account ids are stored in.
  *
  * @param req - The request.
  * @returns The header state.
@@ -87,7 +94,9 @@ export function readActingHeader(req: FastifyRequest): ActingHeader {
   const raw = req.headers[ACTING_ACCOUNT_HEADER];
   if (raw === undefined) return { kind: 'absent' };
   const parsed = AccountIdSchema.safeParse(raw);
-  return parsed.success ? { kind: 'account', id: parsed.data } : { kind: 'malformed' };
+  return parsed.success
+    ? { kind: 'account', id: parsed.data.toLowerCase() }
+    : { kind: 'malformed' };
 }
 
 /**
@@ -111,7 +120,7 @@ export function logActing(code: ActingError['code'] | 'MALFORMED' | 'CLAIM_MISMA
  */
 export function throwIfActingError(error: AuthError): void {
   if (error.code === 'ACTING_ACCOUNT_INVALID') {
-    throw httpError('ACTING_ACCOUNT_INVALID', { detail: error.message });
+    throw httpError('ACTING_ACCOUNT_INVALID', { detail: ACTING_INVALID_DETAIL });
   }
   if (error.code === 'ACTING_UNAVAILABLE') {
     throw httpError('DB_UNAVAILABLE', {

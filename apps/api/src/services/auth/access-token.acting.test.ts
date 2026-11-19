@@ -62,7 +62,13 @@ describe('requireApproved acting as an owner coordinator account', () => {
   let idp: IdpAdminFake;
   let writer: SignalStackWriterFake;
 
-  function seed(opts: { signalstackOrgId?: string | null; status?: 'active' | 'inactive' } = {}) {
+  function seed(
+    opts: {
+      signalstackOrgId?: string | null;
+      status?: 'active' | 'inactive';
+      orgStatus?: 'active' | 'inactive';
+    } = {},
+  ) {
     identities.seed([
       { userId: COORD, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUB },
       { userId: ADMIN, userType: 'admin', provider: IDP_PROVIDER, subject: SUB },
@@ -77,7 +83,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
           opts.signalstackOrgId === undefined ? 'org_from_row' : opts.signalstackOrgId,
       }),
     ]);
-    orgs.seed([buildOrganisation({ id: ORG, status: 'active' })]);
+    orgs.seed([buildOrganisation({ id: ORG, status: opts.orgStatus ?? 'active' })]);
   }
 
   beforeEach(() => {
@@ -126,6 +132,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
       lastName: 'Rao',
       phoneNumber: '+919800000000',
       azp: 'aggregator-portal',
+      acting: true,
     });
     expect(setAttributes).not.toHaveBeenCalled();
     expect(link).not.toHaveBeenCalled();
@@ -142,6 +149,18 @@ describe('requireApproved acting as an owner coordinator account', () => {
     seed({ status: 'inactive' });
     const r = await requireApproved(makeReq(OWNER_CLAIMS, COORD));
     expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+  });
+
+  it('(b) 403 ACTING_ACCOUNT_INVALID when the coordinator org is inactive', async () => {
+    seed({ orgStatus: 'inactive' });
+    const r = await requireApproved(makeReq(OWNER_CLAIMS, COORD));
+    expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+  });
+
+  it('accepts an upper-case header for a linked account', async () => {
+    seed();
+    const r = await requireApproved(makeReq(OWNER_CLAIMS, COORD.toUpperCase()));
+    expect(r.ok && r.context.aggregatorId).toBe(COORD);
   });
 
   it('(b) 403 ACTING_ACCOUNT_INVALID for a malformed header value', async () => {
@@ -199,7 +218,22 @@ describe('requireApproved acting as an owner coordinator account', () => {
     };
     const r = await requireApproved(makeReq(claims, COORD));
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.context.signalstackOrgId).toBe('org_x');
+    if (r.ok) {
+      expect(r.context.signalstackOrgId).toBe('org_x');
+      expect(r.context.acting).toBeUndefined();
+    }
+  });
+
+  it('(d) an upper-case header equal to a lower-case claim is accepted', async () => {
+    seed();
+    const claims = {
+      sub: SUB,
+      aggregator_id: COORD,
+      decision_made: 'approved',
+      signalstack_org_id: 'org_x',
+    };
+    const r = await requireApproved(makeReq(claims, COORD.toUpperCase()));
+    expect(r.ok).toBe(true);
   });
 
   it('(e) MISSING_AGGREGATOR_ID with no claim and no header', async () => {

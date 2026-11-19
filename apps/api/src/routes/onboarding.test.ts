@@ -405,7 +405,9 @@ describe('onboarding routes', () => {
         headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: AGG_A },
       });
       expect(res.statusCode).toBe(403);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('ACTING_ACCOUNT_INVALID');
+      expect(res.json()).toMatchObject({
+        error: { code: 'ACTING_ACCOUNT_INVALID', detail: 'acting account not usable' },
+      });
       expect(lastWhereCondition).toBeUndefined();
     });
   });

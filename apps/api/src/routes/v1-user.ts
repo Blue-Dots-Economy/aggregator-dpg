@@ -62,6 +62,7 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 import { getIdentityStore } from '../services/identity-store/index.js';
+import { resolveActingAccount } from '../services/auth/acting.js';
 import { KC_ATTR } from '../services/idp-admin/attributes.js';
 import {
   decodeUserCursor,
@@ -304,10 +305,30 @@ async function liveRolesOf(rows: readonly Coordinator[]): Promise<Map<string, st
 }
 
 /**
+ * The admin's own coordinator account, when the login may act as it now.
+ *
+ * @param subject - The token `sub`.
+ * @param coordinatorId - The coordinator linked to the same login, or null.
+ * @returns The id when acting would be accepted, else `null`.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function usableOwnCoordinator(
+  subject: string,
+  coordinatorId: string | null,
+): Promise<string | null> {
+  if (coordinatorId === null) return null;
+  const acting = await resolveActingAccount(subject, coordinatorId);
+  if (acting.success) return acting.value.id;
+  if (acting.error.code === 'UNAVAILABLE') dbDown('resolveActingAccount', acting.error.message);
+  return null;
+}
+
+/**
  * Builds the `read/me` answer for an actor.
  *
  * For an admin, `own_coordinator_account_id` is the coordinator account
- * linked to the same login, or `null`.
+ * linked to the same login when the login may act as it (active, in an
+ * active org), else `null`.
  *
  * @param subject - The token `sub`.
  * @throws {HttpError} DB_UNAVAILABLE.
@@ -381,7 +402,7 @@ async function meOf(
   if (actor.userType === 'admin') {
     const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, subject);
     if (!accounts.ok) dbDown('identityStore.accountsOf', accounts.error.message);
-    me.own_coordinator_account_id = accounts.value.coordinator;
+    me.own_coordinator_account_id = await usableOwnCoordinator(subject, accounts.value.coordinator);
   }
   return me;
 }

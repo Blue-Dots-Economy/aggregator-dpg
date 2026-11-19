@@ -60,6 +60,12 @@ export interface AuthContext {
    * log's actor client.
    */
   azp?: string;
+  /**
+   * Set when an org owner acts as its own coordinator account
+   * (`x-acting-account`). The login is the owner's, so nothing records it
+   * as the coordinator's login.
+   */
+  acting?: true;
 }
 
 export type AuthError =
@@ -279,6 +285,7 @@ async function actingContext(
     serves: row.serves,
     decisionMade: decisionOf(row.status),
     ...identityOf(payload),
+    acting: true,
   };
   if (row.signalstackOrgId) ctx.signalstackOrgId = row.signalstackOrgId;
   return { ok: true, context: ctx };
@@ -324,7 +331,7 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
     }
     return result;
   }
-  if (acting.kind === 'account' && acting.id !== claimed) {
+  if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
     logActing('CLAIM_MISMATCH');
     return actingInvalid('x-acting-account differs from the token aggregator_id');
   }

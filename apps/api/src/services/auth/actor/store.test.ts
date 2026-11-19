@@ -286,12 +286,15 @@ describe('StoreActorResolver', () => {
     const ORG_ID = '33333333-3333-4333-8333-333333333333';
     const OTHER_ID = '44444444-4444-4444-8444-444444444444';
 
-    function seedShared(): void {
+    /** A coordinator id with hex letters, so its case matters. */
+    const HEX_ID = 'abcdef00-0000-4000-8000-0000000000cd';
+
+    function seedShared(coordId = COORD_ID): void {
       identity.seed([
-        { userId: COORD_ID, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUBJECT },
+        { userId: coordId, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUBJECT },
         { userId: ADMIN_ID, userType: 'admin', provider: IDP_PROVIDER, subject: SUBJECT },
       ]);
-      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active', parentOrgId: ORG_ID })]);
+      coordStore.seed([buildCoordinator({ id: coordId, status: 'active', parentOrgId: ORG_ID })]);
       orgStore.seed([
         buildOrganisation({ id: ORG_ID, slug: 'o', ownerUserId: ADMIN_ID, status: 'active' }),
       ]);
@@ -337,6 +340,25 @@ describe('StoreActorResolver', () => {
         actingAccountId: OTHER_ID,
       });
       expect(r).toMatchObject({ ok: false, error: { code: 'ACTING_ACCOUNT_INVALID' } });
+    });
+
+    it('accepts a header equal to the claim in another case', async () => {
+      seedShared(HEX_ID);
+      const r = await resolver.resolve({
+        aggregatorId: HEX_ID,
+        subject: SUBJECT,
+        actingAccountId: HEX_ID.toUpperCase(),
+      });
+      expect(r.ok && r.value?.userId).toBe(HEX_ID);
+    });
+
+    it('resolves an upper-case acting account id', async () => {
+      seedShared(HEX_ID);
+      const r = await resolver.resolve({
+        subject: SUBJECT,
+        actingAccountId: HEX_ID.toUpperCase(),
+      });
+      expect(r.ok && r.value?.userId).toBe(HEX_ID);
     });
 
     it('reports UNAVAILABLE when the acting lookup fails', async () => {

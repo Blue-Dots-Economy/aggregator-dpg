@@ -154,9 +154,11 @@ describe('requireActor', () => {
         ok: false,
         error: { code: 'ACTING_ACCOUNT_INVALID', message: 'not linked' },
       });
-      await expectHttp(
-        requireActor(reqActing(ACTING), { allowCoordinator: true }),
-        'ACTING_ACCOUNT_INVALID',
+      await expect(requireActor(reqActing(ACTING), { allowCoordinator: true })).rejects.toSatisfy(
+        (e) =>
+          e instanceof HttpError &&
+          e.code === 'ACTING_ACCOUNT_INVALID' &&
+          e.message === 'acting account not usable',
       );
     });
   });
