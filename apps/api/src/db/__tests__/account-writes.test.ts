@@ -26,8 +26,9 @@ interface Script {
   selects?: Array<Array<Record<string, unknown>>>;
 }
 
-function fakeDb(script: Script): { db: DbExecutor; sql: string[] } {
+function fakeDb(script: Script): { db: DbExecutor; sql: string[]; params: unknown[][] } {
   const sql: string[] = [];
+  const params: unknown[][] = [];
   const executes = [...script.executes];
   const selects = [...(script.selects ?? [])];
   const chain = (rows: unknown): Promise<unknown> => {
@@ -39,22 +40,31 @@ function fakeDb(script: Script): { db: DbExecutor; sql: string[] } {
   };
   const db = {
     execute: (q: SQL) => {
-      sql.push(dialect.sqlToQuery(q).sql);
+      const query = dialect.sqlToQuery(q);
+      sql.push(query.sql);
+      params.push(query.params);
       return Promise.resolve({ rows: executes.shift() ?? [] });
     },
     select: () => chain(selects.shift() ?? []),
   };
-  return { db: db as unknown as DbExecutor, sql };
+  return { db: db as unknown as DbExecutor, sql, params };
 }
 
 describe('linkAdminAccount', () => {
   it('inserts an identity-only admin row with explicit NULLs and holds it', async () => {
-    const { db, sql } = fakeDb({ executes: [[], [{ id: 'admin-1' }]] });
+    const { db, sql, params } = fakeDb({ executes: [[], [{ id: 'admin-1' }]] });
     await expect(linkAdminAccount(db, 'c1')).resolves.toBe('admin-1');
     expect(sql[0]).toMatch(/INSERT INTO users/);
-    expect(sql[0]).toMatch(/'admin', \$1, NULL, NULL, 'self'/);
+    expect(sql[0]).toMatch(/'admin', \$1, NULL, NULL, \$2, \$3/);
+    expect(params[0]).toEqual(['c1', 'self', 'self']);
     expect(sql[0]).toMatch(/ON CONFLICT \(contact_id, user_type\) DO NOTHING/);
     expect(sql[1]).toMatch(/FOR KEY SHARE/);
+  });
+
+  it('stamps a new account with the given creator', async () => {
+    const { db, params } = fakeDb({ executes: [[], [{ id: 'admin-1' }]] });
+    await linkAdminAccount(db, 'c1', 'provisioned:ops');
+    expect(params[0]).toEqual(['c1', 'provisioned:ops', 'provisioned:ops']);
   });
 
   it('re-creates and re-holds the account when it vanished before the hold', async () => {
