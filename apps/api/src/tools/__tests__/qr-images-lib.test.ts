@@ -49,12 +49,28 @@ describe('renderQrImages', () => {
     expect([...bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
   });
 
+  it('keeps both images when two rows sanitise to the same name', async () => {
+    const clash = [
+      HEADER,
+      '2,a.b@x.org,seeker,,camp,https://h/r/o/camp,created,',
+      '3,a-b@x.org,seeker,,camp,https://h/r/o/camp2,created,',
+    ].join('\n');
+    expect(await renderQrImages(clash, dir)).toEqual({ written: 2, skipped: 0 });
+    expect((await readdir(dir)).sort()).toEqual(['a-b-seeker-camp-3.png', 'a-b-seeker-camp.png']);
+  });
+
+  it('never starts a file name with a dash', () => {
+    expect(qrFileName({ coordinatorEmail: '+x@x.org', profileType: 'seeker', slug: '-c' })).toBe(
+      'x-seeker--c.png',
+    );
+  });
+
   it('reads the real slug and email behind a formula-neutralising quote', async () => {
     const neutralised = [HEADER, "2,'+91x@x.org,seeker,,'-camp,https://h/r/o/-camp,created,"].join(
       '\n',
     );
     const result = await renderQrImages(neutralised, dir);
     expect(result.written).toBe(1);
-    expect(await readdir(dir)).toEqual(['-91x-seeker--camp.png']);
+    expect(await readdir(dir)).toEqual(['91x-seeker--camp.png']);
   });
 });

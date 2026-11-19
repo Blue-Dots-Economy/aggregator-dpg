@@ -23,7 +23,8 @@ function unneutralise(cell: string): string {
 
 /**
  * The image file name: `<email local part>-<profile_type>-<slug>.png`,
- * lowercase, every character outside `[a-z0-9-]` replaced with `-`.
+ * lowercase, every character outside `[a-z0-9-]` replaced with `-`, and no
+ * leading `-`.
  */
 export function qrFileName(row: {
   coordinatorEmail: string;
@@ -32,7 +33,7 @@ export function qrFileName(row: {
 }): string {
   const local = row.coordinatorEmail.split('@')[0] ?? '';
   const stem = `${local}-${row.profileType}-${row.slug}`.toLowerCase();
-  return `${stem.replaceAll(/[^a-z0-9-]/g, '-')}.png`;
+  return `${stem.replaceAll(/[^a-z0-9-]/g, '-').replace(/^-+/, '')}.png`;
 }
 
 /**
@@ -49,6 +50,7 @@ export async function renderQrImages(
 ): Promise<{ written: number; skipped: number }> {
   const { records } = parseFile(csvText);
   await mkdir(outDir, { recursive: true });
+  const used = new Set<string>();
   let written = 0;
   let skipped = 0;
   for (const { line, cells } of records) {
@@ -59,11 +61,14 @@ export async function renderQrImages(
     }
     const url = cells['url'];
     if (!url) throw new Error(`line ${line}: a ${outcome} row has no url`);
-    const name = qrFileName({
+    let name = qrFileName({
       coordinatorEmail: unneutralise(cells['coordinator_email'] ?? ''),
       profileType: cells['profile_type'] ?? '',
       slug: unneutralise(cells['slug'] ?? ''),
     });
+    // Two rows can sanitise to one name; the later gets its sheet line so no image is lost.
+    if (used.has(name)) name = `${name.slice(0, -'.png'.length)}-${line}.png`;
+    used.add(name);
     await writeFile(join(outDir, name), await QRCode.toBuffer(url, QR_OPTIONS));
     written += 1;
   }
