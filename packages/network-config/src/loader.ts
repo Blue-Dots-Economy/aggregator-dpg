@@ -494,6 +494,31 @@ function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkCo
   return warnings;
 }
 
+/**
+ * Finds the first voice-bot setting that names a domain the network lacks.
+ *
+ * @param yaml - The validated aggregator config.
+ * @param domainIds - Domain ids of the fetched network.
+ * @returns An error message naming `voice_bots` and the domain, or `null` when all exist.
+ */
+function unknownVoiceBotDomain(
+  yaml: AggregatorYaml,
+  domainIds: ReadonlySet<string>,
+): string | null {
+  for (const bot of yaml.aggregator.voice_bots) {
+    const missing = bot.domains.find((id) => !domainIds.has(id));
+    if (missing) {
+      return `voice_bots '${bot.key}' serves domain '${missing}', which the network does not define`;
+    }
+  }
+  for (const domain of Object.keys(yaml.aggregator.default_voice_bots ?? {})) {
+    if (!domainIds.has(domain)) {
+      return `default_voice_bots names domain '${domain}', which the network does not define (voice_bots)`;
+    }
+  }
+  return null;
+}
+
 function resolveDomains(
   yaml: AggregatorYaml,
   { network, warnings }: CheckedNetwork,
@@ -541,6 +566,11 @@ function resolveDomains(
       ...(d.status_rules !== undefined ? { statusRules: d.status_rules } : {}),
     };
     order.push(d.id);
+  }
+
+  const unknownDomain = unknownVoiceBotDomain(yaml, new Set(order));
+  if (unknownDomain) {
+    return err({ code: 'DOMAIN_RESOLUTION_FAILED', message: unknownDomain });
   }
 
   return ok({

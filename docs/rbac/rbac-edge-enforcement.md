@@ -4,7 +4,7 @@
 
 Move permission enforcement out of the API process and in front of it: an Envoy sidecar asks OPA whether the caller holds the route's permission, and a refused request never reaches the API. The API keeps only the checks that need the target record or the response (reach, list filtering, contact masking). Builds on a roles claim in the access token (section 3.2) and on the current design ([rbac-design-aggregator.md](rbac-design-aggregator.md)).
 
-Status: proposal. Describes the code at `06668001` (`feat/871-rbac-catalogue-view`).
+Status: live. Phases 0 to 3 (section 6) are done: the edge is the only place route permissions are enforced, and the API's route-level check (`route-access.ts`) decides nothing.
 
 ---
 
@@ -83,15 +83,29 @@ Decisions E1 and E5: the edge reads the caller's roles from a claim in the acces
 "roles": ["network_admin", "org_admin"]
 ```
 
-| In the claim     | Rule                                                                                                                                                                                    | Today's equivalent                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Base roles       | Only for active memberships: an approved coordinator holds `coordinator`, the owner of an active aggregator organisation holds `org_admin`, the owner of the root holds `network_admin` | The actor resolver (`apps/api/src/services/auth/actor/store.ts:40`, `:107`) |
-| Additional roles | Unrevoked and unexpired `user_role` rows                                                                                                                                                | `roleStore.listLive`                                                        |
-| Not in the claim | Organisation ids, permissions, names, contact data                                                                                                                                      | —                                                                           |
+A login that holds both an owner account and its own coordinator account (one Keycloak user, two `users` rows) also carries that coordinator account's roles, tagged with its id:
+
+```json
+"roles": ["org_admin", "acting:<coordinator users.id>:coordinator"]
+```
+
+| In the claim     | Rule                                                                                                                                                                                                                                                      | Today's equivalent                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Base roles       | Only for active memberships: an approved coordinator holds `coordinator`, the owner of an active aggregator organisation holds `org_admin`, the owner of the root holds `network_admin`                                                                   | The actor resolver (`apps/api/src/services/auth/actor/store.ts:40`, `:107`) |
+| Additional roles | Unrevoked and unexpired `user_role` rows                                                                                                                                                                                                                  | `roleStore.listLive`                                                        |
+| Acting entries   | `acting:<coordinator users.id>:<roleKey>`, one per effective role of the coordinator account linked to the same login. Counted only with a matching `x-acting-account` header (below). The prefix is `ACTING_ROLE_PREFIX` (`packages/rbac/src/acting.ts`) | —                                                                           |
+| Not in the claim | Organisation ids, permissions, names, contact data                                                                                                                                                                                                        | —                                                                           |
 
 Because base roles are listed only for active memberships, a token with at least one role belongs to an active account. The claim is top-level `roles`, separate from Keycloak's own `realm_access.roles` (realm roles such as `org_owner`, read by the web app at `apps/web/src/lib/jwt.ts:60-62`).
 
 The claim is coarse by design: it says the user holds a role somewhere, never where. Nothing may use it for a per-organisation decision; those stay in the API (section 4). For example, the network admin's claim holds `org_admin` (it owns the Default organisation), so it passes the edge on `org.manage` routes; the API then answers 404 for coordinators of other organisations, as it does today.
+
+**Acting account.** An org owner can act as its own coordinator account: the web BFF sends the owner's token with `x-acting-account: <coordinator users.id>`. The edge (`policy/rbac/edge.rego`, rule `roles`) decides with these roles:
+
+- Without the header: only the plain role keys. An `acting:` entry never grants anything, so the owner console is unchanged.
+- With the header (lowercased, as the API compares it): only the entries `acting:<header value>:<roleKey>`, read as `<roleKey>`. The owner's own roles do not count, so a console-only route such as `org.manage` is refused. No matching entry means no roles: a capability route is refused and a `signed_in` route too.
+
+So an owner acting as its coordinator account gets exactly that account's permissions, `profiles.view_pii` included (the owner role lacks it), and nothing else. The header alone grants nothing: the API still checks that the account is the coordinator linked to the same login, that the login also holds an owner account, and that the coordinator and its org are active (`apps/api/src/services/auth/acting.ts`). For a shared login the owner account writes the Keycloak `roles` attribute: the sync (`token-roles.ts`) writes the owner's roles plus the coordinator account's tagged ones, and drops them when the coordinator account is deactivated. The policy ships in the API image and the `edge-init` container copies it into OPA, so no infra change is needed; the edge applies only with `rbac.mode` set to `log` or `enforce`.
 
 **How it gets into the token.** The same pattern as `decision_made` and `signalstack_org_id`:
 

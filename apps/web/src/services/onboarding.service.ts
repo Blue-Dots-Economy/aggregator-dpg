@@ -16,6 +16,23 @@ const OutcomeCountsSchema = z.object({
   skipped: z.number(),
 });
 
+/** A voice bot a link can point callers to. */
+export const VoiceBotSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  phone: z.string(),
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+export type VoiceBotOption = z.infer<typeof VoiceBotSchema>;
+
+/** Response of `GET /api/links/voice-bots`. */
+export const ListVoiceBotsResponseSchema = z.object({
+  voice_bots: z.array(VoiceBotSchema),
+  default_voice_bot_key: z.string().nullable(),
+});
+export type ListVoiceBotsResponse = z.infer<typeof ListVoiceBotsResponseSchema>;
+
 export const ApiRegistrationLinkSchema = z.object({
   link_id: z.string(),
   slug: z.string(),
@@ -26,6 +43,10 @@ export const ApiRegistrationLinkSchema = z.object({
    * immutable. The network config maps modes to form shapes.
    */
   registration_mode: z.string().optional(),
+  /** Key of the voice bot the link points to. Absent in older API responses. */
+  voice_bot_key: z.string().nullable().optional(),
+  /** The voice bot's details, `null` when the link has none. Absent in older API responses. */
+  voice_bot: VoiceBotSchema.nullable().optional(),
   context: z.record(z.string(), z.unknown()),
   expires_at: z.string().nullable(),
   /** Set only while the link is live; `null` for drafts and retired links. */
@@ -60,6 +81,8 @@ export interface CreateLinkInput {
    * the network config. Defaults to `form`. Immutable after creation.
    */
   registration_mode?: string;
+  /** Key of the voice bot the link points to, checked by the API against the domain's list. */
+  voice_bot_key?: string;
   expires_at?: string | null;
 }
 
@@ -241,6 +264,11 @@ export const onboardingService = {
     });
   },
 
+  async listVoiceBots(domain: string): Promise<ListVoiceBotsResponse> {
+    const params = new URLSearchParams({ domain });
+    return jsonFetch(withQuery('/api/links/voice-bots', params), ListVoiceBotsResponseSchema);
+  },
+
   async updateLink(id: string, patch: UpdateLinkInput): Promise<ApiRegistrationLink> {
     return jsonFetch(`/api/links/${encodeURIComponent(id)}`, ApiRegistrationLinkSchema, {
       method: 'PATCH',
@@ -260,17 +288,23 @@ export const onboardingService = {
     });
   },
 
-  async summary(opts: { from?: string; to?: string } = {}): Promise<OnboardingSummary> {
+  async summary(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingSummary> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
+    if (opts.domain) params.set('domain', opts.domain);
     return jsonFetch(withQuery('/api/onboarding/summary', params), OnboardingSummarySchema);
   },
 
-  async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
+  async bySource(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingBySource> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
+    if (opts.domain) params.set('domain', opts.domain);
     return jsonFetch(withQuery('/api/onboarding/by-source', params), OnboardingBySourceSchema);
   },
 
@@ -373,23 +407,20 @@ export const onboardingService = {
   },
 };
 
-/** Sends the file as the api's upload instructions say, or to `upload_url` on older api builds. */
+/**
+ * Sends the file as the api's upload instructions say, or to `upload_url` on older api builds.
+ *
+ * A form POST the browser cannot send (storage without POST in its CORS rules
+ * blocks it) is retried once as the signed PUT in `upload_url`. The file size
+ * was already checked against `max_bytes`, and `/start` checks it again.
+ *
+ * @throws {HttpError} With a `STORAGE_UPLOAD_*` code if storage refuses or cannot be reached.
+ */
 async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
-  let res: Response;
-  try {
-    res = await sendFile(file, created);
-  } catch {
-    throw new HttpError(0);
-  }
-  if (!res.ok) throw storageUploadError(res.status);
-}
-
-/** Sends the file with the method the api's upload reply names. */
-async function sendFile(file: File, created: BulkUploadCreateResponse): Promise<Response> {
   const { upload } = created;
   let res: Response;
   if (!upload) {
-    res = await fetch(created.upload_url, {
+    res = await sendToStorage(created.upload_url, {
       method: 'PUT',
       body: file,
       headers: { 'Content-Type': created.content_type },
@@ -398,11 +429,49 @@ async function sendFile(file: File, created: BulkUploadCreateResponse): Promise<
     const form = new FormData();
     for (const [name, value] of Object.entries(upload.form_fields)) form.append(name, value);
     form.append('file', file);
-    res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+    try {
+      res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+    } catch (err) {
+      console.warn('[bulk-upload] form upload to storage failed; retrying as a signed PUT', {
+        error: describeError(err),
+      });
+      res = await sendToStorage(created.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': created.content_type },
+      });
+    }
   } else {
-    res = await fetch(upload.url, { method: 'PUT', body: file, headers: upload.headers });
+    res = await sendToStorage(upload.url, { method: 'PUT', body: file, headers: upload.headers });
   }
-  return res;
+  if (!res.ok) throw storageUploadError(res.status);
+}
+
+/**
+ * Sends one request to storage.
+ *
+ * The api answered just before this call, so a request that never gets a
+ * response is a storage problem (CORS, network path to storage), not a lost
+ * connection, and is reported as one.
+ *
+ * @throws {HttpError} `STORAGE_UPLOAD_FAILED` if no response arrives.
+ */
+async function sendToStorage(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    console.error('[bulk-upload] upload to storage failed', {
+      method: init.method,
+      error: describeError(err),
+    });
+    throw new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
+  }
+}
+
+/** The name and message of a thrown value, for a log line; never the request or file. */
+function describeError(err: unknown): { name: string; message: string } {
+  if (err instanceof Error) return { name: err.name, message: err.message };
+  return { name: typeof err, message: String(err) };
 }
 
 /**

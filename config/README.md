@@ -202,6 +202,45 @@ registration_modes:
     signals_cta: true
 ```
 
+### Two-option mode and voice bots
+
+`voice_or_form` is a registration mode with `offers: [voice, form]`: the public
+page lets the participant choose to call a voice bot or fill in the form. Keep
+`voice` and `form` declared as well; removing either changes the behaviour of
+links already issued.
+
+```yaml
+registration_modes:
+  voice_or_form:
+    label_i18n_key: registration_mode.voice_or_form.label
+    submission_shape: account_and_profile
+    public_hint_i18n_key: null
+    signals_cta: true
+    offers: [voice, form]
+
+voice_bots: # one entry per calling number; empty by default
+  - key: example_bot
+    display_name: Example helpline
+    phone: '+919999999999' # validated at load
+    languages: [en, hi]
+    domains: [seeker]
+    description: Optional note shown to admins
+default_voice_bots: # optional: domain id -> bot key
+  seeker: example_bot
+```
+
+Which bot a new link gets, per domain: the one the coordinator picks, else
+`default_voice_bots[domain]` if set, else the only bot serving that domain, else
+none. The bot is stored on the link at creation, so a later default change or an
+added bot does not move live links. A `default_voice_bots` entry must name a
+listed bot that serves that domain, every domain served by two or more bots
+needs a `default_voice_bots` entry, and bot keys must be unique; config load
+fails otherwise.
+
+Config is read at startup, so changing a number or adding a bot needs a config
+rollout. To make newly created links two-option only, set
+`AGGREGATOR_ONBOARDING_ENABLED=voice_or_form`.
+
 ### The Signals UI hand-off URL lives in the environment, not here
 
 The hand-off also needs the `SIGNALS_UI_URLS` env var, which maps each domain

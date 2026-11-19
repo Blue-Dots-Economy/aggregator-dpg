@@ -1,8 +1,8 @@
 /**
  * BFF proxy: onboarding metrics summary.
- *   GET /api/onboarding/summary?from=&to=
+ *   GET /api/onboarding/summary?from=&to=&domain=
  *
- * Only `from` and `to` are forwarded, after the same checks the API applies.
+ * Only `from`, `to` and `domain` are forwarded, after the same checks the API applies.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';

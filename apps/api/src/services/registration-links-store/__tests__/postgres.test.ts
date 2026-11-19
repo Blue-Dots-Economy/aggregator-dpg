@@ -75,6 +75,7 @@ function makeRow(overrides: Partial<RegistrationLink> = {}): RegistrationLink {
     domain: 'seeker',
     context: {},
     registrationMode: 'form',
+    voiceBotKey: null,
     qrObjectKey: null,
     status: 'draft',
     expiresAt: null,
@@ -138,6 +139,38 @@ describe('PostgresRegistrationLinksStore.create', () => {
       registrationMode: 'qr_only',
       expiresAt,
     });
+  });
+
+  it('stores the voice bot key and returns it on the row', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      captured = chain;
+      return [makeRow({ voiceBotKey: 'up_hindi' })];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationLinksStore();
+
+    const result = await store.create(makeInput({ voiceBotKey: 'up_hindi' }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(callArgs(captured, 'values')?.[0]).toMatchObject({ voiceBotKey: 'up_hindi' });
+    expect(result.value.voiceBotKey).toBe('up_hindi');
+  });
+
+  it('stores a null voice bot key when none is given', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      captured = chain;
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationLinksStore();
+
+    const result = await store.create(makeInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(callArgs(captured, 'values')?.[0]).toMatchObject({ voiceBotKey: null });
+    expect(result.value.voiceBotKey).toBeNull();
   });
 
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {
@@ -483,6 +516,17 @@ describe('PostgresRegistrationLinksStore.updateStatus', () => {
 // ─── toDomain mapping ───────────────────────────────────────────────────────
 
 describe('PostgresRegistrationLinksStore row → domain mapping', () => {
+  it('maps a null voice_bot_key to null', async () => {
+    const db = makeFakeDb(() => [makeRow({ voiceBotKey: null })]);
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationLinksStore();
+
+    const result = await store.findBySlug('my-link');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value?.voiceBotKey).toBeNull();
+  });
+
   it('falls back to "form" when registrationMode is not a string', async () => {
     const db = makeFakeDb(() => [makeRow({ registrationMode: undefined as never })]);
     _setDbClients(null, db as never);

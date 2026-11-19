@@ -15,7 +15,10 @@
  *     `consent` is read-only after registration; a body that sends it is
  *     refused as `SCHEMA_VALIDATION`. `org_slug` cannot be changed.
  *
- * Requires a Keycloak Bearer token carrying the `aggregator_id` claim.
+ * Requires a Keycloak Bearer token carrying the `aggregator_id` claim. The GET
+ * also accepts an org owner acting as its own coordinator account
+ * (`x-acting-account`); the PATCH does not, because it writes the login's
+ * Keycloak contact attributes.
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
@@ -24,7 +27,14 @@ import { z } from 'zod';
 import { ConsentRecordSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
+import {
+  authenticate,
+  authenticateAllowingActing,
+  type AuthContext,
+  type AuthResult,
+} from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
+import type { Coordinator } from '../services/user-store/index.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
@@ -119,7 +129,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireAuth(req, { allowActing: true });
       const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
       const start = Date.now();
 
@@ -133,7 +143,8 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
         throw httpError('NOT_FOUND', { detail: 'Aggregator record not found.' });
       }
 
-      const kcUser = await fetchKcUserSafe(auth, log);
+      // An acting owner's Keycloak user is the owner's login, not this account.
+      const kcUser = auth.acting ? null : await fetchKcUserSafe(auth, log);
 
       log.info(
         { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.aggregatorId },
@@ -153,20 +164,22 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
         locations: aggregator.value.locations,
         consent: aggregator.value.consent,
         status: aggregator.value.status,
-        // From the token, falling back to Keycloak.
-        identity: {
-          first_name: auth.firstName ?? kcUser?.firstName ?? null,
-          last_name: auth.lastName ?? kcUser?.lastName ?? null,
-          email: auth.email ?? kcUser?.email ?? aggregator.value.contact.email,
-          email_verified: auth.emailVerified ?? false,
-          phone:
-            auth.phoneNumber ??
-            pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ??
-            aggregator.value.contact.phone,
-          phone_verified:
-            auth.phoneNumberVerified ?? pickAttribute(kcUser, 'phoneNumberVerified') === 'true',
-          active: kcUser?.enabled ?? aggregator.value.status === 'active',
-        },
+        identity: auth.acting
+          ? actingIdentity(auth, aggregator.value)
+          : // From the token, falling back to Keycloak.
+            {
+              first_name: auth.firstName ?? kcUser?.firstName ?? null,
+              last_name: auth.lastName ?? kcUser?.lastName ?? null,
+              email: auth.email ?? kcUser?.email ?? aggregator.value.contact.email,
+              email_verified: auth.emailVerified ?? false,
+              phone:
+                auth.phoneNumber ??
+                pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ??
+                aggregator.value.contact.phone,
+              phone_verified:
+                auth.phoneNumberVerified ?? pickAttribute(kcUser, 'phoneNumberVerified') === 'true',
+              active: kcUser?.enabled ?? aggregator.value.status === 'active',
+            },
         created_at: aggregator.value.createdAt.toISOString(),
         updated_at: aggregator.value.updatedAt.toISOString(),
       });
@@ -371,12 +384,48 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
   return undefined;
 }
 
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
+/**
+ * The identity of an acting owner's coordinator account, from the coordinator
+ * row: the token belongs to the owner's login. A verified flag holds only when
+ * the token's value is the row's.
+ *
+ * @param auth - The acting context.
+ * @param row - The coordinator row.
+ * @returns The `identity` block of the profile read.
+ */
+function actingIdentity(auth: AuthContext, row: Coordinator) {
+  const { email, phone, name } = row.contact;
+  return {
+    first_name: name,
+    last_name: null,
+    email,
+    email_verified: auth.emailVerified === true && auth.email?.toLowerCase() === email,
+    phone,
+    phone_verified: auth.phoneNumberVerified === true && auth.phoneNumber === phone,
+    active: row.status === 'active',
+  };
+}
+
+/**
+ * Authenticates a profile request and records a coordinator's login.
+ *
+ * @param req - The request.
+ * @param opts.allowActing - Accept an owner acting as its coordinator account.
+ * @returns The auth context.
+ * @throws {HttpError} 401, 403 or 503 when the caller is refused.
+ */
+async function requireAuth(
+  req: FastifyRequest,
+  opts: { allowActing?: boolean } = {},
+): Promise<AuthContext> {
+  const result: AuthResult = opts.allowActing
+    ? await authenticateAllowingActing(req)
+    : await authenticate(req);
   if (result.ok) {
     await recordRouteCaller(req, callerFromAuth(result.context));
     return result.context;
   }
+  throwIfActingError(result.error);
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,

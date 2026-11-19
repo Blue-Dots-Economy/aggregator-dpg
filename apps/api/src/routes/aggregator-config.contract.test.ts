@@ -319,6 +319,7 @@ describe('GET /v1/aggregator-config — OpenAPI response schema', () => {
     const mode = typeof modes === 'object' ? modes : undefined;
     expect(keysOf(mode)).toEqual([
       'label_i18n_key',
+      'offers',
       'public_hint_i18n_key',
       'signals_cta',
       'submission_shape',

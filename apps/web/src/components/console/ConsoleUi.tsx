@@ -175,3 +175,16 @@ export function BackLink({ href, children }: { href: string; children: ReactNode
 export function EmptyState({ children }: { children: ReactNode }) {
   return <p className="px-5 py-8 text-center text-[13.5px] text-ink-500">{children}</p>;
 }
+
+/**
+ * The "You" tag on the viewer's own coordinator account in a team list.
+ *
+ * @param label - The translated tag text.
+ */
+export function YouTag({ label }: Readonly<{ label: string }>) {
+  return (
+    <span className="flex-none rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[11px] font-semibold text-[#047857]">
+      {label}
+    </span>
+  );
+}

@@ -124,6 +124,7 @@ const baseLink = {
   aggregatorId: AGG_ID,
   domain: 'seeker' as const,
   context: {},
+  voiceBotKey: null,
   qrObjectKey: null,
   status: 'live' as const,
   expiresAt: null,

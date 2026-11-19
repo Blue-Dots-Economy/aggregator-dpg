@@ -8,20 +8,30 @@
  * (icon/colour/label fallback), the zero-total percentage guard, and the
  * "no sources yet" case where the by-mode card is omitted entirely.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 
-const { useOnboardingSummary, useOnboardingBySource } = vi.hoisted(() => ({
+const { useOnboardingSummary, useOnboardingBySource, useActiveDomain } = vi.hoisted(() => ({
   useOnboardingSummary: vi.fn(),
   useOnboardingBySource: vi.fn(),
+  useActiveDomain: vi.fn(),
 }));
 vi.mock('@/hooks/useOnboarding', () => ({
-  useOnboardingSummary: () => useOnboardingSummary(),
-  useOnboardingBySource: () => useOnboardingBySource(),
+  useOnboardingSummary: (opts: unknown) => useOnboardingSummary(opts),
+  useOnboardingBySource: (opts: unknown) => useOnboardingBySource(opts),
 }));
+vi.mock('@/hooks/useActiveDomain', () => ({
+  useActiveDomain: () => useActiveDomain(),
+}));
+
+/** Served profile types, as `useActiveDomain` returns them. */
+const DOMAINS = [
+  { id: 'seeker', plural_label: 'Seekers' },
+  { id: 'provider', plural_label: 'Providers' },
+];
 
 import { OnboardingMetrics } from '@/app/(protected)/onboarding/_components/OnboardingMetrics';
 
@@ -34,7 +44,38 @@ function renderMetrics() {
 }
 
 describe('<OnboardingMetrics />', () => {
+  beforeEach(() => {
+    useActiveDomain.mockReturnValue({ domains: DOMAINS, active: 'provider', ready: true });
+  });
   afterEach(() => vi.clearAllMocks());
+
+  it('reads the counts of the selected profile type and names it', () => {
+    useOnboardingSummary.mockReturnValue({
+      isError: false,
+      isLoading: false,
+      data: { total: 7, passed: 6, failed: 1, skipped: 0 },
+    });
+    useOnboardingBySource.mockReturnValue({ data: { by_source: [] } });
+
+    renderMetrics();
+
+    expect(useOnboardingSummary).toHaveBeenCalledWith({ domain: 'provider', enabled: true });
+    expect(useOnboardingBySource).toHaveBeenCalledWith({ domain: 'provider', enabled: true });
+    expect(screen.getByText('Providers, rolled up across your network')).toBeInTheDocument();
+    expect(screen.queryByText(/All profile types/)).not.toBeInTheDocument();
+  });
+
+  it('holds the reads and shows skeletons until the profile type is known', () => {
+    useActiveDomain.mockReturnValue({ domains: [], active: undefined, ready: false });
+    useOnboardingSummary.mockReturnValue({ isError: false, isLoading: false, data: undefined });
+    useOnboardingBySource.mockReturnValue({ data: undefined });
+
+    renderMetrics();
+
+    expect(useOnboardingSummary).toHaveBeenCalledWith({ domain: undefined, enabled: false });
+    expect(screen.queryByText('Total submissions')).not.toBeInTheDocument();
+    expect(screen.getByText('Rolled up across your network')).toBeInTheDocument();
+  });
 
   it('renders an error state with a working retry that refetches both queries', async () => {
     const summaryRefetch = vi.fn();

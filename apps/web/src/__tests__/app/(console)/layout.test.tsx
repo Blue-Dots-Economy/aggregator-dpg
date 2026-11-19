@@ -16,6 +16,9 @@ vi.mock('@/components/console/ConsoleSidebar', () => ({
     return <nav data-testid="console-nav" />;
   },
 }));
+vi.mock('@/components/console/ActingEndedNotice', () => ({
+  ActingEndedNotice: () => <div data-testid="acting-ended-notice-slot" />,
+}));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
@@ -150,5 +153,20 @@ describe('<ConsoleLayout />', () => {
     vi.mocked(getSession).mockResolvedValue(null);
     await expect(ConsoleLayout({ children: null })).rejects.toThrow();
     expect(redirect).toHaveBeenCalledWith('/api/auth/login?returnTo=%2Fconsole');
+  });
+
+  it('leaves acting mode before reading the actor, returning to the console page', async () => {
+    vi.mocked(getSession).mockResolvedValue({ ...session, actingAccountId: 'acc-1' });
+    await expect(ConsoleLayout({ children: null })).rejects.toThrow();
+    expect(redirect).toHaveBeenCalledWith('/api/auth/acting/leave?returnTo=%2Fconsole');
+    expect(getConsoleActor).not.toHaveBeenCalled();
+  });
+
+  it('shows the acting-ended notice slot without leaving the console', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
+    const { render, screen } = await import('@testing-library/react');
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    expect(screen.getByTestId('acting-ended-notice-slot')).toBeInTheDocument();
   });
 });

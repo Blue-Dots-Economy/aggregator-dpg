@@ -32,24 +32,21 @@ import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primiti
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { stampConsent } from '../services/registration-consent.js';
-import type { LegacyOrgDetails, RecordConsentHook } from '../services/user-store/interface.js';
+import {
+  aggregatorConsentWriter,
+  createAggregatorWithSlug,
+} from '../services/registration/coordinator-row.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
-import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { getConsentLedger } from '../services/consent-ledger/index.js';
-import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
-import { slugFromName } from '../services/slug.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
-
-const SLUG_RETRIES = 3;
 
 const CoordinatorInviteAcceptBodySchema = RegistrationPayloadSchema.extend({
   invite: z.string().min(1).max(4096),
@@ -417,6 +414,11 @@ async function createCoordinatorRow(
   },
 ): Promise<{ aggregatorId: string; orgSlug: string }> {
   const recordConsent = await aggregatorConsentWriter({ consent: row.consent, log: row.log });
+  if (!recordConsent) {
+    throw httpError('CONSENT_WRITE_FAILED', {
+      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+    });
+  }
   const created = await createAggregatorWithSlug(userStore, body.name, {
     domains: row.domains,
     contact: row.contact,
@@ -490,137 +492,6 @@ async function createCoordinatorLogin(
     cause: created.error,
     fields: { sub_operation: 'idp.createUser', rolled_back: true },
   });
-}
-
-/**
- * Builds the consent-ledger write that `store.create` runs inside its transaction.
- *
- * The consent config is read now, before the transaction. A failed ledger
- * write throws, so the store rolls back and answers `CONSENT_WRITE_FAILED`.
- *
- * @param consent - The server-stamped registration consent (`valid_till` is stored).
- * @param log - Request-scoped child logger.
- * @returns The hook to pass as `recordConsent`.
- * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
- */
-async function aggregatorConsentWriter({
-  consent,
-  log,
-}: {
-  consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
-  log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<RecordConsentHook> {
-  const { network, brand } = resolveActiveNetwork();
-  let termsVersion: number;
-  let privacyVersion: number;
-  try {
-    const consentCfg = await loadConsentConfig(network, brand);
-    termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
-    privacyVersion = consentCfg.audiences.aggregator.documents.privacy.current_version;
-  } catch (e) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
-        network,
-        brand: brand ?? null,
-      },
-      'consent config load failed — registration refused',
-    );
-    throw httpError('CONSENT_WRITE_FAILED', {
-      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
-    });
-  }
-
-  return async (executor, aggregatorId) => {
-    const result = await getConsentLedger()
-      .withExecutor(executor)
-      .recordRegistrationConsent({
-        subjectType: 'user',
-        subjectId: aggregatorId,
-        network,
-        brand: brand ?? null,
-        termsVersion,
-        privacyVersion,
-        validTill: new Date(consent.valid_till),
-      });
-    if (!result.success) {
-      log.error(
-        {
-          operation: 'consentLedger.recordAggregatorConsent',
-          status: 'failure',
-          error: result.error.message,
-          error_type: result.error.name,
-          aggregator_id: aggregatorId,
-          network,
-          brand: brand ?? null,
-          terms_version: termsVersion,
-          privacy_version: privacyVersion,
-        },
-        'consent ledger write failed — registration rolled back',
-      );
-      // Throwing inside the store's transaction rolls the registration back.
-      throw result.error;
-    }
-  };
-}
-
-/**
- * Inserts a coordinator, retrying up to {@link SLUG_RETRIES} times on a slug collision.
- */
-async function createAggregatorWithSlug(
-  store: ReturnType<typeof getUserStore>,
-  name: string,
-  extras: {
-    /** The domains served, validated and non-empty. */
-    domains: string[];
-    contact: BecknContact;
-    consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
-    /** Writes the consent ledger row inside the create transaction. */
-    recordConsent: RecordConsentHook;
-    /** The coordinator's org (`users.org_id`). */
-    orgId: string;
-    /** The coordinator's own org details (Default-org registrations only). */
-    legacyOrgDetails: LegacyOrgDetails | null;
-    /** The coordinator's own address (`users.locations`). */
-    locations: BecknLocation[];
-    /** The consumed invite's `jti`, when registered via one. */
-    inviteId: string | null;
-    profile: Record<string, unknown>;
-    /** `null` when no registration schema resolved. */
-    profileRef: string | null;
-  },
-): ReturnType<typeof store.create> {
-  let last: Awaited<ReturnType<typeof store.create>> | null = null;
-  for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
-    const orgSlug = slugFromName(name);
-    last = await store.create({
-      orgSlug,
-      name,
-      type: extras.domains[0] ?? null,
-      serves: extras.domains,
-      contact: extras.contact,
-      consent: extras.consent,
-      recordConsent: extras.recordConsent,
-      createdBy: 'self',
-      updatedBy: 'self',
-      orgId: extras.orgId,
-      legacyOrgDetails: extras.legacyOrgDetails,
-      locations: extras.locations,
-      inviteId: extras.inviteId,
-      profile: extras.profile,
-      profileRef: extras.profileRef,
-    });
-    if (last.ok) return last;
-    if (last.error.code !== 'DUPLICATE_SLUG') return last;
-  }
-  return (
-    last ?? {
-      ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: 'slug retries exhausted' },
-    }
-  );
 }
 
 function mapStoreCreateError(

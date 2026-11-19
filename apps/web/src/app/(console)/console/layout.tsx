@@ -1,7 +1,9 @@
 /**
  * Organisation console layout.
  *
- * Server Component. Requires a session and resolves the actor from
+ * Server Component. Requires a session and never runs in acting mode: a
+ * session with an acting account is sent through the leave route first, so
+ * console calls never carry the acting-account header. It resolves the actor from
  * `GET /v1/user/read/me`, cached in the session for about 60 s. Coordinators go
  * to `/dashboard`; admins the API does not know, or without an active org, are
  * signed out with a reason.
@@ -19,6 +21,8 @@ import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
 import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ActingEndedNotice } from '@/components/console/ActingEndedNotice';
+import { actingLeaveHref } from '@/lib/acting';
 import { canViewCoordinators, coordinatorsHref, ownProfileOrgId } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -28,6 +32,8 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   if (session.refreshTokenExp && session.refreshTokenExp <= Date.now()) {
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
+
+  if (session.actingAccountId !== undefined) redirect(actingLeaveHref(path));
 
   const actor = await getConsoleActor();
   if (!actor.ok) leaveConsole(actor.reason, path);
@@ -51,6 +57,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
         <ConsoleSidebar
           teamHref={canViewCoordinators(me) ? coordinatorsHref(me) : null}
           showProfile={ownProfileOrgId(me) !== null}
+          ownCoordinatorAccountId={me.own_coordinator_account_id ?? null}
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
@@ -70,7 +77,10 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           }}
         />
         <main className="flex-1 min-w-0 overflow-x-clip">
-          <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>
+          <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+            <ActingEndedNotice />
+            {children}
+          </div>
         </main>
       </div>
     </AuthProvider>

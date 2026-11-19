@@ -455,7 +455,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const below = this.descendantIdsOf(filter.descendantsOf);
       rows = rows.filter((o) => below.has(o.id));
     }
-    if (filter.parentId) rows = rows.filter((o) => o.parentId === filter.parentId);
+    const { parentId } = filter;
+    if (parentId) rows = rows.filter((o) => o.parentId === parentId);
     if (filter.namePrefix) {
       const p = filter.namePrefix.toLowerCase();
       rows = rows.filter((o) => o.displayName.toLowerCase().startsWith(p));

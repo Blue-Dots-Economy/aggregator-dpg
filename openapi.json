@@ -3282,6 +3282,12 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "own_coordinator_account_id": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
                     }
                   },
                   "required": [
@@ -5182,6 +5188,482 @@
             }
           },
           "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/self/add": {
+      "post": {
+        "summary": "Add the signed-in owner to the team of an organisation they own",
+        "tags": [
+          "console"
+        ],
+        "description": "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "org_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+                  },
+                  "serves": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "consent": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "given_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      "valid_till": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "given_at",
+                      "valid_till"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "org_id",
+                  "serves",
+                  "consent"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "user_type": {
+                      "type": "string",
+                      "enum": [
+                        "coordinator"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "inactive",
+                        "retired"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "contact": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "email",
+                        "phone"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "serves": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "org_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "invited": {
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "rejected_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "roles": {
+                      "nullable": true,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "user_type",
+                    "status",
+                    "name",
+                    "contact",
+                    "serves",
+                    "org_id",
+                    "invited",
+                    "created_at",
+                    "updated_at",
+                    "rejected_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "429": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -16117,6 +16599,10 @@
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9_]*$"
                   },
+                  "voice_bot_key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
                   "expires_at": {
                     "nullable": true,
                     "type": "string",
@@ -16158,6 +16644,41 @@
                     },
                     "registration_mode": {
                       "type": "string"
+                    },
+                    "voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
                     },
                     "context": {
                       "type": "object",
@@ -16216,6 +16737,8 @@
                     "domain",
                     "status",
                     "registration_mode",
+                    "voice_bot_key",
+                    "voice_bot",
                     "context",
                     "expires_at",
                     "public_url",
@@ -16488,6 +17011,292 @@
         }
       }
     },
+    "/v1/links/voice-bots": {
+      "get": {
+        "summary": "List the voice bots a link in a domain can use",
+        "tags": [
+          "registration-links"
+        ],
+        "description": "Voice bots configured for the domain, plus the key of the domain default (null when several bots serve it and none is the default). Feeds the bot picker on the link form.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "domain",
+            "required": true,
+            "description": "Network domain id the link is for."
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "voice_bots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "phone": {
+                            "type": "string"
+                          },
+                          "languages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "display_name",
+                          "phone",
+                          "languages"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "default_voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "voice_bots",
+                    "default_voice_bot_key"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/links": {
       "get": {
         "summary": "List the caller aggregator's registration links",
@@ -16565,6 +17374,41 @@
                           "registration_mode": {
                             "type": "string"
                           },
+                          "voice_bot_key": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "voice_bot": {
+                            "nullable": true,
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "phone": {
+                                "type": "string"
+                              },
+                              "languages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "display_name",
+                              "phone",
+                              "languages"
+                            ],
+                            "additionalProperties": false
+                          },
                           "context": {
                             "type": "object",
                             "additionalProperties": {}
@@ -16622,6 +17466,8 @@
                           "domain",
                           "status",
                           "registration_mode",
+                          "voice_bot_key",
+                          "voice_bot",
                           "context",
                           "expires_at",
                           "public_url",
@@ -16938,6 +17784,41 @@
                     "registration_mode": {
                       "type": "string"
                     },
+                    "voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
+                    },
                     "context": {
                       "type": "object",
                       "additionalProperties": {}
@@ -16995,6 +17876,8 @@
                     "domain",
                     "status",
                     "registration_mode",
+                    "voice_bot_key",
+                    "voice_bot",
                     "context",
                     "expires_at",
                     "public_url",
@@ -17312,6 +18195,41 @@
                     "registration_mode": {
                       "type": "string"
                     },
+                    "voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
+                    },
                     "context": {
                       "type": "object",
                       "additionalProperties": {}
@@ -17369,6 +18287,8 @@
                     "domain",
                     "status",
                     "registration_mode",
+                    "voice_bot_key",
+                    "voice_bot",
                     "context",
                     "expires_at",
                     "public_url",
@@ -17637,6 +18557,41 @@
                     "registration_mode": {
                       "type": "string"
                     },
+                    "voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
+                    },
                     "context": {
                       "type": "object",
                       "additionalProperties": {}
@@ -17694,6 +18649,8 @@
                     "domain",
                     "status",
                     "registration_mode",
+                    "voice_bot_key",
+                    "voice_bot",
                     "context",
                     "expires_at",
                     "public_url",
@@ -18064,6 +19021,41 @@
                     "registration_mode": {
                       "type": "string"
                     },
+                    "voice_bot_key": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
+                    },
                     "context": {
                       "type": "object",
                       "additionalProperties": {}
@@ -18121,6 +19113,8 @@
                     "domain",
                     "status",
                     "registration_mode",
+                    "voice_bot_key",
+                    "voice_bot",
                     "context",
                     "expires_at",
                     "public_url",
@@ -18427,6 +19421,41 @@
                     "expires_at": {
                       "nullable": true,
                       "type": "string"
+                    },
+                    "offers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "voice",
+                          "form"
+                        ]
+                      },
+                      "description": "Registration channels the page offers, in display order."
+                    },
+                    "voice_bot": {
+                      "nullable": true,
+                      "description": "The voice bot the link resolves to; null when it offers no voice option.",
+                      "type": "object",
+                      "properties": {
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "description": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "display_name",
+                        "languages"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -18441,7 +19470,9 @@
                     "schema_version",
                     "schema",
                     "identity",
-                    "expires_at"
+                    "expires_at",
+                    "offers",
+                    "voice_bot"
                   ],
                   "additionalProperties": {}
                 }
@@ -19155,6 +20186,455 @@
         }
       }
     },
+    "/public/v1/aggregators/{orgSlug}/voice-requests/{slug}": {
+      "post": {
+        "summary": "Get the voice-bot number of a public link, creating the account if new",
+        "tags": [
+          "public-registration"
+        ],
+        "description": "Public endpoint behind the 'talk to the voice bot' option of a two-option link. Checks the phone with signalstack first: a new phone gets an account (no profile) under the link's aggregator; an existing one, whoever owns it, is left untouched. Returns the bot's number either way (200, never 409 for an existing account). 409 when the link offers no voice option or no bot resolves; 429 when the per-link rate limit, shared with the form submit, trips.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {},
+                "description": "The domain's identity name and phone keys, consent_terms / consent_privacy, and year_of_birth (or age) on guardian-gated domains. Phone is required; email and profile fields are rejected."
+              }
+            }
+          },
+          "description": "The domain's identity name and phone keys, consent_terms / consent_privacy, and year_of_birth (or age) on guardian-gated domains. Phone is required; email and profile fields are rejected."
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "orgSlug",
+            "required": true,
+            "description": "Aggregator organisation slug."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "description": "Registration link slug."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "existing": {
+                      "type": "boolean",
+                      "description": "True when the phone already had an account; nothing was created then."
+                    },
+                    "voice_bot": {
+                      "type": "object",
+                      "properties": {
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string",
+                          "description": "E.164 number to call."
+                        },
+                        "languages": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "display_name",
+                        "phone",
+                        "languages"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "existing",
+                    "voice_bot"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/public/v1/aggregators/{orgSlug}/lookup": {
       "get": {
         "summary": "Probe an identity before opening the registration form",
@@ -19531,7 +21011,7 @@
         "tags": [
           "onboarding"
         ],
-        "description": "Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.",
+        "description": "Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates and narrowed to one profile type by ?domain=.",
         "parameters": [
           {
             "schema": {
@@ -19552,6 +21032,16 @@
             "in": "query",
             "name": "to",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "description": "Profile type (network domain id) to count; omitted counts every profile type."
           }
         ],
         "security": [
@@ -19775,7 +21265,7 @@
         "tags": [
           "onboarding"
         ],
-        "description": "Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.",
+        "description": "Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to= and narrowed to one profile type by ?domain=.",
         "parameters": [
           {
             "schema": {
@@ -19796,6 +21286,16 @@
             "in": "query",
             "name": "to",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "description": "Profile type (network domain id) to count; omitted counts every profile type."
           }
         ],
         "security": [
@@ -21424,6 +22924,17 @@
                           },
                           "signals_cta": {
                             "type": "boolean"
+                          },
+                          "offers": {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "form"
+                              ]
+                            }
                           }
                         },
                         "required": [

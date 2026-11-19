@@ -243,3 +243,25 @@ export function isValidPhone(value: string): boolean {
 export function isAcceptedPhone(value: string): boolean {
   return normaliseContactPhone(value).ok;
 }
+
+/** Digits in each half of a 10-digit national number when grouped for reading. */
+const READING_GROUP_DIGITS = 5;
+
+/**
+ * Groups a stored number for reading, e.g. `+911234567890` → `+91 12345 67890`.
+ *
+ * Only for display: links and payloads keep the raw E.164 value. A national
+ * number of any other length is shown after its code ungrouped.
+ *
+ * @param value - The stored `+<code><number>` value.
+ * @param countries - The deployment's country list, used to find the code.
+ * @returns The number with spaces between code and digit groups.
+ */
+export function formatPhoneForReading(
+  value: string,
+  countries: PhoneCountries = DEFAULT_PHONE_COUNTRIES,
+): string {
+  const { code, national } = splitPhone(value, countries);
+  if (national.length !== READING_GROUP_DIGITS * 2) return `${code} ${national}`;
+  return `${code} ${national.slice(0, READING_GROUP_DIGITS)} ${national.slice(READING_GROUP_DIGITS)}`;
+}

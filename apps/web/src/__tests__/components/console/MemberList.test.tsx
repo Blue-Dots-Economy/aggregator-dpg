@@ -145,4 +145,20 @@ describe('MemberList', () => {
     );
     expect(screen.getByRole('searchbox', { name: 'नाम या ईमेल खोजें' })).toBeInTheDocument();
   });
+
+  it('tags only the row marked as the viewer\'s own with "You"', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <MemberList
+          kind="users"
+          rows={rows.map((r) => (r.id === 'u4' ? { ...r, self: true } : r))}
+          counts={{ all: '3', active: '1', pending: '2' }}
+          columns={['Profile Types']}
+        />
+      </NextIntlClientProvider>,
+    );
+    const tags = screen.getAllByText(messages.console.org_home.you);
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.closest('tr')).toHaveTextContent('Test User 4');
+  });
 });

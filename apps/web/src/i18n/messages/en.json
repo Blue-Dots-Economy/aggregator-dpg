@@ -225,7 +225,8 @@
     },
     "onboardingGroup": {
       "title": "Onboarding",
-      "helper": "All profile types, rolled up across your network",
+      "helper": "{type}, rolled up across your network",
+      "helper_no_type": "Rolled up across your network",
       "view": "View onboarding",
       "total": "Total submissions",
       "total_sub": "All entry modes",
@@ -278,7 +279,10 @@
     "contact_support": "Contact support",
     "open_menu": "Open menu",
     "close_menu": "Close menu",
-    "menu_label": "Main navigation"
+    "menu_label": "Main navigation",
+    "back_to_console": "Back to console",
+    "acting_sublabel": "Coordinator · {org}",
+    "acting_sublabel_no_org": "Coordinator"
   },
   "onboarding": {
     "title": "Onboarding",
@@ -411,7 +415,11 @@
       "error_required": "State, District, and Event are required.",
       "link_created": "Registration link created",
       "save_failed": "Couldn't save the link. Try again.",
-      "error_duplicate_slug": "A link with this district and event already exists. Change the event name and try again."
+      "error_duplicate_slug": "A link with this district and event already exists. Change the event name and try again.",
+      "voice_bot_label": "Voice assistant",
+      "voice_bot_none": "No voice bot yet — the link offers Register / sign in until one is configured",
+      "voice_bot_load_failed": "Couldn't load the voice bots. Refresh the page to try again.",
+      "voice_bot_choice_required": "Choose a voice bot for this link."
     },
     "your_links": {
       "title": "Your Registration Links",
@@ -447,7 +455,8 @@
       "cancel": "Cancel",
       "save_draft": "Save Draft",
       "saving": "Saving…",
-      "error_required": "State, District, and Event are required."
+      "error_required": "State, District, and Event are required.",
+      "voice_bot": "Voice bot: {name} · {phone}"
     },
     "bulk_uploads_page": {
       "title": "Bulk Upload",
@@ -458,7 +467,10 @@
       "title": "Registration Links",
       "subtitle": "Generate, share, and manage public registration links.",
       "back": "Back to Onboarding"
-    }
+    },
+    "acting_banner": "You're onboarding as yourself in {org}. Counts here are only your own.",
+    "acting_banner_dismiss": "Dismiss",
+    "acting_banner_no_org": "You're onboarding as yourself. Counts here are only your own."
   },
   "profile": {
     "view": {
@@ -590,7 +602,19 @@
       "error_link_not_live": "This registration link is no longer accepting registrations.",
       "error_u18": "As you are under 18, please finish registering in the Signalstack app.",
       "error_consent_required": "Please accept the terms and privacy policy to continue.",
-      "error_profile_limit": "This phone or email already has the maximum number of profiles."
+      "error_profile_limit": "This phone or email already has the maximum number of profiles.",
+      "voice_chooser_title": "How would you like to register?",
+      "voice_chooser_subtitle": "Talk to our voice assistant, or fill the form yourself.",
+      "voice_cta": "Talk to the voice assistant",
+      "voice_form_cta": "Register with the form",
+      "voice_form_title": "Talk to the voice assistant",
+      "voice_form_subtitle": "Give your name and number, then call us.",
+      "voice_continue": "Continue",
+      "voice_done_new_title": "You're all set",
+      "voice_done_existing_title": "You already have an account",
+      "voice_done_body": "Call {name} to build your profile. It speaks {languages}.",
+      "voice_call_cta": "Call {phone}",
+      "voice_unavailable": "The voice assistant is not available right now. Please register with the form."
     }
   },
   "registration_mode": {
@@ -602,6 +626,10 @@
     "form": {
       "label": "Form Filling",
       "hint": "Participants fill the full profile online. Partial submissions are accepted."
+    },
+    "voice_or_form": {
+      "label": "Voice or Form",
+      "hint": "Participants choose to call the voice assistant or fill the form online."
     }
   },
   "auth": {
@@ -710,7 +738,10 @@
       "dashboard": "Dashboard",
       "my_blue_dots": "My Blue Dots",
       "my_team": "My Team",
-      "profile": "Account Details"
+      "profile": "Account Details",
+      "my_onboarding": "My onboarding",
+      "onboard_participants": "Onboard participants",
+      "acting_not_ready": "Setting up your access — try again in a minute."
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -1049,7 +1080,11 @@
       "signed_out": "You've been signed out. Sign in again, then try once more.",
       "forbidden": "You don't have permission to do this.",
       "server": "Something went wrong on our side. Try again in a few minutes.",
-      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state."
+      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state.",
+      "already_coordinator": "You already have a coordinator account.",
+      "org_not_eligible": "You can't add yourself to this [[org]].",
+      "not_org_owner": "Only the [[org]] owner can add themselves.",
+      "owner_phone_required": "Add a phone number to your account first."
     },
     "roles": {
       "title": "Roles",
@@ -1197,7 +1232,18 @@
       "view": "View",
       "view_named": "View {name}",
       "empty": "No [[users]] match.",
-      "partial": "Showing the newest {count}. <link>See all [[users]]</link>"
+      "partial": "Showing the newest {count}. <link>See all [[users]]</link>",
+      "you": "You"
+    },
+    "self_add": {
+      "button": "Add myself to My Team",
+      "title": "Add myself to My Team",
+      "intro": "You get your own coordinator account, so you can onboard participants yourself. You stay the [[org]] owner.",
+      "org": "[[Org]]",
+      "org_placeholder": "Choose one",
+      "serves": "Profile types",
+      "cancel": "Cancel",
+      "submit": "Continue"
     },
     "page_error": {
       "title": "This page couldn't load",
@@ -1228,7 +1274,8 @@
       "coming_soon": "Coming soon",
       "aggregated_body": "Your dashboard is coming soon.",
       "participants_body": "This works only if you have onboarded seekers and providers yourself."
-    }
+    },
+    "acting_ended": "Your onboarding access is no longer available."
   },
   "page_error": {
     "title": "This page couldn't load",
