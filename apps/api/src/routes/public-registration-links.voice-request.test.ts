@@ -272,6 +272,42 @@ describe('POST /public/v1/aggregators/:org/voice-requests/:slug', () => {
       expect(h.rows).toEqual([{ outcome: 'passed' }]);
     });
 
+    it('writes a PII-free audit line when the account is created', async () => {
+      const info = vi.fn();
+      const appChild = h.app.log.child.bind(h.app.log);
+      const childSpy = vi.spyOn(h.app.log, 'child').mockImplementation(((
+        ...args: Parameters<typeof appChild>
+      ) => {
+        const reqLog = appChild(...args);
+        const reqChild = reqLog.child.bind(reqLog);
+        reqLog.child = ((...childArgs: Parameters<typeof reqChild>) => {
+          const routeLog = reqChild(...childArgs);
+          const realInfo = routeLog.info.bind(routeLog);
+          routeLog.info = ((...a: Parameters<typeof realInfo>) => {
+            info(...a);
+            return realInfo(...a);
+          }) as never;
+          return routeLog;
+        }) as never;
+        return reqLog;
+      }) as never);
+      const r = await request(h.app, ADULT);
+      childSpy.mockRestore();
+      expect(r.statusCode).toBe(200);
+      const audit = info.mock.calls
+        .map((c) => c[0] as Record<string, unknown>)
+        .find((o) => o?.event_type === 'audit');
+      expect(audit).toMatchObject({
+        audit: 'link.voice_request_recorded',
+        link_id: LINK_ID,
+        voice_bot_key: 'a',
+        existing: false,
+        outcome: 'passed',
+      });
+      expect(JSON.stringify(audit)).not.toContain('9876543210');
+      expect(JSON.stringify(audit)).not.toContain('A. User');
+    });
+
     it('creates nothing for a phone this coordinator already has', async () => {
       h.writer.seedOwnUser({ actingOrgId: ORG_ID, phoneNumber: '+919876543210' });
       const onboard = vi.spyOn(h.writer, 'onboard');

@@ -770,8 +770,11 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         });
       }
 
+      // Audit line, no PII: `outcome: 'passed'` means an account was created.
       log.info({
         status: 'success',
+        event_type: 'audit',
+        audit: 'link.voice_request_recorded',
         latency_ms: Date.now() - start,
         link_id: link.id,
         voice_bot_key: bot.key,
