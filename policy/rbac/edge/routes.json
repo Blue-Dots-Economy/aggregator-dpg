@@ -234,6 +234,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/user/consent/status",
+      "access": {
+        "access": "signed_in"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/user/invite/read",
       "access": {
         "access": "service"
@@ -462,6 +469,13 @@
       "path": "/v1/user/activate",
       "access": {
         "access": "public"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/consent",
+      "access": {
+        "access": "signed_in"
       }
     },
     {

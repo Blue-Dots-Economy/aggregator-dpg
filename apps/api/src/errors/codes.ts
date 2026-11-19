@@ -44,6 +44,14 @@ export const ERR = {
       'Your consent could not be recorded, so the registration was not completed. Please try again.',
     hint: 'The consent-ledger write failed and the registration was rolled back (fail-closed). Check consent config + DB.',
   },
+  CONSENT_VERSION_CHANGED: {
+    code: 'CONSENT_VERSION_CHANGED',
+    status: 409,
+    title: 'The terms have changed',
+    detail:
+      'The terms or privacy policy changed while you were reading them. Please review them again.',
+    hint: "terms_version / privacy_version in the body are not the current versions of the caller's audience in consent.json; nothing was recorded.",
+  },
   SCHEMA_VALIDATION: {
     code: 'SCHEMA_VALIDATION',
     status: 400,
