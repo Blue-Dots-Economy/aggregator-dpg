@@ -38,7 +38,7 @@ export class InMemoryBulkUploadsStore extends BulkUploadsStoreBase {
 
   async findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>> {
     const row = this.rows.get(id);
-    return { ok: true, value: row && row.aggregatorId === aggregatorId ? row : null };
+    return { ok: true, value: row?.aggregatorId === aggregatorId ? row : null };
   }
 
   async list(
@@ -65,7 +65,7 @@ export class InMemoryBulkUploadsStore extends BulkUploadsStoreBase {
     contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>> {
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
+    if (row?.aggregatorId !== aggregatorId) {
       return { ok: false, error: { code: 'NOT_FOUND', message: `upload not found: ${id}` } };
     }
     if (row.status !== 'pending' && row.status !== 'uploaded') {
@@ -95,7 +95,7 @@ export class InMemoryBulkUploadsStore extends BulkUploadsStoreBase {
 
   async deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>> {
     const row = this.rows.get(id);
-    if (row && row.aggregatorId === aggregatorId && row.status === 'pending') this.rows.delete(id);
+    if (row?.aggregatorId === aggregatorId && row.status === 'pending') this.rows.delete(id);
     return { ok: true, value: undefined };
   }
 }

@@ -14,7 +14,7 @@ import { getDb } from '../db/client.js';
 import { logger } from '../logger.js';
 import type { Actor } from './auth/actor/index.js';
 import { getConsentLedger } from './consent-ledger/index.js';
-import { getConsentStatus, type ConsentSubjectRef } from './consent-status.js';
+import { getConsentStatus, type ConsentStatus, type ConsentSubjectRef } from './consent-status.js';
 import { MAX_CONSENT_VALIDITY_MS } from './registration-consent.js';
 
 /** Ledger source of an acceptance given on the terms screen after sign-in. */
@@ -82,12 +82,7 @@ export async function acceptCurrentTerms(
     );
   }
 
-  const subjects: ConsentSubjectRef[] =
-    s.audience === 'aggregator'
-      ? s.outstanding
-        ? [{ subjectType: 'user', subjectId: actor.userId }]
-        : []
-      : s.outstandingOrgIds.map((id) => ({ subjectType: 'organisation', subjectId: id }));
+  const subjects = outstandingSubjects(s, actor.userId);
   const orgIds = s.outstandingOrgIds;
 
   if (subjects.length === 0) {
@@ -137,4 +132,12 @@ export async function acceptCurrentTerms(
     org_ids: orgIds,
   });
   return ok({ recorded: subjects.length });
+}
+
+/** The subjects still to accept: the coordinator itself, or the owner's outstanding orgs. */
+function outstandingSubjects(s: ConsentStatus, userId: string): ConsentSubjectRef[] {
+  if (s.audience !== 'aggregator') {
+    return s.outstandingOrgIds.map((id) => ({ subjectType: 'organisation', subjectId: id }));
+  }
+  return s.outstanding ? [{ subjectType: 'user', subjectId: userId }] : [];
 }

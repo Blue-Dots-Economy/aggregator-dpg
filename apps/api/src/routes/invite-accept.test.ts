@@ -29,6 +29,11 @@ const PARENT = '00000000-0000-4000-8000-0000000000c1';
 const COORD_EMAIL = 'asha@trrain.org';
 const OWNER_EMAIL = 'ravi@enable.org';
 
+/** The accept body without its `consent` block. */
+function withoutConsent(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'consent'));
+}
+
 describe('invite read and accept routes', () => {
   let app: FastifyInstance;
   let userStore: UserStoreFake;
@@ -236,7 +241,7 @@ describe('invite read and accept routes', () => {
   describe('POST /v1/user/invite/accept', () => {
     it('refuses a coordinator accept body without consent with 400 SCHEMA_VALIDATION', async () => {
       const token = await inviteToken('coordinator');
-      const { consent: _consent, ...noConsent } = coordinatorBody;
+      const noConsent = withoutConsent(coordinatorBody);
       const res = await accept('/v1/user/invite/accept', { ...noConsent, invite: token });
       expect(res.statusCode).toBe(400);
       expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
@@ -251,11 +256,9 @@ describe('invite read and accept routes', () => {
       expect(ledger.list()).toHaveLength(1);
       expect(ledger.list()[0]).toMatchObject({
         subjectType: 'user',
-        subjectId: (res.json() as { aggregator_id: string }).aggregator_id,
+        subjectId: res.json<{ aggregator_id: string }>().aggregator_id,
       });
-      const stored = await userStore.findById(
-        (res.json() as { aggregator_id: string }).aggregator_id,
-      );
+      const stored = await userStore.findById(res.json<{ aggregator_id: string }>().aggregator_id);
       expect(stored.ok && stored.value?.createdBy).toBe('self');
     });
 
@@ -488,7 +491,7 @@ describe('invite read and accept routes', () => {
   describe('POST /v1/org/invite/accept', () => {
     it('refuses an org accept body without consent with 400 SCHEMA_VALIDATION', async () => {
       const token = await inviteToken('org_owner');
-      const { consent: _consent, ...noConsent } = orgBody;
+      const noConsent = withoutConsent(orgBody);
       const res = await accept('/v1/org/invite/accept', { ...noConsent, invite: token });
       expect(res.statusCode).toBe(400);
       expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
@@ -500,7 +503,7 @@ describe('invite read and accept routes', () => {
       const token = await inviteToken('org_owner');
       const res = await accept('/v1/org/invite/accept', { ...orgBody, invite: token });
       expect(res.statusCode).toBe(201);
-      const orgId = (res.json() as { org_id: string }).org_id;
+      const orgId = res.json<{ org_id: string }>().org_id;
       expect(ledger.list()).toHaveLength(1);
       expect(ledger.list()[0]).toMatchObject({ subjectType: 'organisation', subjectId: orgId });
       const org = await orgStore.findById(orgId);

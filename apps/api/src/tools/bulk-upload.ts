@@ -268,7 +268,8 @@ async function waitForResult(
  * {@link EXIT_ROWS_FAILED} when rows failed or no counts were recorded, else 1.
  */
 async function report(upload: BulkUpload, io: CommandIo): Promise<number> {
-  io.out(`status: ${upload.status}${upload.statusReason ? ` (${upload.statusReason})` : ''}`);
+  const reason = upload.statusReason ? ` (${upload.statusReason})` : '';
+  io.out(`status: ${upload.status}${reason}`);
   if (upload.status !== 'completed') return 1;
   const counts = await withTimeout(
     loadCounts(upload.id, upload.status),
@@ -539,33 +540,42 @@ export async function run(args: string[], io: CommandIo): Promise<number> {
       );
       return 1;
     }
-    if (err instanceof UsageError) {
-      io.out(err.message);
-      io.out(USAGE);
-      return 2;
-    }
-    if (err instanceof Refusal) {
-      io.out(`REFUSED: ${err.message}`);
-    } else if (err instanceof HttpError && err.status < 500) {
-      io.out(`REFUSED: ${err.code}: ${err.detail}`);
-    } else if (err instanceof HttpError) {
-      // The cause is a store, storage or queue error: ids and driver text, no row data.
-      logger.error({
-        operation: 'tools.bulkUpload',
-        status: 'failure',
-        upload_id: uploadId,
-        error_code: err.code,
-        cause_type: err.cause === undefined ? undefined : errorType(err.cause),
-        cause: err.cause === undefined ? undefined : errorMessage(err.cause),
-      });
-      const upload = uploadId === undefined ? '' : `upload ${uploadId}: `;
-      io.out(`FAILED: ${upload}${err.code}: ${err.detail}`);
-    } else {
-      logger.error({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
-      io.out(`FAILED: ${errorMessage(err)}`);
-    }
-    return 1;
+    return reportError(err, uploadId, io);
   }
+}
+
+/**
+ * Prints a usage error, refusal or failure that is not tied to a started upload, and logs a failure.
+ *
+ * @returns 2 for a usage error, else 1.
+ */
+function reportError(err: unknown, uploadId: string | undefined, io: CommandIo): number {
+  if (err instanceof UsageError) {
+    io.out(err.message);
+    io.out(USAGE);
+    return 2;
+  }
+  if (err instanceof Refusal) {
+    io.out(`REFUSED: ${err.message}`);
+  } else if (err instanceof HttpError && err.status < 500) {
+    io.out(`REFUSED: ${err.code}: ${err.detail}`);
+  } else if (err instanceof HttpError) {
+    // The cause is a store, storage or queue error: ids and driver text, no row data.
+    logger.error({
+      operation: 'tools.bulkUpload',
+      status: 'failure',
+      upload_id: uploadId,
+      error_code: err.code,
+      cause_type: err.cause === undefined ? undefined : errorType(err.cause),
+      cause: err.cause === undefined ? undefined : errorMessage(err.cause),
+    });
+    const upload = uploadId === undefined ? '' : `upload ${uploadId}: `;
+    io.out(`FAILED: ${upload}${err.code}: ${err.detail}`);
+  } else {
+    logger.error({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
+    io.out(`FAILED: ${errorMessage(err)}`);
+  }
+  return 1;
 }
 
 /**
