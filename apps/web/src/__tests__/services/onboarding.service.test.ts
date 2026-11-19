@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BulkUploadStartUnreadError, onboardingService } from '../../services/onboarding.service';
+import { HttpError } from '@/services/http';
 
 /** A complete bulk-upload status body, as the API sends it. */
 function uploadStatus(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -430,6 +431,104 @@ describe('onboardingService', () => {
         )
         .mockResolvedValueOnce(new Response('Forbidden', { status: 403 }));
       await expect(onboardingService.uploadCsv(file, 'seeker', true)).rejects.toThrow();
+    });
+    describe('form upload (POST)', () => {
+      /** A create reply naming a form POST, with the signed PUT in `upload_url`. */
+      const created = (): Response =>
+        new Response(
+          JSON.stringify({
+            upload_id: 'u7',
+            upload: {
+              method: 'POST',
+              url: 'https://s3/bucket',
+              headers: {},
+              form_fields: { key: 'k', policy: 'p' },
+            },
+            upload_url: 'https://s3/put',
+            s3_key: 'k',
+            expires_at: '2026-01-01',
+            content_type: 'text/csv',
+            max_bytes: 1000,
+            schema_id: 's',
+            schema_version: '1',
+            status: 'pending',
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      const started = (): Response =>
+        new Response(JSON.stringify(uploadStatus({ upload_id: 'u7', status: 'row_processing' })), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+
+      it('sends the file as a form POST with the storage fields', async () => {
+        const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(created())
+          .mockResolvedValueOnce(new Response(null, { status: 204 }))
+          .mockResolvedValueOnce(started());
+        await onboardingService.uploadCsv(file, 'seeker', true);
+        const [url, init] = fetchSpy.mock.calls[1] as [string, RequestInit];
+        expect(url).toBe('https://s3/bucket');
+        expect(init.method).toBe('POST');
+        const form = init.body;
+        if (!(form instanceof FormData)) throw new Error('expected a form body');
+        expect(form.get('key')).toBe('k');
+        expect(form.get('file')).toBeInstanceOf(File);
+      });
+
+      it('retries as the signed PUT when the browser blocks the form POST', async () => {
+        const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(created())
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+          .mockResolvedValueOnce(new Response(null, { status: 200 }))
+          .mockResolvedValueOnce(started());
+        const result = await onboardingService.uploadCsv(file, 'seeker', true);
+        expect(result.status.status).toBe('row_processing');
+        const [url, init] = fetchSpy.mock.calls[2] as [string, RequestInit];
+        expect(url).toBe('https://s3/put');
+        expect(init.method).toBe('PUT');
+        expect(init.headers).toEqual({ 'Content-Type': 'text/csv' });
+      });
+
+      it('reports a storage failure, not a lost connection, when storage cannot be reached', async () => {
+        const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(created())
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+        const err = await onboardingService
+          .uploadCsv(file, 'seeker', true)
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(HttpError);
+        expect(err).toMatchObject({ status: 503, code: 'STORAGE_UPLOAD_FAILED' });
+        expect(logged).toHaveBeenCalledWith(
+          '[bulk-upload] upload to storage failed',
+          expect.objectContaining({ error: { name: 'TypeError', message: 'Failed to fetch' } }),
+        );
+        // `/start` is never called for a file that did not reach storage.
+        expect(fetchSpy).toHaveBeenCalledTimes(3);
+      });
+
+      it('does not retry a form POST that storage answered with a refusal', async () => {
+        const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(created())
+          .mockResolvedValueOnce(new Response('EntityTooLarge', { status: 400 }));
+        const err = await onboardingService
+          .uploadCsv(file, 'seeker', true)
+          .catch((e: unknown) => e);
+        expect(err).toMatchObject({ code: 'STORAGE_UPLOAD_LINK_EXPIRED' });
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      });
     });
   });
 });
