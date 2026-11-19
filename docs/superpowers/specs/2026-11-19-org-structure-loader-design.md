@@ -82,6 +82,42 @@ Today every owner and coordinator account has a terms acceptance in the consent 
   - skips provisioned accounts that haven't accepted yet.
 - The invite-accept routes still always write consent. Only the loader path creates without it.
 
+## Bulk upload on a coordinator's behalf (#1124)
+
+**Why:** our team, which has cluster access, runs the first bulk uploads for loaded coordinators before any of them logs in. The team taking over operations has no cluster access yet.
+
+**Command:** `apps/api/src/tools/bulk-upload.ts`, shipped in the API image like the loader, and run in the API pod:
+
+```
+node dist/tools/bulk-upload.js --coordinator <email or user id> --type <profile type> --file <path.csv> --operator <name> [--skip-rate-limit]
+```
+
+Exit codes: 0 ok, 1 refused or failed, 2 usage.
+
+**How it works:**
+1. Split the create and start steps of `POST /v1/bulk-uploads` and `POST /v1/bulk-uploads/:id/start` (`apps/api/src/routes/bulk-uploads.ts`) into a shared service (`services/bulk-upload/`), with no change in route behaviour. The routes and the command both call it, the same approach as the loader's create services.
+2. **Preconditions.** The command refuses unless:
+   - the coordinator exists and is `active` (loaded by the org loader or registered normally);
+   - they serve the given profile type;
+   - the file passes the same size and header checks as a portal upload.
+3. **Storage and processing.** The command writes the CSV to object storage with `ObjectStorageBase.put` under the same bulk-upload area and key layout the portal uses, instead of a browser presigned upload. It then runs the shared start step, which enqueues `bulk-file-process` as usual. Processing, row errors, the errors report, statuses and the Onboarding counts are unchanged from a portal upload.
+4. **Who did it.**
+   - `bulk_uploads.uploaded_by` stays the coordinator's user id. The column is a required user id; no migration.
+   - The operator is recorded in the attestation's consent `source`: `bulk_upload:<uploadId>:v<n>:provisioned:<operator>`. The operator part is built with `provisionedBy` from `services/provisioned.ts`; no other code spells the prefix.
+   - The subject stays the coordinator (`subject_type = 'user'`), as for a portal upload.
+   - The command's logs carry the upload id, the coordinator id and the operator name, never row data.
+5. **Rate limit.** The usual per-coordinator limit (`checkBulkUploadRate`) applies by default. `--skip-rate-limit` skips it for one run, and the log records that it was skipped. The runbook says to use it only for the initial load.
+6. **Output.** The upload id and final status are printed once processing finishes (the command polls the upload status), plus the path of the errors report when any rows failed.
+7. **Runbook:**
+   - copy the file in with `kubectl cp`;
+   - run the command, reading the status and the errors report;
+   - delete the file;
+   - nobody is told to log in until the terms screen (#1120) is live.
+
+**Open question (product and legal):** can our team, as operator, attest that the source team holds the participants' consent? The command can be built before the answer, but must not be run on UP without it.
+
+**Depends on:** `services/provisioned.ts` (commit `86f9e75d`, on this branch).
+
 ## Returning to the main release cycle (operations team)
 
 The runbook lists what the main release cycle does not know about, so the team can reconcile before moving UP back:
