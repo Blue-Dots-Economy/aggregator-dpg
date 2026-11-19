@@ -49,7 +49,7 @@ describe('ensureTermsAccepted', () => {
   });
 
   it('checks an absent status, stores ok and returns', async () => {
-    withStatus(undefined);
+    withStatus();
     vi.mocked(fetchTermsStatus).mockResolvedValue({ status: 'ok' });
     await expect(ensureTermsAccepted('/dashboard')).resolves.toBeUndefined();
     expect(getFreshAccessToken).toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe('ensureTermsAccepted', () => {
   });
 
   it('checks an absent status, stores outstanding and redirects', async () => {
-    withStatus(undefined);
+    withStatus();
     vi.mocked(fetchTermsStatus).mockResolvedValue({ status: 'outstanding' });
     await expect(ensureTermsAccepted('/console')).rejects.toThrow(
       `REDIRECT:/accept-terms?returnTo=${encodeURIComponent('/console')}`,
@@ -74,13 +74,13 @@ describe('ensureTermsAccepted', () => {
   });
 
   it('lets the page load when the check fails (fail-open)', async () => {
-    withStatus(undefined);
+    withStatus();
     vi.mocked(fetchTermsStatus).mockResolvedValue({ status: 'unknown' });
     await expect(ensureTermsAccepted('/dashboard')).resolves.toBeUndefined();
   });
 
   it('does not block the page when storing the status fails', async () => {
-    withStatus(undefined);
+    withStatus();
     vi.mocked(fetchTermsStatus).mockResolvedValue({ status: 'ok' });
     update.mockRejectedValueOnce(new Error('redis down'));
     await expect(ensureTermsAccepted('/dashboard')).resolves.toBeUndefined();
@@ -90,7 +90,7 @@ describe('ensureTermsAccepted', () => {
   });
 
   it('logs a store that answers not-ok and still redirects on outstanding', async () => {
-    withStatus(undefined);
+    withStatus();
     vi.mocked(fetchTermsStatus).mockResolvedValue({ status: 'outstanding' });
     update.mockResolvedValueOnce({ ok: false, error: { code: 'STORE_UNAVAILABLE' } } as never);
     await expect(ensureTermsAccepted('/dashboard')).rejects.toThrow('REDIRECT:/accept-terms');

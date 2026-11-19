@@ -205,19 +205,19 @@ describe('AcceptTermsView', () => {
   const fetchMock = vi.fn();
   const assign = vi.fn();
   const reload = vi.fn();
-  const originalLocation = window.location;
+  const originalLocation = globalThis.location;
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('fetch', fetchMock);
-    Object.defineProperty(window, 'location', {
+    Object.defineProperty(globalThis, 'location', {
       configurable: true,
       value: { ...originalLocation, assign, reload },
     });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: originalLocation });
   });
 
   const docs = [

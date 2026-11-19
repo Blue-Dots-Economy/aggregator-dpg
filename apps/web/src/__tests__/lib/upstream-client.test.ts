@@ -175,7 +175,7 @@ describe('callApi', () => {
         termsStatus: 'outstanding',
       });
       const fetchMock = vi.fn();
-      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      globalThis.fetch = fetchMock;
       const res = await callApi('/v1/dashboard/items?page=1');
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ code: 'TERMS_REQUIRED' });
@@ -189,7 +189,7 @@ describe('callApi', () => {
         termsStatus: 'outstanding',
       });
       const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      globalThis.fetch = fetchMock;
       const res = await callApi('/v1/user/consent', { method: 'POST', body: {} });
       expect(res.status).toBe(200);
       expect(fetchMock).toHaveBeenCalledWith(
@@ -205,7 +205,7 @@ describe('callApi', () => {
         termsStatus: 'ok',
       });
       const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      globalThis.fetch = fetchMock;
       const res = await callApi('/v1/dashboard/items');
       expect(res.status).toBe(200);
       expect(fetchMock).toHaveBeenCalledTimes(1);
