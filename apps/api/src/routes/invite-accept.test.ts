@@ -253,6 +253,10 @@ describe('invite read and accept routes', () => {
         subjectType: 'user',
         subjectId: (res.json() as { aggregator_id: string }).aggregator_id,
       });
+      const stored = await userStore.findById(
+        (res.json() as { aggregator_id: string }).aggregator_id,
+      );
+      expect(stored.ok && stored.value?.createdBy).toBe('self');
     });
 
     it('creates a pending coordinator whose login is enabled, unverified and marked invited', async () => {
