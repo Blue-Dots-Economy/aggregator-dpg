@@ -115,7 +115,7 @@ An acting request carries the owner's token, so the claim holds the owner's admi
   - With no `X-Acting-Account` header, the effective roles are the claim entries **without** the `acting:` prefix, so the owner console is unchanged and tagged entries never grant anything.
   - With the header, the effective roles are **only** the entries `acting:<header value>:<k>`, mapped to `k`; the owner's plain roles don't count. No matching entry means no roles, so `403`.
   - `permissions` and the `signed_in`/`self` `count(roles) == 0` check use the effective roles.
-  - Envoy must pass `x-acting-account` to the OPA check request (`infra/envoy/envoy.yaml`, and the Helm `opa-authz.rego` / `edge-init.js` in bluedots-automation, which mirror the policy).
+  - Envoy's gRPC ext_authz already forwards `x-acting-account` to OPA (`infra/envoy/envoy.yaml:95-103`). The Helm `opa-authz.rego` / `edge-init.js` in bluedots-automation mirror the policy and must get the same change.
 - **The API still verifies the link** (the three checks above) and builds the context from the row. The edge decides the permission and the API decides the identity and the data scope, so neither trusts the header alone.
 - **Token freshness.** After self-add, the BFF's `POST /api/auth/acting` refreshes the token before it stores the acting account, so the first acting request carries the tagged roles. Changes later follow the usual sync and refresh lag.
 - **Other claim readers.** Audit every consumer of the `roles` claim (API, web, the Helm policy copy) so that `acting:` entries are ignored where they aren't expected.
@@ -127,7 +127,7 @@ The session is already stored on the server (Redis, `apps/web/src/lib/session/in
 
 - **Session:** add `actingAccountId?: string` to `SessionData`. Changing it clears the `consoleActor` cache.
 - **BFF routes:**
-  - `POST /api/auth/acting` `{ accountId }` calls the API's acting check (for example `GET /v1/user/read/me` with the header). If that returns a coordinator actor, store the id and redirect to `/onboarding`. Otherwise return `403`.
+  - `POST /api/auth/acting` `{ accountId }` checks `/me`'s `own_coordinator_account_id` equals `accountId`, refreshes the token and checks it carries `acting:<accountId>:` entries (else `409 ACTING_NOT_READY`), then stores the id and redirects to `/onboarding`. Otherwise it returns `403`.
   - `DELETE /api/auth/acting` clears it and redirects to `/console`.
 - **`callApi`** (`lib/upstream-client.ts:65-80`): when `session.actingAccountId` is set, add `X-Acting-Account`. Other BFF proxies that call the API with the user token (`lib/bff-service-proxy.ts` and any others found) do the same.
 - **`(protected)/layout.tsx:36-44`:** accept the session when the token has `aggregator_id` **or** `session.actingAccountId` is set. An owner without an acting account still goes to `/console`. The footer and `user` show the coordinator account's name, and "Coordinator · <org name>".
@@ -166,7 +166,7 @@ No special-casing. The account is an ordinary coordinator in `users.org_id`, so 
 
 - One branch per block, cut from `feature`, with stacked PRs per `.claude/rules/pull-requests.md`:
   1. **api:** schema, migration, identity store, resolver, auth, self-add, roles sync, boot reconcile, `edge.rego` with its tests, `routes.json`, docs.
-   - Hand-written `infra/envoy` header pass-through goes in the infra and config PR (block 4).
+   - No infra PR: Envoy's gRPC ext_authz already forwards all request headers to OPA.
    - The Helm policy and config copy is a bluedots-automation Task, which must deploy with or before the API.
   2. **web:** session, BFF routes, layouts, sidebar, My Team button and tag.
 - After both merge into `feature`, merge into `hotfix/up-speedrun`. That branch has `coordinator-create.ts`, so expect conflicts around the registration checks; this design doesn't edit them.
