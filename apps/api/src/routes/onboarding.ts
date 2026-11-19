@@ -81,12 +81,7 @@ export async function registerOnboardingRoutes(base: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req.query);
-      const conditions = [eq(onboarding.userId, auth.aggregatorId)];
-      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
-      const byType = await profileTypeCondition(auth, req.query.domain);
-      if (byType) conditions.push(byType);
+      const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
         .select({
@@ -96,7 +91,7 @@ export async function registerOnboardingRoutes(base: FastifyInstance): Promise<v
           skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
         })
         .from(onboarding)
-        .where(and(...conditions));
+        .where(where);
 
       const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
       return reply.send({
@@ -127,12 +122,7 @@ export async function registerOnboardingRoutes(base: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const range = parseRange(req.query);
-      const conditions = [eq(onboarding.userId, auth.aggregatorId)];
-      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
-      const byType = await profileTypeCondition(auth, req.query.domain);
-      if (byType) conditions.push(byType);
+      const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
         .select({
@@ -143,7 +133,7 @@ export async function registerOnboardingRoutes(base: FastifyInstance): Promise<v
           skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
         })
         .from(onboarding)
-        .where(and(...conditions))
+        .where(where)
         .groupBy(onboarding.source);
 
       return reply.send({
@@ -154,6 +144,28 @@ export async function registerOnboardingRoutes(base: FastifyInstance): Promise<v
       });
     },
   );
+}
+
+/**
+ * The filter both metrics reads share: the caller's rows, the date range and the profile type.
+ *
+ * @param auth - The verified caller.
+ * @param query - The validated query.
+ * @returns The parsed range, echoed in the response, and the where clause.
+ * @throws SCHEMA_VALIDATION if `domain` is not a network domain.
+ * @throws DOMAIN_NOT_SERVED if the caller does not serve `domain`.
+ */
+async function metricsFilter(
+  auth: AuthContext,
+  query: z.infer<typeof RangeQuerySchema>,
+): Promise<{ range: { from?: Date; to?: Date }; where: SQL | undefined }> {
+  const range = parseRange(query);
+  const conditions = [eq(onboarding.userId, auth.aggregatorId)];
+  if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
+  if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+  const byType = await profileTypeCondition(auth, query.domain);
+  if (byType) conditions.push(byType);
+  return { range, where: and(...conditions) };
 }
 
 /**
