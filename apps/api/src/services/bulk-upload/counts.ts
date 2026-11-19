@@ -4,7 +4,9 @@
  */
 
 import { and, eq, inArray } from 'drizzle-orm';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getDb } from '../../db/client.js';
+import { logger } from '../../logger.js';
 import { onboarding } from '../../db/schema.js';
 import { getRedis } from '../redis/index.js';
 
@@ -21,7 +23,7 @@ export const ZERO_COUNTS: UploadCounts = { totalRows: null, passed: 0, failed: 0
 /**
  * Loads live counters from Redis for an in-flight upload.
  *
- * Returns ZERO_COUNTS when the keys are missing.
+ * Returns ZERO_COUNTS when the keys are missing, and when Redis fails (logged).
  */
 async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
   try {
@@ -36,7 +38,14 @@ async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
     const skipped = Number.parseInt(counters[2] ?? '0', 10) || 0;
     const totalRows = meta ? Number.parseInt(meta, 10) || null : null;
     return { totalRows, passed, failed, skipped };
-  } catch {
+  } catch (err) {
+    logger.warn({
+      operation: 'bulkUpload.loadCountsFromRedis',
+      status: 'failure',
+      error: errorMessage(err),
+      error_type: errorType(err),
+      upload_id: uploadId,
+    });
     return ZERO_COUNTS;
   }
 }
