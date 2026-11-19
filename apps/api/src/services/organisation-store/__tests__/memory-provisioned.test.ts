@@ -15,7 +15,11 @@ describe('InMemoryOrganisationStore.create without a consent hook', () => {
     };
     const r = await store.create(input, permissiveTreeRules());
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.updatedBy).toBe('provisioned:ops');
+    if (!r.ok) return;
+    expect(r.value.updatedBy).toBe('provisioned:ops');
+    expect(r.value.createdBy).toBe('provisioned:ops');
+    const read = await store.findById(r.value.id);
+    expect(read.ok && read.value?.createdBy).toBe('provisioned:ops');
   });
 
   it('returns CONSENT_REQUIRED for a self-created org and stores nothing', async () => {

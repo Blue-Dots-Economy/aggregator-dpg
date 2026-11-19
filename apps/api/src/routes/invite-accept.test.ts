@@ -36,6 +36,7 @@ describe('invite read and accept routes', () => {
   let invites: RegistrationInvitesStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let ledger: ConsentLedgerFake;
 
   const coordinatorBody = {
     name: 'TRRAIN',
@@ -113,7 +114,8 @@ describe('invite read and accept routes', () => {
     _setRegistrationInvitesStore(invites);
     _setIdpAdmin(idp);
     _setMailer(mailer);
-    _setConsentLedger(new ConsentLedgerFake());
+    ledger = new ConsentLedgerFake();
+    _setConsentLedger(ledger);
     useMaxDepth(3);
     _setAccessTokenVerifier(async (token) => {
       if (token === 'service-token') {
@@ -232,6 +234,31 @@ describe('invite read and accept routes', () => {
   });
 
   describe('POST /v1/user/invite/accept', () => {
+    it('refuses a coordinator accept body without consent with 400 SCHEMA_VALIDATION', async () => {
+      const token = await inviteToken('coordinator');
+      const { consent: _consent, ...noConsent } = coordinatorBody;
+      const res = await accept('/v1/user/invite/accept', { ...noConsent, invite: token });
+      expect(res.statusCode).toBe(400);
+      expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
+      expect(ledger.list()).toHaveLength(0);
+      expect(await inviteStatus('inv-coordinator')).toBe('pending');
+    });
+
+    it('records exactly one consent row for an accepted coordinator invite', async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
+      expect(res.statusCode).toBe(201);
+      expect(ledger.list()).toHaveLength(1);
+      expect(ledger.list()[0]).toMatchObject({
+        subjectType: 'user',
+        subjectId: (res.json() as { aggregator_id: string }).aggregator_id,
+      });
+      const stored = await userStore.findById(
+        (res.json() as { aggregator_id: string }).aggregator_id,
+      );
+      expect(stored.ok && stored.value?.createdBy).toBe('self');
+    });
+
     it('creates a pending coordinator whose login is enabled, unverified and marked invited', async () => {
       const token = await inviteToken('coordinator');
       const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
@@ -459,6 +486,27 @@ describe('invite read and accept routes', () => {
   });
 
   describe('POST /v1/org/invite/accept', () => {
+    it('refuses an org accept body without consent with 400 SCHEMA_VALIDATION', async () => {
+      const token = await inviteToken('org_owner');
+      const { consent: _consent, ...noConsent } = orgBody;
+      const res = await accept('/v1/org/invite/accept', { ...noConsent, invite: token });
+      expect(res.statusCode).toBe(400);
+      expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
+      expect(ledger.list()).toHaveLength(0);
+      expect(await inviteStatus('inv-org_owner')).toBe('pending');
+    });
+
+    it('records exactly one consent row and marks the org created_by self', async () => {
+      const token = await inviteToken('org_owner');
+      const res = await accept('/v1/org/invite/accept', { ...orgBody, invite: token });
+      expect(res.statusCode).toBe(201);
+      const orgId = (res.json() as { org_id: string }).org_id;
+      expect(ledger.list()).toHaveLength(1);
+      expect(ledger.list()[0]).toMatchObject({ subjectType: 'organisation', subjectId: orgId });
+      const org = await orgStore.findById(orgId);
+      expect(org.ok && org.value?.createdBy).toBe('self');
+    });
+
     it('creates a pending org under the inviting org with an enabled, unverified, invited owner', async () => {
       const token = await inviteToken('org_owner');
       const res = await accept('/v1/org/invite/accept', { ...orgBody, invite: token });

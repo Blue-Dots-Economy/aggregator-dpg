@@ -21,15 +21,20 @@ import type { DbExecutor } from './contact-writes.js';
  *
  * @param db - The caller's transaction.
  * @param contactId - The owner's contact id.
+ * @param createdBy - `created_by` / `updated_by` of a new account; an existing account keeps its own.
  * @returns The admin account's `users.id`.
  * @throws Error when the account cannot be created or held twice in a row.
  */
-export async function linkAdminAccount(db: DbExecutor, contactId: string): Promise<string> {
+export async function linkAdminAccount(
+  db: DbExecutor,
+  contactId: string,
+  createdBy = 'self',
+): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt++) {
     // Explicit NULLs: the role CHECK requires them on admin rows, and the column defaults are for coordinators.
     await db.execute(sql`
       INSERT INTO users (user_type, contact_id, status, profile, created_by, updated_by)
-      VALUES ('admin', ${contactId}, NULL, NULL, 'self', 'self')
+      VALUES ('admin', ${contactId}, NULL, NULL, ${createdBy}, ${createdBy})
       ON CONFLICT (contact_id, user_type) DO NOTHING`);
     const held = await db.execute<{ id: string }>(sql`
       SELECT id FROM users

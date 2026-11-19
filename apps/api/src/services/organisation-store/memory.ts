@@ -127,6 +127,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       createdAt: now,
       updatedAt: now,
       updatedBy: createdBy,
+      createdBy,
       rejectedAt: null,
       isDefault: false,
       locations: input.locations ?? [],

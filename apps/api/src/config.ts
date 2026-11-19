@@ -29,6 +29,11 @@ const ConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /**
+   * Where log lines go. `stderr` is for operator tools whose stdout carries their output
+   * (the org loader sets it); the API and worker keep `stdout`.
+   */
+  LOG_DESTINATION: z.enum(['stdout', 'stderr']).default('stdout'),
   /** Comma-separated allowed CORS origins. Use `*` only in dev. */
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3100'),
   /** Postgres connection string. No default because it carries credentials; startup fails when unset. */

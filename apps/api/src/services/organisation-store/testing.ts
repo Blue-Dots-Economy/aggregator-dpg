@@ -80,6 +80,7 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     createdAt,
     updatedAt: createdAt,
     updatedBy: null,
+    createdBy: 'self',
     rejectedAt: null,
     isDefault: false,
     locations: [],

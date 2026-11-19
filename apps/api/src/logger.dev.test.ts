@@ -26,8 +26,19 @@ describe('loggerOptions in development', () => {
         translateTime: 'SYS:HH:MM:ss.l',
         singleLine: false,
         ignore: 'pid,hostname,service,env',
+        destination: 1,
       },
     });
     expect(loggerOptions.base).toEqual({ service: 'aggregator-api', env: 'development' });
+  });
+
+  it('sends pretty output to stderr when LOG_DESTINATION is stderr', async () => {
+    vi.resetModules();
+    vi.doMock('./config.js', () => ({
+      config: { LOG_LEVEL: 'info', NODE_ENV: 'development', LOG_DESTINATION: 'stderr' },
+    }));
+    const { loggerOptions } = await import('./logger.js');
+    expect(loggerOptions.transport).toMatchObject({ options: { destination: 2 } });
+    vi.doUnmock('./config.js');
   });
 });

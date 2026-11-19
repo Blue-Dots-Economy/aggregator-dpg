@@ -454,6 +454,65 @@ suite('cleanup (migration 0029) — integration', () => {
     }
   });
 
+  describe('V1 coordinator_without_consent', () => {
+    /** Runs V1 after seeding coordinators (slug, created_by, ledger sources) in a rolled-back transaction. */
+    async function v1With(
+      seeds: Array<{ slug: string; createdBy: string; sources: string[] }>,
+    ): Promise<number> {
+      const script = await readFile(VERIFY_SQL, 'utf8');
+      const v1 = script.slice(script.indexOf("SELECT 'V1"), script.indexOf('-- V2')).trim();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const s of seeds) {
+          const email = `${s.slug}@v1.test`;
+          await client.query(
+            `INSERT INTO contact (id, email) VALUES (contact_id_of($1, NULL), $1)`,
+            [email],
+          );
+          const u = await client.query(
+            `INSERT INTO users (user_type, contact_id, signalstack_org_slug, signalstack_org_name,
+                                status, org_id, created_by, updated_by)
+             VALUES ('coordinator', contact_id_of($1, NULL), $2, $2, 'active',
+                     (SELECT id FROM organisations WHERE slug = 'default'), $3, $3)
+             RETURNING id`,
+            [email, s.slug, s.createdBy],
+          );
+          for (const source of s.sources) {
+            await client.query(
+              `INSERT INTO consent_record (subject_type, subject_id, user_id, terms_version,
+                                           privacy_version, network, source, accepted_at, valid_till)
+               VALUES ('user', $1, $1, 1, 1, 'blue_dot', $2, now(), now() + interval '1 year')`,
+              [u.rows[0].id, source],
+            );
+          }
+        }
+        const before = await client.query(v1.replace(/;\s*$/, ''));
+        return Number((before.rows[0] as { n: number }).n);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+    }
+
+    // The shared fixture's own coordinators all carry a registration row, so the baseline is 0.
+    it('skips an operator-provisioned coordinator that has not accepted yet', async () => {
+      expect(await v1With([{ slug: 'v1-prov', createdBy: 'provisioned:ops', sources: [] }])).toBe(
+        0,
+      );
+    });
+
+    it('counts a self-registered coordinator with no acceptance', async () => {
+      expect(await v1With([{ slug: 'v1-self', createdBy: 'self', sources: [] }])).toBe(1);
+    });
+
+    it('does not count a coordinator whose only acceptance is a first-login row', async () => {
+      expect(
+        await v1With([{ slug: 'v1-login', createdBy: 'self', sources: ['first-login'] }]),
+      ).toBe(0);
+    });
+  });
+
   it('refuses any change to the ledger except a link dropping to NULL', async () => {
     await expect(
       pool.query(`UPDATE consent_record SET network = 'x' WHERE subject_id = $1`, [ids.c1]),

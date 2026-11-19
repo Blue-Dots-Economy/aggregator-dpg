@@ -128,7 +128,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           phone: input.ownerPhone ?? null,
           name: input.ownerName ?? null,
         });
-        const ownerUserId = await linkAdminAccount(tx, contactId);
+        const ownerUserId = await linkAdminAccount(tx, contactId, createdBy);
         if (input.ownerKcSub)
           await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub, 'admin');
         const parent = await resolveParent(tx, input.parentId);
@@ -852,6 +852,7 @@ function toDomain(row: JoinedRow): Organisation {
     createdAt: o.createdAt,
     updatedAt: o.updatedAt,
     updatedBy: o.updatedBy,
+    createdBy: o.createdBy ?? 'self',
     rejectedAt: o.rejectedAt,
     isDefault,
     locations: o.locations,

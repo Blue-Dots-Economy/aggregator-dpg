@@ -45,11 +45,11 @@ Today every org and coordinator joins by invitation. The invitee fills in the fo
 
 ## Approaches
 
-| | Approach | Trade-off |
-|---|---|---|
+|                | Approach                                                                                                                                                                                                          | Trade-off                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A (chosen)** | Move the create steps out of the two invite-accept routes into shared services, with no change in behaviour. The routes and the loader both call them; the loader then calls `approveOrg` / `approveCoordinator`. | One code path for validation, slugs, contacts and Keycloak, so no drift. A moderate refactor of the accept routes, covered by their existing tests. |
-| B | The loader calls the stores and the Keycloak adapter directly, copying what accept does. | Leaves the routes alone, but duplicates the rules, and they'll drift. |
-| C | The loader drives the invite and accept APIs in-process with internal tokens. | Reuses everything, but has to work around the invite emails and token checks. |
+| B              | The loader calls the stores and the Keycloak adapter directly, copying what accept does.                                                                                                                          | Leaves the routes alone, but duplicates the rules, and they'll drift.                                                                               |
+| C              | The loader drives the invite and accept APIs in-process with internal tokens.                                                                                                                                     | Reuses everything, but has to work around the invite emails and token checks.                                                                       |
 
 Aniket picked A.
 
@@ -95,6 +95,7 @@ node dist/tools/bulk-upload.js --coordinator <email or user id> --type <profile 
 Exit codes: 0 ok, 1 refused or failed, 2 usage.
 
 **How it works:**
+
 1. Split the create and start steps of `POST /v1/bulk-uploads` and `POST /v1/bulk-uploads/:id/start` (`apps/api/src/routes/bulk-uploads.ts`) into a shared service (`services/bulk-upload/`), with no change in route behaviour. The routes and the command both call it, the same approach as the loader's create services.
 2. **Preconditions.** The command refuses unless:
    - the coordinator exists and is `active` (loaded by the org loader or registered normally);
@@ -154,24 +155,24 @@ node dist/tools/org-loader.js apply --orgs orgs.csv --coordinators coordinators.
 
 One row per org, in any order:
 
-| Column | Notes |
-|---|---|
-| `name` | Required. Org display name |
-| `parent` | Name of the parent org: one in this file, or one that already exists. Blank means the network facilitator root |
-| `owner_name`, `owner_phone`, `owner_email` | Required |
-| any other column | Any extra field the instance's org form requires (e.g. `organisation_type`, `management_type`, `aggregator_type`), named as in `org-registration.v1.json` |
-| `address_*` | Optional. Same parts as the form address block |
+| Column                                     | Notes                                                                                                                                                     |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                     | Required. Org display name                                                                                                                                |
+| `parent`                                   | Name of the parent org: one in this file, or one that already exists. Blank means the network facilitator root                                            |
+| `owner_name`, `owner_phone`, `owner_email` | Required                                                                                                                                                  |
+| any other column                           | Any extra field the instance's org form requires (e.g. `organisation_type`, `management_type`, `aggregator_type`), named as in `org-registration.v1.json` |
+| `address_*`                                | Optional. Same parts as the form address block                                                                                                            |
 
 **coordinators.csv**
 
 One row per coordinator:
 
-| Column | Notes |
-|---|---|
-| `org` | Org name, from the file or already existing |
-| `name`, `phone`, `email` | Required |
-| `profile_types` | Required. Separated by `;`, each one a network domain id |
-| any other column | Any extra field the coordinator form requires, named as in `registration.v1.json` |
+| Column                   | Notes                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `org`                    | Org name, from the file or already existing                                       |
+| `name`, `phone`, `email` | Required                                                                          |
+| `profile_types`          | Required. Separated by `;`, each one a network domain id                          |
+| any other column         | Any extra field the coordinator form requires, named as in `registration.v1.json` |
 
 Each row becomes the same body the matching accept route takes, without `invite` and `consent`, and is checked with the same schema validator. Consent is taken out of the schema's `required` list for the loader only, never for the routes. The runbook ships a sheet template per instance, generated from its two schemas.
 
@@ -197,28 +198,28 @@ Each row becomes the same body the matching accept route takes, without `invite`
 2. **Coordinators.** For each coordinator:
    - Run the shared create-coordinator service with no consent hook and no invite id. It creates the user row with a Signals slug and the Keycloak user.
    - Then call `approveCoordinator({ decidedBy: 'provisioned:<operator>' })`, which creates the Signals org, sets the Keycloak attributes and activates the row.
-3. **Token roles.** The tool initialises the RBAC runtime at start and awaits the role sync for every account it touched, instead of the fire-and-forget call. A sync failure counts as a failed row.
+3. **Token roles.** The tool initialises the RBAC runtime at start and awaits the role sync for every account it touched, instead of the fire-and-forget call. The report records each sync outcome. A failed or deferred sync never fails the row; the background sweep repairs it.
 4. **Resuming:**
    - An org or coordinator left `pending` by an earlier stopped run is approved, not recreated.
    - Create failures roll back what they created, as the accept routes already do (for example `discardHalfCreatedOrg`).
 
 ### Shared services (the refactor)
 
-| Today (private, in the route) | Becomes | Used by |
-|---|---|---|
-| `aggregator-orgs.ts`: `checkOrgSubmission`, `createOrgRecord`, `provisionOrgLogin`, `discardHalfCreatedOrg`, `findOwnerContactClash` | `services/registration/org-create.ts` | Org accept route; loader |
+| Today (private, in the route)                                                                                                                                                         | Becomes                                       | Used by                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | -------------------------------- |
+| `aggregator-orgs.ts`: `checkOrgSubmission`, `createOrgRecord`, `provisionOrgLogin`, `discardHalfCreatedOrg`, `findOwnerContactClash`                                                  | `services/registration/org-create.ts`         | Org accept route; loader         |
 | `aggregator-registrations.ts`: `checkCoordinatorSubmission` (minus the rate limit), `createCoordinatorRow`, `createCoordinatorLogin`, `createAggregatorWithSlug`, `assertContactFree` | `services/registration/coordinator-create.ts` | Coordinator accept route; loader |
 
 The services return `Result` values. The routes map them to the same HTTP errors as today, so route tests and responses don't change. The consent hook becomes an optional parameter: the routes always pass it, the loader never does. Invite claiming, rate limits and `assertNotOrgOwner` stay in the routes.
 
 ### What the result looks like
 
-| | Org owner | Coordinator |
-|---|---|---|
-| DB | contact, admin account, `user_identities`, org `active` | contact, user row `active` with Signals org id and slug |
-| Keycloak | enabled, `emailVerified=false`, `decision_made=approved`, `org_owner` role, org group | enabled, `emailVerified=false`, `decision_made=approved`, `aggregator_id`, `aggregator_type`, `signalstack_org_id`, roles |
-| Signals | — | aggregator org (`external_id` = user id) |
-| Not written | terms record, emails | terms record, invite, emails |
+|             | Org owner                                                                             | Coordinator                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| DB          | contact, admin account, `user_identities`, org `active`                               | contact, user row `active` with Signals org id and slug                                                                   |
+| Keycloak    | enabled, `emailVerified=false`, `decision_made=approved`, `org_owner` role, org group | enabled, `emailVerified=false`, `decision_made=approved`, `aggregator_id`, `aggregator_type`, `signalstack_org_id`, roles |
+| Signals     | —                                                                                     | aggregator org (`external_id` = user id)                                                                                  |
+| Not written | terms record, emails                                                                  | terms record, invite, emails                                                                                              |
 
 - `created_by` / `updated_by` and `decidedBy` read `provisioned:<operator>`, so loaded accounts can be found later.
 - First sign-in with an email code works with no activation step. #1120 then shows the terms.
@@ -244,6 +245,7 @@ The services return `Result` values. The routes map them to the same HTTP errors
 ### Runbook
 
 `docs/org-structure-loader-runbook.md`:
+
 - sheet template per instance;
 - copying files into the pod;
 - `check`, then `apply`;
@@ -254,20 +256,24 @@ The services return `Result` values. The routes map them to the same HTTP errors
 ### Rules settled during review (author's calls)
 
 **Mapping**
+
 - The CSV `name` of a coordinator is the person, written to `contact.name`. The body's top-level `name` (the form's "Organisation Name") is set to the org's display name, as `CoordinatorRegisterForm` does.
 - Coordinators can't be placed in the network facilitator root. `check` rejects it.
 
 **Duplicates inside the files**
+
 - Org names must be unique (case-insensitive). Coordinator person names may repeat.
 - An owner may appear on several org rows only with the same email and phone. The contact id is built from both, so a different phone fails the insert.
 - A person can't be both an owner and a coordinator in the files. The coordinator path refuses an owner's email.
 
 **Reusing existing owners**
+
 - An owner who already owns active orgs is reused: same contact, admin account and Keycloak user, looked up through the owner's existing org.
 - An owner who has any pending (invited) org is refused. Approving a new org would stop their invited org from ever activating.
 - The network admin (first `ADMIN_EMAILS`) and the Default-org owner are refused as owners of loaded orgs. The org store can't find them through `findByOwnerEmail`.
 
 **Resuming**
+
 - The loader only resumes or adopts rows it created (`created_by` / `updated_by` = `provisioned:%`). A real invitee's pending registration that matches a CSV row is a check error, never approved by the loader.
 - A loader row left complete but pending is approved.
 - A loader row left half-created by a killed process is removed and created again. Only the Keycloak user or group linked to it by id (`ownerKcSub`, `kcGroupId`, `aggregator_id`) is removed. The loader never adopts a Keycloak user or group found only by email or name; if one is in the way, that row fails and the report tells the operator.
@@ -275,6 +281,7 @@ The services return `Result` values. The routes map them to the same HTTP errors
 - Token roles: the approve services' background sync and the running API's sweep (`RBAC_TOKEN_ROLES_SWEEP_MS`) repair a deferred or failed sync. The loader still awaits one sync per account and reports a failure, but doesn't fail the row for it.
 
 **Store changes**
+
 - The org store's create input gets `createdBy` / `updatedBy`, which are hard-coded to `self` today.
 
 ## Left to the builder
