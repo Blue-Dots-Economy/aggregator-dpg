@@ -292,6 +292,36 @@ async function actingContext(
 }
 
 /**
+ * {@link authenticate} that also accepts an org owner acting as its own
+ * coordinator account (`x-acting-account`, see {@link requireApproved}).
+ * Runs no approval gate, backfill or login record, so a route that must show
+ * a pending account (the profile self-read) can use it.
+ *
+ * @param req - The Fastify request.
+ * @returns The context (`acting: true` when acting) or the auth error.
+ */
+export async function authenticateAllowingActing(req: FastifyRequest): Promise<AuthResult> {
+  const verified = await verifyRequest(req);
+  if (!verified.ok) return verified;
+  const { sub, payload } = verified;
+  const acting = readActingHeader(req);
+  if (acting.kind === 'malformed') {
+    logActing('MALFORMED');
+    return actingInvalid('x-acting-account is not an account id');
+  }
+  const claimed = readAggregatorId(payload);
+  if (!claimed) {
+    if (acting.kind === 'absent') return missingAggregatorId();
+    return actingContext(sub, acting.id, payload);
+  }
+  if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
+    logActing('CLAIM_MISMATCH');
+    return actingInvalid('x-acting-account differs from the token aggregator_id');
+  }
+  return { ok: true, context: hydrateContext(sub, claimed, payload) };
+}
+
+/**
  * {@link authenticate} plus the approval gate. Rejects with `NOT_APPROVED`
  * unless `decision_made` is `'approved'`. Use on business endpoints; not on
  * `/auth/*` or the profile self-read, which must show "pending".
@@ -310,19 +340,9 @@ async function actingContext(
  * token whose header differs from its claim is refused.
  */
 export async function requireApproved(req: FastifyRequest): Promise<AuthResult> {
-  const verified = await verifyRequest(req);
-  if (!verified.ok) return verified;
-  const { sub, payload } = verified;
-  const acting = readActingHeader(req);
-  if (acting.kind === 'malformed') {
-    logActing('MALFORMED');
-    return actingInvalid('x-acting-account is not an account id');
-  }
-  const claimed = readAggregatorId(payload);
-  if (!claimed) {
-    if (acting.kind === 'absent') return missingAggregatorId();
-    const result = await actingContext(sub, acting.id, payload);
-    if (!result.ok) return result;
+  const result = await authenticateAllowingActing(req);
+  if (!result.ok) return result;
+  if (result.context.acting) {
     if (result.context.decisionMade !== 'approved' || !result.context.signalstackOrgId) {
       return {
         ok: false,
@@ -331,12 +351,6 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
     }
     return result;
   }
-  if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
-    logActing('CLAIM_MISMATCH');
-    return actingInvalid('x-acting-account differs from the token aggregator_id');
-  }
-
-  const result: AuthResult = { ok: true, context: hydrateContext(sub, claimed, payload) };
   if (result.context.decisionMade !== 'approved') {
     return {
       ok: false,
