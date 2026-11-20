@@ -88,6 +88,7 @@ const ResolveLinkResponseSchema = z
     voice_bot: z
       .object({
         display_name: z.string(),
+        phone: z.string().describe('The number the participant calls; shown before they register.'),
         languages: z.array(z.string()),
         description: z.string().optional(),
       })
@@ -219,7 +220,8 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       const accountOnly = submissionShape === 'account_only';
 
       // Resolve the bot only for modes that offer voice. `voice` is dropped from
-      // `offers` when none applies. The phone is never returned here.
+      // `offers` when none applies. The bot's number is returned so the page
+      // can show it before the participant gives their details.
       const modeChannels = modeOffers(link.registrationMode, networkCfg);
       let bot: VoiceBot | null = null;
       if (modeChannels.includes('voice')) {
@@ -255,6 +257,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         voice_bot: bot
           ? {
               display_name: bot.display_name,
+              phone: bot.phone,
               languages: bot.languages,
               ...(bot.description !== undefined && { description: bot.description }),
             }

@@ -6,8 +6,8 @@
  *
  * - `offers` comes from the link's registration mode; `voice` is dropped when
  *   no bot resolves for the link.
- * - `voice_bot` carries only display name, languages and description: never
- *   the phone, key or domains.
+ * - `voice_bot` carries the display name, number, languages and description:
+ *   never the key or domains.
  * - Every other key of the body is unchanged for existing link types.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -227,25 +227,25 @@ describe('GET /public/v1/aggregators/:org/links/:slug — offers and voice_bot',
       });
     });
 
-    it('offers voice and form with the named bot, without leaking its phone', async () => {
+    it('offers voice and form with the named bot and its number', async () => {
       const { body, raw } = await resolve(app!, 'named');
       expect(body.offers).toEqual(['voice', 'form']);
       expect(body.voice_bot).toEqual({
         display_name: 'Asha',
+        phone: PHONE_A,
         languages: ['hi', 'en'],
         description: 'Helps job seekers',
       });
       expect(body.schema).not.toBeNull();
-      expect(raw).not.toContain(PHONE_A);
       expect(raw).not.toContain('"key":"a"');
       expect(raw).not.toContain('domains');
     });
 
     it('falls back to the domain default when the named key is gone', async () => {
-      const { body, raw } = await resolve(app!, 'gone');
+      const { body } = await resolve(app!, 'gone');
       expect(body.offers).toEqual(['voice', 'form']);
       expect(body.voice_bot.display_name).toBe('Bina');
-      expect(raw).not.toContain(PHONE_B);
+      expect(body.voice_bot.phone).toBe(PHONE_B);
     });
 
     it('uses the domain default for a link naming no bot', async () => {

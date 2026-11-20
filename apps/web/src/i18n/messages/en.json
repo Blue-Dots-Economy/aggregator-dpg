@@ -603,18 +603,38 @@
       "error_u18": "As you are under 18, please finish registering in the Signalstack app.",
       "error_consent_required": "Please accept the terms and privacy policy to continue.",
       "error_profile_limit": "This phone or email already has the maximum number of profiles.",
-      "voice_chooser_title": "How would you like to register?",
-      "voice_chooser_subtitle": "Talk to our voice assistant, or fill the form yourself.",
-      "voice_cta": "Talk to the voice assistant",
-      "voice_form_cta": "Register with the form",
-      "voice_form_title": "Talk to the voice assistant",
-      "voice_form_subtitle": "Give your name and number, then call us.",
-      "voice_continue": "Continue",
       "voice_done_new_title": "You're all set",
       "voice_done_existing_title": "You already have an account",
-      "voice_done_body": "Call {name} to build your profile. It speaks {languages}.",
       "voice_call_cta": "Call {phone}",
-      "voice_unavailable": "The voice assistant is not available right now. Please register with the form."
+      "voice_unavailable": "The voice assistant is not available right now. Please register with the form.",
+      "signals_sign_in_prompt": "Already registered?",
+      "signals_sign_in_link": "Sign in with OTP",
+      "call": {
+        "title": "Call to register",
+        "name_label": "Full name",
+        "phone_label": "Mobile number",
+        "phone_invalid": "Enter a 10-digit mobile number.",
+        "year_of_birth_label": "Year of birth",
+        "year_of_birth_placeholder": "Select year",
+        "terms_required": "Agree to the Privacy Policy and Terms of Service to continue.",
+        "our_number": "Our number",
+        "talk_to_bot": "Talk to {name} in {languages} to register.",
+        "submit": "Save and call now",
+        "submitting": "Saving…",
+        "or": "or",
+        "form_cta": "Fill a form to register",
+        "form_cta_hint": "Enter your details online yourself",
+        "called_body": "Call {name} on the number below. When you come back to this page, we will take you to BlueDots.",
+        "called_body_no_link": "Call {name} on the number below to build your profile.",
+        "continue_to_signals": "Continue to BlueDots"
+      },
+      "minor": {
+        "title": "You're under 18",
+        "body": "A parent or guardian needs to confirm your account, so please register on the BlueDots app with them. We will take you there now.",
+        "body_no_link": "A parent or guardian needs to confirm your account, so please register on the BlueDots app with them.",
+        "countdown": "Opening in {seconds} s",
+        "go_now": "Go now"
+      }
     }
   },
   "registration_mode": {
