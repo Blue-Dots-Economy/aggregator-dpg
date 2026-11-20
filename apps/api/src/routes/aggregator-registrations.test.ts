@@ -173,6 +173,7 @@ describe('POST /v1/user/invite/accept', () => {
       expect(kcUser.value.enabled).toBe(true);
       expect(kcUser.value.emailVerified).toBe(false);
       expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.aggregator_id);
       expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
       expect(kcUser.value.attributes?.decision_made?.[0]).toBe('invited');

@@ -114,8 +114,93 @@ async function coordinatorsWithoutLogin(): Promise<string[]> {
   return rows.rows.map((r) => r.id);
 }
 
+/** Counts of the `user_id` step of `enrich`. */
+export interface UserIdClaimReport {
+  candidates: number;
+  /** Coordinators given `user_id` (on a dry run: that would be given it). */
+  copied: number;
+  /** Coordinators whose `user_id` already equals their id. */
+  already: number;
+  notInKeycloak: number;
+  /** Coordinators whose `user_id` holds a different value; left unchanged. */
+  conflicts: number;
+  failed: number;
+  /** Coordinator ids whose `user_id` holds a different value. */
+  conflictIds: string[];
+}
+
+/** What the `user_id` step of `enrich` needs (fakes in tests). */
+export interface UserIdClaimDeps {
+  idp: IdpAdminAdapter;
+  /** Every coordinator id. */
+  listCandidates: () => Promise<string[]>;
+  /** Pause between Keycloak calls. */
+  pause?: (ms: number) => Promise<void>;
+}
+
 /**
- * Runs `enrich`: records Keycloak logins, then backfills owner names.
+ * Copies each coordinator's `aggregator_id` attribute into `user_id`, paced.
+ *
+ * Tokens carry both claims while clients move to `user_id`. Idempotent; a
+ * `user_id` that holds another value is reported and never overwritten.
+ *
+ * @param deps - Keycloak and the candidate list.
+ * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
+ * @returns Per-outcome counts.
+ * @throws {RangeError} When `ratePerSecond` is not a positive number.
+ */
+export async function backfillUserIdClaim(
+  deps: UserIdClaimDeps,
+  opts: { dryRun: boolean; ratePerSecond: number },
+): Promise<UserIdClaimReport> {
+  if (!Number.isFinite(opts.ratePerSecond) || opts.ratePerSecond <= 0) {
+    throw new RangeError('--rate must be a positive number of calls per second');
+  }
+  const ids = await deps.listCandidates();
+  const report: UserIdClaimReport = {
+    candidates: ids.length,
+    copied: 0,
+    already: 0,
+    notInKeycloak: 0,
+    conflicts: 0,
+    failed: 0,
+    conflictIds: [],
+  };
+  const pause = deps.pause ?? sleep;
+  const gapMs = Math.ceil(1000 / opts.ratePerSecond);
+  for (const id of ids) {
+    // Sequential: paced against Keycloak.
+    const found = await deps.idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, id); // NOSONAR typescript:S9382
+    const current = found.ok ? found.value?.attributes?.[KC_ATTR.USER_ID]?.[0] : undefined;
+    if (!found.ok) report.failed += 1;
+    else if (!found.value) report.notInKeycloak += 1;
+    else if (current === id) report.already += 1;
+    else if (current !== undefined) {
+      report.conflicts += 1;
+      report.conflictIds.push(id);
+    } else if (opts.dryRun) report.copied += 1;
+    else {
+      const set = await deps.idp.setAttributes(found.value.id, { [KC_ATTR.USER_ID]: id }); // NOSONAR typescript:S9382
+      if (set.ok) report.copied += 1;
+      else report.failed += 1;
+    }
+    await pause(gapMs); // NOSONAR typescript:S9382
+  }
+  return report;
+}
+
+/** Every coordinator id, oldest first. */
+async function allCoordinators(): Promise<string[]> {
+  const rows = await getDb().execute<{ id: string }>(sql`
+    SELECT u.id::text AS id FROM users u
+     WHERE u.user_type = 'coordinator'
+     ORDER BY u.created_at`);
+  return rows.rows.map((r) => r.id);
+}
+
+/**
+ * Runs `enrich`: records Keycloak logins, backfills owner names, then copies
+ * `aggregator_id` into `user_id`.
  *
  * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
  * @param out - Line printer.
@@ -143,23 +228,31 @@ export async function enrich(
     { dryRun: opts.dryRun },
   );
   out(`enrich owner_names ${JSON.stringify(names)}`);
-  return enrichExitCode(report, names);
+  const userIds = await backfillUserIdClaim({ idp, listCandidates: allCoordinators }, opts);
+  const { conflictIds: userIdConflictIds, ...userIdCounts } = userIds;
+  out(`enrich user_id ${JSON.stringify(userIdCounts)}${opts.dryRun ? ' (dry run)' : ''}`);
+  for (const id of userIdConflictIds) out(`  user_id differs: coordinator ${id}`);
+  return enrichExitCode(report, names, userIds);
 }
 
 /**
- * Exit code for `enrich`: 0 only when every lookup answered and no login conflicts.
+ * Exit code for `enrich`: 0 only when every lookup answered and nothing conflicts.
  *
  * Coordinators absent from Keycloak do not fail it.
  *
  * @param identities - The identity step's counts.
  * @param names - The owner-name step's counts.
+ * @param userIds - The `user_id` step's counts.
  * @returns 0 or 1.
  */
 export function enrichExitCode(
   identities: Pick<EnrichReport, 'failed' | 'conflicts'>,
   names: { failed: number },
+  userIds: Pick<UserIdClaimReport, 'failed' | 'conflicts'>,
 ): 0 | 1 {
-  return identities.failed > 0 || identities.conflicts > 0 || names.failed > 0 ? 1 : 0;
+  const failed = identities.failed + names.failed + userIds.failed;
+  const conflicts = identities.conflicts + userIds.conflicts;
+  return failed > 0 || conflicts > 0 ? 1 : 0;
 }
 
 /** Counts of `enable-owners`; ids name the orgs to follow up. */

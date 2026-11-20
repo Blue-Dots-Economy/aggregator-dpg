@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
-import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../instance-upgrade-online.js';
+import {
+  backfillUserIdClaim,
+  enableOwnersStep,
+  enrichExitCode,
+  enrichIdentities,
+} from '../instance-upgrade-online.js';
 import { buildOrganisation, buildDefaultOrg } from '../../services/organisation-store/index.js';
 import type { Organisation } from '../../services/organisation-store/index.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';
@@ -100,15 +105,95 @@ describe('enrichIdentities', () => {
   });
 });
 
-describe('enrichExitCode', () => {
-  it('passes when every lookup answered, absent users included', () => {
-    expect(enrichExitCode({ failed: 0, conflicts: 0 }, { failed: 0 })).toBe(0);
+describe('backfillUserIdClaim', () => {
+  let idp: IdpAdminFake;
+  const pauses: number[] = [];
+  const deps = (ids: string[]) => ({
+    idp,
+    listCandidates: () => Promise.resolve(ids),
+    pause: (ms: number) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+  });
+  const userIdOf = async (sub: string) => {
+    const r = await idp.findById(sub);
+    return r.ok ? r.value?.attributes?.user_id : undefined;
+  };
+
+  beforeEach(() => {
+    idp = new IdpAdminFake();
+    pauses.length = 0;
   });
 
-  it('fails on a lookup failure, a login conflict or an owner-name failure', () => {
-    expect(enrichExitCode({ failed: 1, conflicts: 0 }, { failed: 0 })).toBe(1);
-    expect(enrichExitCode({ failed: 0, conflicts: 1 }, { failed: 0 })).toBe(1);
-    expect(enrichExitCode({ failed: 0, conflicts: 0 }, { failed: 1 })).toBe(1);
+  it('copies aggregator_id into user_id, skips the done ones and reports conflicts', async () => {
+    const sub1 = await kcUser(idp, 1, C1);
+    const sub2 = await kcUser(idp, 2, C2);
+    await idp.setAttributes(sub2, { user_id: C2 });
+    const sub3 = await kcUser(idp, 3, C3);
+    await idp.setAttributes(sub3, { user_id: 'someone-else' });
+    const report = await backfillUserIdClaim(deps([C1, C2, C3, 'absent']), {
+      dryRun: false,
+      ratePerSecond: 4,
+    });
+    expect(report).toEqual({
+      candidates: 4,
+      copied: 1,
+      already: 1,
+      notInKeycloak: 1,
+      conflicts: 1,
+      failed: 0,
+      conflictIds: [C3],
+    });
+    expect(await userIdOf(sub1)).toEqual([C1]);
+    expect(await userIdOf(sub3)).toEqual(['someone-else']);
+    expect(pauses).toEqual([250, 250, 250, 250]);
+  });
+
+  it('is a no-op on a second run', async () => {
+    await kcUser(idp, 1, C1);
+    await backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    const again = await backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    expect(again).toMatchObject({ copied: 0, already: 1 });
+  });
+
+  it('writes nothing on a dry run', async () => {
+    const sub1 = await kcUser(idp, 1, C1);
+    const report = await backfillUserIdClaim(deps([C1]), { dryRun: true, ratePerSecond: 1000 });
+    expect(report.copied).toBe(1);
+    expect(await userIdOf(sub1)).toBeUndefined();
+  });
+
+  it('counts a Keycloak failure and carries on', async () => {
+    await kcUser(idp, 2, C2);
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const report = await backfillUserIdClaim(deps([C1, C2]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 2, failed: 1, copied: 1 });
+  });
+
+  it('refuses a rate that would disable the pacing', async () => {
+    await expect(
+      backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 0 }),
+    ).rejects.toThrow(RangeError);
+  });
+});
+
+describe('enrichExitCode', () => {
+  const clean = { failed: 0, conflicts: 0 };
+
+  it('passes when every lookup answered, absent users included', () => {
+    expect(enrichExitCode(clean, { failed: 0 }, clean)).toBe(0);
+  });
+
+  it('fails on a lookup failure, a conflict or an owner-name failure', () => {
+    expect(enrichExitCode({ failed: 1, conflicts: 0 }, { failed: 0 }, clean)).toBe(1);
+    expect(enrichExitCode({ failed: 0, conflicts: 1 }, { failed: 0 }, clean)).toBe(1);
+    expect(enrichExitCode(clean, { failed: 1 }, clean)).toBe(1);
+    expect(enrichExitCode(clean, { failed: 0 }, { failed: 1, conflicts: 0 })).toBe(1);
+    expect(enrichExitCode(clean, { failed: 0 }, { failed: 0, conflicts: 1 })).toBe(1);
   });
 });
 
