@@ -169,7 +169,7 @@ const VoiceRequestResponseSchema = z.object({
   }),
 });
 
-export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance): Promise<void> {
+export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/public/v1/aggregators/:orgSlug/links/:slug',

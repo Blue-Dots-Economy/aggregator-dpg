@@ -192,8 +192,9 @@ export function assertRouteDeclared(route: RouteOptions): void {
   if (!decl) {
     throw new Error(`RBAC: route ${methods.join(',')} ${url} has no config.rbac declaration`);
   }
-  const named =
-    'capability' in decl ? [decl.capability] : 'anyCapability' in decl ? decl.anyCapability : [];
+  let named: readonly Capability[] = [];
+  if ('capability' in decl) named = [decl.capability];
+  else if ('anyCapability' in decl) named = decl.anyCapability;
   if ('anyCapability' in decl && named.length === 0) {
     throw new Error(`RBAC: route ${methods.join(',')} ${url} declares an empty anyCapability`);
   }

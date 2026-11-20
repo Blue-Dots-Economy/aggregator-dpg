@@ -73,8 +73,10 @@ async function importConfigModule(packageDir: string): Promise<ConfigSchemaModul
   const distPath = join(packageDir, 'dist', 'config.schema.js');
   const srcPath = join(packageDir, 'src', 'config.schema.ts');
 
-  const modulePath = existsSync(distPath) ? distPath : existsSync(srcPath) ? srcPath : null;
-  if (modulePath === null) return null;
+  let modulePath: string;
+  if (existsSync(distPath)) modulePath = distPath;
+  else if (existsSync(srcPath)) modulePath = srcPath;
+  else return null;
   const mod: unknown = await import(pathToFileURL(modulePath).href);
   const parsed = ConfigSchemaModuleSchema.safeParse(mod);
   if (!parsed.success) {

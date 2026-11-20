@@ -61,7 +61,7 @@ const OnboardingBySourceResponseSchema = z
   })
   .loose();
 
-export async function registerOnboardingRoutes(base: FastifyInstance): Promise<void> {
+export function registerOnboardingRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/onboarding/summary',
