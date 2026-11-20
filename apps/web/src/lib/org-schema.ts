@@ -179,8 +179,8 @@ export function orgFieldText(prop: JsonRecord, ui: JsonRecord, value: unknown): 
   const choices = Array.isArray(items['enum']) ? (items['enum'] as unknown[]) : [];
   const names = Array.isArray(ui['ui:enumNames']) ? (ui['ui:enumNames'] as unknown[]) : [];
   const label = (v: unknown): string => {
-    const i = choices.indexOf(v);
-    return i >= 0 && names[i] !== undefined ? String(names[i]) : String(v);
+    const name = names[choices.indexOf(v)];
+    return typeof name === 'string' || typeof name === 'number' ? String(name) : String(v);
   };
   if (Array.isArray(value)) return value.length > 0 ? value.map(label).join(', ') : null;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';

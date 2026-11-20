@@ -2037,27 +2037,29 @@ export default function DashboardPageRoot() {
 }
 
 /** The dashboard title over the loading state, the load error or the no-access notice. */
-function DashboardGateFrame({ activeDomain }: { activeDomain: ActiveDomainState }) {
+function DashboardGateFrame({ activeDomain }: Readonly<{ activeDomain: ActiveDomainState }>) {
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  let body: ReactNode;
+  if (activeDomain.error) {
+    body = <ProfileLoadError onRetry={activeDomain.retry} retrying={activeDomain.retrying} />;
+  } else if (activeDomain.ready) {
+    body = <NoProfileTypesNotice />;
+  } else {
+    body = <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>;
+  }
   return (
     <div className="fade-up">
       <Topbar
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      {activeDomain.error ? (
-        <ProfileLoadError onRetry={activeDomain.retry} retrying={activeDomain.retrying} />
-      ) : !activeDomain.ready ? (
-        <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
-      ) : (
-        <NoProfileTypesNotice />
-      )}
+      {body}
     </div>
   );
 }
 
-function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState }) {
+function DashboardContent({ activeDomain }: Readonly<{ activeDomain: ActiveDomainState }>) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();

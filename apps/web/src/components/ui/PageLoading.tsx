@@ -10,8 +10,6 @@ import { useTranslations } from 'next-intl';
 export function PageLoading() {
   const t = useTranslations('common');
   return (
-    <p role="status" className="py-10 text-center text-[13.5px] text-ink-400">
-      {t('loading')}
-    </p>
+    <output className="block py-10 text-center text-[13.5px] text-ink-400">{t('loading')}</output>
   );
 }

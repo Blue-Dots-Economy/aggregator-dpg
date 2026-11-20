@@ -249,6 +249,9 @@ export function OrgEditForm({
     );
   }
 
+  // RJSF reads a present-but-undefined `customValidate` as a validator; pass it only when set.
+  const validateProps = customValidate ? { customValidate } : {};
+
   return (
     <ConsoleSection title={t('org.details')}>
       <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
@@ -297,7 +300,7 @@ export function OrgEditForm({
                 fieldErrors.onFormChange(id, { before: profileData, after: ev.formData });
               }}
               {...fieldErrors.formProps}
-              {...(customValidate ? { customValidate } : {})}
+              {...validateProps}
             />
           </div>
         ) : null}

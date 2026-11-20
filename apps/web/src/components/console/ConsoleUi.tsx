@@ -26,7 +26,7 @@ const PILL: Record<ConsoleStatus, { dot: string; bg: string; text: string }> = {
  *
  * @param props.status - The status.
  */
-export function ConsoleStatusPill({ status }: { status: ConsoleStatus }) {
+export function ConsoleStatusPill({ status }: Readonly<{ status: ConsoleStatus }>) {
   const t = useTranslations('console');
   const s = PILL[status] ?? PILL.retired;
   return (
@@ -54,14 +54,14 @@ export function ConsoleSection({
   flush = false,
   className,
   children,
-}: {
+}: Readonly<{
   title?: ReactNode;
   action?: ReactNode;
   flush?: boolean;
   className?: string;
   /** Omitted (or null) for a header-only card. */
   children?: ReactNode;
-}) {
+}>) {
   return (
     <section className={cn('bd-card bd-shadow overflow-hidden', className)}>
       {title || action ? (
@@ -134,7 +134,9 @@ export function ConsoleCollapsible({
  *
  * @param props.items - The pairs, in order.
  */
-export function DetailList({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
+export function DetailList({
+  items,
+}: Readonly<{ items: Array<{ label: string; value: ReactNode }> }>) {
   return (
     <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((i) => (
@@ -155,7 +157,7 @@ export function DetailList({ items }: { items: Array<{ label: string; value: Rea
  * @param props.href - Where it goes.
  * @param props.children - Its label.
  */
-export function BackLink({ href, children }: { href: string; children: ReactNode }) {
+export function BackLink({ href, children }: Readonly<{ href: string; children: ReactNode }>) {
   return (
     <Link
       href={href}
@@ -172,7 +174,7 @@ export function BackLink({ href, children }: { href: string; children: ReactNode
  *
  * @param props.children - The text.
  */
-export function EmptyState({ children }: { children: ReactNode }) {
+export function EmptyState({ children }: Readonly<{ children: ReactNode }>) {
   return <p className="px-5 py-8 text-center text-[13.5px] text-ink-500">{children}</p>;
 }
 
