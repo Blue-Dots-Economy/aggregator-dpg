@@ -20066,6 +20066,10 @@
                         "display_name": {
                           "type": "string"
                         },
+                        "phone": {
+                          "type": "string",
+                          "description": "The number the participant calls; shown before they register."
+                        },
                         "languages": {
                           "type": "array",
                           "items": {
@@ -20078,6 +20082,7 @@
                       },
                       "required": [
                         "display_name",
+                        "phone",
                         "languages"
                       ],
                       "additionalProperties": false

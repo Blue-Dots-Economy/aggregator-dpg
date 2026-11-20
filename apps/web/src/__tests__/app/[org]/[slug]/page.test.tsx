@@ -306,7 +306,7 @@ describe('PublicRegistrationPage (server component)', () => {
   });
 
   describe('offers', () => {
-    const bot = { display_name: 'UP Rozgar Sahayak', languages: ['hi'] };
+    const bot = { display_name: 'UP Rozgar Sahayak', phone: '+911234567890', languages: ['hi'] };
 
     function mockResolved(body: unknown): void {
       globalThis.fetch = vi.fn(
