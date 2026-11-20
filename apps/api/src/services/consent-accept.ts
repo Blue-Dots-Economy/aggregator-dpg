@@ -97,7 +97,7 @@ export async function acceptCurrentTerms(
     await getDb().transaction(async (tx) => {
       const ledger = getConsentLedger().withExecutor(tx);
       for (const subject of subjects) {
-        const r = await ledger.recordRegistrationConsent({
+        const consent = {
           subjectType: subject.subjectType,
           subjectId: subject.subjectId,
           network,
@@ -106,7 +106,8 @@ export async function acceptCurrentTerms(
           privacyVersion: s.privacyVersion,
           validTill,
           source: FIRST_LOGIN_SOURCE,
-        });
+        };
+        const r = await ledger.recordRegistrationConsent(consent);
         if (!r.success) throw new LedgerWriteFailed(r.error);
       }
     });

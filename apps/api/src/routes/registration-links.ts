@@ -208,7 +208,7 @@ const ListLinksResponseSchema = z
   })
   .loose();
 
-export async function registerRegistrationLinksRoutes(base: FastifyInstance): Promise<void> {
+export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/links/create',
