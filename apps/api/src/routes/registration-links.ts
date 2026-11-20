@@ -274,6 +274,19 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const voiceBotKey = checkVoiceBotChoice(body.voice_bot_key, modeKey, body.domain, networkCfg);
       const store = getRegistrationLinksStore();
 
+      // Coordinator org_slug and instance organisation name for the URL path and context.
+      const userStore = getUserStore();
+      const aggLookup = await userStore.findById(auth.aggregatorId);
+      if (!aggLookup.ok || !aggLookup.value) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(
+            aggLookup.ok ? 'aggregator row missing for caller' : aggLookup.error.message,
+          ),
+        });
+      }
+      const callerOrgSlug = aggLookup.value.orgSlug;
+      const instanceOrgName = aggLookup.value.name || aggLookup.value.orgSlug;
+
       // Try the caller's slug first and add a short random suffix on collision.
       // Without one, use a random stem.
       let created;
@@ -288,7 +301,10 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           aggregatorId: auth.aggregatorId,
           slug,
           domain: body.domain,
-          context: body.context,
+          context: {
+            ...body.context,
+            org_name: instanceOrgName || body.context?.org_name,
+          },
           status: body.status,
           registrationMode: modeKey,
           voiceBotKey,
@@ -320,18 +336,6 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           detail: 'Could not allocate a unique slug for the link. Please retry.',
         });
       }
-
-      // Coordinator org_slug for the URL path.
-      const userStore = getUserStore();
-      const aggLookup = await userStore.findById(auth.aggregatorId);
-      if (!aggLookup.ok || !aggLookup.value) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(
-            aggLookup.ok ? 'aggregator row missing for caller' : aggLookup.error.message,
-          ),
-        });
-      }
-      const callerOrgSlug = aggLookup.value.orgSlug;
 
       // The public URL exists only once the link is live; a draft slug can still
       // change. The QR is generated client-side from the URL.

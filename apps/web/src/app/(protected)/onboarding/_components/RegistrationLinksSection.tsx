@@ -301,9 +301,15 @@ export function CreateLinkSection() {
   const create = useCreateLink();
   const profile = useProfile();
   const rawProfile = useProfileRaw();
-  const orgName = profile.data?.org ?? '';
-  const { domains: servedDomains, active: activeDomain } = useActiveDomain();
   const { data: cfg } = useAggregatorConfig();
+  const orgName =
+    profile.data?.org ||
+    rawProfile.data?.org_name ||
+    cfg?.aggregator?.name ||
+    cfg?.brand?.long_name ||
+    cfg?.brand?.short_name ||
+    '';
+  const { domains: servedDomains, active: activeDomain } = useActiveDomain();
   const offersVoice = cfg?.registration_modes?.[form.registration_mode]?.offers?.includes('voice');
   const domainCfg = servedDomains.find((d) => d.id === form.domain);
   // Shares the picker's cached bot list; blocks submit when a bot must be chosen.
@@ -431,6 +437,8 @@ export function CreateLinkSection() {
                 className="bd-input bg-ink-50 cursor-not-allowed"
                 value={orgName}
                 readOnly
+                disabled
+                aria-readonly="true"
                 placeholder="—"
               />
             </Field>

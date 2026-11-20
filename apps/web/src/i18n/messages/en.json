@@ -394,7 +394,7 @@
     "create_link": {
       "title": "Share a registration link",
       "new_badge": "New",
-      "field_org_name": "Enter your [[Org]] Name",
+      "field_org_name": "[[Org]]",
       "field_state": "State",
       "field_event": "Event",
       "field_event_date": "Event Date",
