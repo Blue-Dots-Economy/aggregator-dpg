@@ -212,6 +212,21 @@ function toFieldError(f: unknown, schema: unknown): FieldError | null {
   return { field: f['field'], label, message: f['message'] };
 }
 
+/** The API's `fields.field_errors` (a list or a `{ field: message }` map) as worded errors. */
+function wordedFieldErrors(raw: unknown, schema: unknown): FieldError[] {
+  if (Array.isArray(raw)) {
+    return raw.flatMap((f: unknown) => {
+      const e = toFieldError(f, schema);
+      return e ? [e] : [];
+    });
+  }
+  if (!isRecord(raw)) return [];
+  return Object.entries(raw)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .filter(([field]) => !field.split('.').includes('__proto__'))
+    .map(([field, message]) => ({ field, label: fieldLabel(schema, field), message }));
+}
+
 /**
  * Maps the API's `fields.issues` / `fields.field_errors` onto form fields, worded like client errors.
  *
@@ -259,20 +274,7 @@ export function serverFieldErrors(
   });
   for (const e of readableFormErrors(asRjsf, schema, copy)) add(e.property ?? '', e.message ?? '');
 
-  const raw = fields?.['field_errors'];
-  let worded: FieldError[] = [];
-  if (Array.isArray(raw)) {
-    worded = raw.flatMap((f: unknown) => {
-      const e = toFieldError(f, schema);
-      return e ? [e] : [];
-    });
-  } else if (isRecord(raw)) {
-    worded = Object.entries(raw)
-      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-      .filter(([field]) => !field.split('.').includes('__proto__'))
-      .map(([field, message]) => ({ field, label: fieldLabel(schema, field), message }));
-  }
-  for (const f of worded) {
+  for (const f of wordedFieldErrors(fields?.['field_errors'], schema)) {
     // A field `issues` already worded keeps that message.
     if (!f.field || mapped.has(f.field)) continue;
     add(

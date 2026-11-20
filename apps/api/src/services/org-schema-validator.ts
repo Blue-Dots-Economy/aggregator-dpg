@@ -198,6 +198,14 @@ function tidy(c: CompiledOrgSchema, values: JsonRecord): JsonRecord {
   return out;
 }
 
+/** Adds the updatable-schema errors for `values` to `errors`, keeping any already set. */
+function checkUpdatable(c: CompiledOrgSchema, values: JsonRecord, errors: OrgFieldErrors): void {
+  if (c.validateUpdatable(values)) return;
+  for (const [field, message] of Object.entries(describe(c.validateUpdatable, c.schema))) {
+    if (!Object.hasOwn(errors, field)) errors[field] = message;
+  }
+}
+
 /**
  * Applies `x-check: "gstin"`: refuses a GSTIN whose check character is wrong.
  * The schema's pattern has already checked the shape.
@@ -261,11 +269,7 @@ export async function validateOrgUpdate(changes: JsonRecord): Promise<OrgFieldsR
   const tidied = tidy(c, toSet);
   // A value tidied away (an empty string) clears the field.
   for (const key of Object.keys(toSet)) if (!Object.hasOwn(tidied, key)) toRemove.push(key);
-  if (!c.validateUpdatable(tidied)) {
-    for (const [field, message] of Object.entries(describe(c.validateUpdatable, c.schema))) {
-      if (!Object.hasOwn(errors, field)) errors[field] = message;
-    }
-  }
+  checkUpdatable(c, tidied, errors);
   checkGstin(c, tidied, errors);
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   const values: JsonRecord = { ...tidied };

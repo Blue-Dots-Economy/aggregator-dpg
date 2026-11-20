@@ -80,45 +80,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
               </span>
             </div>
 
-            {error ? (
-              error === 'session_expired' ? (
-                <div
-                  role="alert"
-                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-                >
-                  {t('session_expired')}
-                </div>
-              ) : error === 'console_not_provisioned' ||
-                error === 'console_no_org' ||
-                error === 'signals_account_no_portal' ||
-                error === 'no_portal_access' ||
-                error === 'account_switch' ? (
-                <div
-                  role="alert"
-                  className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-                >
-                  {t(error)}
-                  {/* Offer an account switch, which ends the realm SSO session
-                      first. Not shown on `account_switch`, which is the state
-                      after that logout. */}
-                  {error !== 'account_switch' ? (
-                    <a
-                      href="/api/auth/login?switch=1"
-                      className="mt-2 block font-semibold underline underline-offset-2"
-                    >
-                      {t('switch_account')}
-                    </a>
-                  ) : null}
-                </div>
-              ) : (
-                <div
-                  role="alert"
-                  className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
-                >
-                  {t('signin_failed', { reason: humanizeError(error, t) })}
-                </div>
-              )
-            ) : null}
+            {error ? <LoginErrorNotice error={error} t={t} /> : null}
 
             <div className="fade-up">
               <Welcome onSignIn={goSignIn} brand={brand} t={t} />
@@ -171,6 +133,64 @@ function humanizeError(code: string, t: TFunction): string {
     return t(`errors.${code as ErrorKey}`);
   }
   return t('errors.unknown');
+}
+
+interface LoginErrorNoticeProps {
+  error: string;
+  t: TFunction;
+}
+
+/**
+ * The alert over the sign-in card for a `?error=` code.
+ *
+ * @param props - The error code and translation function.
+ */
+function LoginErrorNotice({ error, t }: Readonly<LoginErrorNoticeProps>): JSX.Element {
+  if (error === 'session_expired') {
+    return (
+      <div
+        role="alert"
+        className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+      >
+        {t('session_expired')}
+      </div>
+    );
+  }
+  if (
+    error === 'console_not_provisioned' ||
+    error === 'console_no_org' ||
+    error === 'signals_account_no_portal' ||
+    error === 'no_portal_access' ||
+    error === 'account_switch'
+  ) {
+    return (
+      <div
+        role="alert"
+        className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+      >
+        {t(error)}
+        {/* Offer an account switch, which ends the realm SSO session
+            first. Not shown on `account_switch`, which is the state
+            after that logout. */}
+        {error !== 'account_switch' ? (
+          <a
+            href="/api/auth/login?switch=1"
+            className="mt-2 block font-semibold underline underline-offset-2"
+          >
+            {t('switch_account')}
+          </a>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div
+      role="alert"
+      className="mb-5 rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700"
+    >
+      {t('signin_failed', { reason: humanizeError(error, t) })}
+    </div>
+  );
 }
 
 interface WelcomeProps {

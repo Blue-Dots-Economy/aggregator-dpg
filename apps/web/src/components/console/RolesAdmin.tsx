@@ -96,10 +96,10 @@ const draftOf = (r: Role): Draft => ({
 export function RolesAdmin({
   initial,
   permissions,
-}: {
+}: Readonly<{
   initial: Role[];
   permissions: Permission[];
-}) {
+}>) {
   const t = useTranslations('console');
   const [roles, setRoles] = useState<Role[]>(initial);
   const [editing, setEditing] = useState<string | null>(null);
@@ -391,11 +391,7 @@ export function RolesAdmin({
             </div>
           </form>
         )}
-        {note ? (
-          <p role="status" className="text-ink-600">
-            {note}
-          </p>
-        ) : null}
+        {note ? <output className="block text-ink-600">{note}</output> : null}
       </Card>
     </div>
   );

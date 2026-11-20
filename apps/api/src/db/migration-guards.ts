@@ -27,13 +27,12 @@ import {
   shippedFileHashes,
   UPGRADE_FIRST_WHEN,
   UPGRADE_LAST_WHEN,
-  type AppliedMigration,
-  type ForeignVerdict,
   type JournalEntry,
 } from './migrate-core.js';
 
 export { checkForeign, UPGRADE_FIRST_WHEN, UPGRADE_LAST_WHEN };
-export type { AppliedMigration, ForeignVerdict, JournalEntry };
+export type { AppliedMigration, ForeignVerdict } from './migrate-core.js';
+export type { JournalEntry };
 
 /**
  * Whether the train guard refuses this migration run.

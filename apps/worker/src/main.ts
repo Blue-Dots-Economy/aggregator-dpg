@@ -189,7 +189,9 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
-main().catch((err: unknown) => {
+try {
+  await main();
+} catch (err: unknown) {
   const error = toError(err);
   logger.error({
     operation: 'worker.boot',
@@ -199,4 +201,4 @@ main().catch((err: unknown) => {
     stack: error.stack,
   });
   process.exit(1);
-});
+}
