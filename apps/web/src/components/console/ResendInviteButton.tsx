@@ -55,7 +55,9 @@ export function ResendInviteButton({
     <span className="inline-flex flex-col items-start gap-0.5">
       <button
         type="button"
-        onClick={resend}
+        onClick={() => {
+          void resend();
+        }}
         disabled={phase === 'sending'}
         aria-label={t('resend_named', { email })}
         className={cn(
