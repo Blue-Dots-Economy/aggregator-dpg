@@ -197,7 +197,7 @@ describe('RayaVoiceProvider', () => {
       create: Record<string, unknown>;
       start: Record<string, unknown>;
     };
-    expect(Object.keys(create).sort()).toEqual(
+    expect(Object.keys(create).sort((a, b) => a.localeCompare(b))).toEqual(
       [
         'status',
         'message',
@@ -206,9 +206,9 @@ describe('RayaVoiceProvider', () => {
         'invalidRows',
         'batchId',
         'contactsInserted',
-      ].sort(),
+      ].sort((a, b) => a.localeCompare(b)),
     );
-    expect(Object.keys(start).sort()).toEqual(
+    expect(Object.keys(start).sort((a, b) => a.localeCompare(b))).toEqual(
       [
         'id',
         'status',
@@ -219,7 +219,7 @@ describe('RayaVoiceProvider', () => {
         'max_retries',
         'concurrency',
         'retry_after_hrs',
-      ].sort(),
+      ].sort((a, b) => a.localeCompare(b)),
     );
     // The raw payload's contact echo/private webhook must never survive curation.
     const serialized = JSON.stringify(result.value.providerResponse);

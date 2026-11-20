@@ -14,7 +14,10 @@ describe('listOrgCoordinators', () => {
     ]);
     _setUserStore(store);
     const r = await listOrgCoordinators('org-1');
-    expect(r.ok && r.value.map((a) => a.id).sort()).toEqual(['c1', 'c3']);
+    expect(r.ok && r.value.map((a) => a.id).sort((a, b) => a.localeCompare(b))).toEqual([
+      'c1',
+      'c3',
+    ]);
   });
 
   it('returns an empty list for an org with no coordinators', async () => {

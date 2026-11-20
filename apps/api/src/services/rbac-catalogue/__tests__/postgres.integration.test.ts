@@ -46,7 +46,7 @@ suite('rbac catalogue (migrations 0030/0031) — integration', () => {
   }
   async function roleKeys(): Promise<string[]> {
     const l = await store.load();
-    return l.ok ? l.value.roles.map((r) => r.key).sort() : [];
+    return l.ok ? l.value.roles.map((r) => r.key).sort((a, b) => a.localeCompare(b)) : [];
   }
 
   beforeAll(async () => {
@@ -96,7 +96,12 @@ suite('rbac catalogue (migrations 0030/0031) — integration', () => {
     if (!loaded.ok) return;
     expect(loaded.value.revision).toMatch(/^[0-9a-f]{32}$/);
     const seeded = byKey(loaded.value.roles.filter((r) => r.isBuiltin));
-    expect(seeded).toEqual(builtins.map((r) => ({ ...r, permissions: [...r.permissions].sort() })));
+    expect(seeded).toEqual(
+      builtins.map((r) => ({
+        ...r,
+        permissions: [...r.permissions].sort((a, b) => a.localeCompare(b)),
+      })),
+    );
   });
 
   it('seeds built-in roles that pass the catalogue rules and reference known permissions', async () => {

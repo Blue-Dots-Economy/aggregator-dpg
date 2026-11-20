@@ -289,8 +289,8 @@ export function runStoreConformance(
       expect(proc.channel).toBe('export');
       expect(proc.signalstackOrgId).toBe(input.signalstackOrgId);
       expect(proc.requestedBy).toBe('user@org.example');
-      expect(proc.items.map((i) => i.itemId).sort()).toEqual(
-        input.items.map((i) => i.itemId).sort(),
+      expect(proc.items.map((i) => i.itemId).sort((a, b) => a.localeCompare(b))).toEqual(
+        input.items.map((i) => i.itemId).sort((a, b) => a.localeCompare(b)),
       );
     });
 

@@ -245,7 +245,7 @@ interface JsonSchema {
 
 /** Returns the property names of a JSON Schema object node. */
 function keysOf(node: JsonSchema | undefined): string[] {
-  return Object.keys(node?.properties ?? {}).sort();
+  return Object.keys(node?.properties ?? {}).sort((a, b) => a.localeCompare(b));
 }
 
 describe('GET /v1/aggregator-config — OpenAPI response schema', () => {
