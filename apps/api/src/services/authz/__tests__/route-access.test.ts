@@ -238,7 +238,7 @@ describe('declared route table', () => {
     const enforced = enforcedCapabilities();
     const reserved = CAPABILITIES.filter((c) => !enforced.has(c));
 
-    expect([...reserved].sort()).toEqual([
+    expect([...reserved].sort((a, b) => a.localeCompare(b))).toEqual([
       'agreement.manage',
       'orgs.block',
       'profiles.act_on_behalf',

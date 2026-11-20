@@ -530,7 +530,12 @@ export function CreateLinkSection() {
             />
           </Field>
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending}>
+            <Button
+              onClick={() => {
+                void onCreate();
+              }}
+              disabled={create.isPending}
+            >
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
@@ -744,7 +749,9 @@ function LinkCard({
                 {/* Copy button for the public URL; shows the copied confirmation. */}
                 <button
                   type="button"
-                  onClick={onCopy}
+                  onClick={() => {
+                    void onCopy();
+                  }}
                   title={copied ? t('link_card.copied') : t('link_card.copy_title')}
                   aria-label={t('link_card.copy_title')}
                   className={`ml-1 shrink-0 ${copied ? 'text-emerald-600' : 'text-ink-400 hover:text-primary-600'}`}
@@ -754,7 +761,9 @@ function LinkCard({
               </div>
               <button
                 type="button"
-                onClick={openQr}
+                onClick={() => {
+                  void openQr();
+                }}
                 title={t('link_card.view_qr')}
                 className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
               >
@@ -930,7 +939,12 @@ function LinkCard({
             <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
               {t('link_card.cancel')}
             </Button>
-            <Button onClick={onSaveEdit} disabled={update.isPending}>
+            <Button
+              onClick={() => {
+                void onSaveEdit();
+              }}
+              disabled={update.isPending}
+            >
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
           </div>

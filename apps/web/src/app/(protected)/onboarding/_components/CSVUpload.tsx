@@ -301,7 +301,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       <FieldMessage id={fe.errorId('attestation')} message={fe.message('attestation')} />
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={upload.isPending}>
+        <Button
+          onClick={() => {
+            void onUpload();
+          }}
+          disabled={upload.isPending}
+        >
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
@@ -470,7 +475,9 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
           canDownload={can('profiles.view_pii')}
           downloading={downloading}
           downloadError={downloadError}
-          onDownload={onDownloadErrors}
+          onDownload={() => {
+            void onDownloadErrors();
+          }}
         />
       </td>
     </tr>

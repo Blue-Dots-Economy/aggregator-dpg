@@ -345,7 +345,13 @@ function SupportForm({
         {status === 'success' ? (
           <p className="text-[14px] text-emerald-600">{t('success')}</p>
         ) : (
-          <form onSubmit={submit} noValidate className="space-y-3">
+          <form
+            onSubmit={(e) => {
+              void submit(e);
+            }}
+            noValidate
+            className="space-y-3"
+          >
             <div>
               <label htmlFor="support-name" className="block text-[13px] font-medium mb-1">
                 {t('label_name')}

@@ -78,7 +78,9 @@ describe('decisionInput', () => {
     const target = { id: 'org-a', orgType: 'aggregator' as const, ancestorIds: [] };
     const input = decisionInput(roles, actor, 'profiles.verify', target, 0);
     expect(input.org).toEqual({ id: 'org-a', orgType: 'aggregator' });
-    expect(input.actor.permissions).toEqual([...COORDINATOR, 'profiles.verify'].sort());
+    expect(input.actor.permissions).toEqual(
+      [...COORDINATOR, 'profiles.verify'].sort((a, b) => a.localeCompare(b)),
+    );
   });
 
   it('gives nothing in an organisation the actor is not part of', () => {
