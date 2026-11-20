@@ -57,7 +57,7 @@ describe('GET /v1/aggregator-config — AGGREGATOR_ONBOARDING_ENABLED filtering'
     const modes = await fetchModes(app);
     // Exact key set, not just "voice is present" — a filter that dropped an
     // unrelated mode would still pass a per-key assertion.
-    expect(Object.keys(modes).sort()).toEqual(['form', 'voice']);
+    expect(Object.keys(modes).sort((a, b) => a.localeCompare(b))).toEqual(['form', 'voice']);
     expect(modes.voice?.submission_shape).toBe('account_only');
     expect(modes.voice?.signals_cta).toBe(false);
     expect(modes.voice?.public_hint_i18n_key).toBe('registration_mode.voice.hint');
@@ -67,7 +67,10 @@ describe('GET /v1/aggregator-config — AGGREGATOR_ONBOARDING_ENABLED filtering'
 
   it('serves every declared mode when the var lists them all', async () => {
     process.env.AGGREGATOR_ONBOARDING_ENABLED = 'form,voice';
-    expect(Object.keys(await fetchModes(app)).sort()).toEqual(['form', 'voice']);
+    expect(Object.keys(await fetchModes(app)).sort((a, b) => a.localeCompare(b))).toEqual([
+      'form',
+      'voice',
+    ]);
   });
 
   it('omits voice when the allow-list is form only', async () => {

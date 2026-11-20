@@ -12,7 +12,7 @@ import {
 describe('extractPlaceholders', () => {
   it('finds distinct, lower-cased tokens across subject + body, tolerating whitespace', () => {
     const found = extractPlaceholders('Hi {{first_name}}', 'Dear {{ Name }}, call {{phone}}');
-    expect(found.sort()).toEqual(['first_name', 'name', 'phone']);
+    expect(found.sort((a, b) => a.localeCompare(b))).toEqual(['first_name', 'name', 'phone']);
   });
   it('returns [] when there are no placeholders', () => {
     expect(extractPlaceholders('plain subject', 'plain body')).toEqual([]);
@@ -32,10 +32,11 @@ describe('unknownPlaceholders', () => {
 
 describe('requiredContactFields', () => {
   it('maps name/first_name/last_name to name, and email/phone to themselves', () => {
-    expect(requiredContactFields('Hi {{first_name}}', 'ref {{phone}}').sort()).toEqual([
-      'name',
-      'phone',
-    ]);
+    expect(
+      requiredContactFields('Hi {{first_name}}', 'ref {{phone}}').sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    ).toEqual(['name', 'phone']);
   });
   it('is empty when no placeholders are used', () => {
     expect(requiredContactFields('plain', 'plain')).toEqual([]);

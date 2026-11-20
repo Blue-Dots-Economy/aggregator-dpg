@@ -25,7 +25,9 @@ describe('capability lists agree with single decisions', () => {
   const all = [...CAPABILITIES];
   it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
     const listed = listCapabilities({ actor: v.input.actor, org: v.input.org, candidates: all });
-    const allowed = all.filter((c) => evaluate({ ...v.input, capability: c }).allow).sort();
+    const allowed = all
+      .filter((c) => evaluate({ ...v.input, capability: c }).allow)
+      .sort((a, b) => a.localeCompare(b));
     expect(listed).toEqual(allowed);
   });
 

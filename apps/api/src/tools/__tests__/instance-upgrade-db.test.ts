@@ -66,7 +66,9 @@ describe('VERIFY_FILES', () => {
       (f) => f.endsWith('-verify.sql') && !f.startsWith('contact-'),
     );
     const { VERIFY_FILES } = await import('../instance-upgrade.js');
-    expect([...VERIFY_FILES].sort()).toEqual(onDisk.sort());
+    expect([...VERIFY_FILES].sort((a, b) => a.localeCompare(b))).toEqual(
+      onDisk.sort((a, b) => a.localeCompare(b)),
+    );
   });
 });
 

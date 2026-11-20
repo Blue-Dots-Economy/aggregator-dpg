@@ -46,7 +46,10 @@ describe('aggregator store org link (0028)', () => {
       buildCoordinator({ id: 'c3', orgSlug: 'c3', contactEmail: 'c3@x.org', parentOrgId: 'org-1' }),
     ]);
     const list = await store.findByParentOrgId('org-1');
-    expect(list.ok && list.value.map((a) => a.id).sort()).toEqual(['c1', 'c3']);
+    expect(list.ok && list.value.map((a) => a.id).sort((a, b) => a.localeCompare(b))).toEqual([
+      'c1',
+      'c3',
+    ]);
   });
 });
 
