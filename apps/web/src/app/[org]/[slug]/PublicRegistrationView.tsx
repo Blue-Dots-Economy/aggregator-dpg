@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
@@ -17,7 +16,7 @@ import { FieldMessage, useHandFieldErrors } from '@/components/forms/useHandFiel
 import { serverFieldErrors } from '@/lib/readable-form-errors';
 import { requestErrorKind } from '@/lib/request-errors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
-import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
+import { RegistrationShell } from './RegistrationShell';
 import { I } from '../../../icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import {
@@ -27,7 +26,7 @@ import {
   isValidBirthYear,
 } from '../../../lib/registration-gates';
 import { MinimalIdentityForm, type MinimalIdentityPayload } from './MinimalIdentityForm';
-import { SignalsSignInCta, useSignalsHandoffUrl } from './SignalsSignInCta';
+import { SignalsSignInCta, navigateToSignals, useSignalsHandoffUrl } from './SignalsSignInCta';
 import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
@@ -107,30 +106,6 @@ const SIGNALS_REDIRECT_SECONDS = 4;
  */
 type SignalsHandoff =
   { phase: 'counting'; url: string; seconds: number } | { phase: 'navigating'; url: string };
-
-/**
- * Sends the participant to the Signals UI in the same tab.
- *
- * Do not use `window.open(url, '_blank')`: this runs from a timer, and
- * browsers block pop-ups opened without a user click. Errors from a blocked
- * navigation are logged; the button stays on screen.
- *
- * @param url - Hand-off URL captured when the countdown started.
- */
-function navigateToSignals(url: string): void {
-  try {
-    window.location.assign(url);
-  } catch (err) {
-    console.error(
-      '[signals-handoff] navigation to the Signals UI was blocked; the participant stays on the success panel',
-      {
-        operation: 'signals-handoff.navigate',
-        status: 'failure',
-        error: err instanceof Error ? err.message : String(err),
-      },
-    );
-  }
-}
 
 /**
  * Outcome of the pre-submit identity probe: submit normally, or the identity
@@ -412,8 +387,6 @@ export function PublicRegistrationView({
    * the chooser so participants can still register.
    */
   const configResolved = cfgData !== undefined || cfgFailed;
-  const brandShort = cfg.brand.short_name;
-  const brandLogo = cfg.brand.logo?.default;
   // The consent step and birth-year field are set per domain in network.json.
   // See registrationShowsConsent and domainRequiresBirthYear.
   // Signals sign-in URL for existing participants. Resolved before the
@@ -626,15 +599,6 @@ export function PublicRegistrationView({
       participant_id: { 'ui:widget': 'hidden' },
     };
   }, [schema, uiSchema]);
-
-  const eventLabel =
-    (typeof context['title'] === 'string' && (context['title'] as string)) ||
-    (typeof context['lever_event'] === 'string' && (context['lever_event'] as string)) ||
-    'Register';
-  const orgName = typeof context['org_name'] === 'string' ? (context['org_name'] as string) : '';
-  const locationLabel = [context['district'], context['state'], context['event_location']]
-    .filter((v): v is string => typeof v === 'string' && v.length > 0)
-    .join(' · ');
 
   /**
    * Checks, before submit, whether the email or phone belongs to another aggregator.
@@ -1111,188 +1075,136 @@ export function PublicRegistrationView({
   }
 
   return (
-    <div
-      className="bd-public-light min-h-screen w-full"
-      style={{
-        background: PAGE_BACKGROUND,
-      }}
-    >
-      <div className="max-w-[760px] mx-auto px-4 sm:px-6 lg:px-10 py-8 sm:py-12">
-        <header className="flex items-center justify-between gap-4 mb-6">
-          {brandLogo ? (
-            <Image
-              src={brandLogo}
-              alt={brandShort}
-              width={200}
-              height={48}
-              priority
-              className="h-10 w-auto object-contain object-left"
-            />
-          ) : (
-            <div className="flex items-center gap-3">
-              <BlueDotsLogo size={40} />
-              <div className="font-display font-bold text-[18px] text-ink-900 leading-none tracking-tight">
-                {brandShort}
+    <>
+      <RegistrationShell domain={domain} context={context}>
+        {activeView === 'done' && donePanel}
+        {activeView === 'chooser' && chooserPanel}
+        {activeView === 'form' && (
+          <>
+            {backToChooser}
+            {errorBanner}
+
+            {lookup?.kind === 'owned_elsewhere' ? (
+              <div
+                role="alert"
+                data-testid="lookup-owned-elsewhere"
+                className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
+              >
+                <div className="font-semibold">{t('lookup.owned_elsewhere_title')}</div>
+                <div className="mt-1 text-amber-700">{t('lookup.owned_elsewhere_body')}</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLookup(null);
+                    // Clear the identity fields so the user can retry.
+                    // Other field values stay.
+                    setFormData((prev) => {
+                      const next = { ...prev };
+                      for (const key of [
+                        identity?.email,
+                        identity?.phone,
+                        'email',
+                        'phone',
+                        'phone_number',
+                        'mobile',
+                      ]) {
+                        if (key) delete next[key];
+                      }
+                      return next;
+                    });
+                  }}
+                  className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
+                >
+                  {t('lookup.owned_elsewhere_cta')}
+                </button>
               </div>
-            </div>
-          )}
-          <LanguageSwitcher />
-        </header>
+            ) : null}
 
-        <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
-          <div
-            className="px-6 sm:px-8 py-6 text-white relative overflow-hidden"
-            style={{ background: heroGradient }}
-          >
-            <div className="text-[11.5px] uppercase tracking-[0.14em] font-semibold text-white/70">
-              {(() => {
-                const d = cfg.domains?.find((x) => x.id === domain);
-                return d?.label ?? d?.plural_label ?? domain;
-              })()}
-            </div>
-            <h1 className="font-display font-bold text-[24px] sm:text-[28px] tracking-tight leading-tight mt-1.5">
-              {eventLabel}
-            </h1>
-            {(orgName || locationLabel) && (
-              <p className="text-[13.5px] text-white/85 mt-1.5">
-                {orgName ? <span className="font-semibold">{orgName}</span> : null}
-                {orgName && locationLabel ? <span className="text-white/60"> · </span> : null}
-                {locationLabel}
-              </p>
-            )}
-          </div>
-
-          <div className="px-6 sm:px-8 py-7">
-            {activeView === 'done' && donePanel}
-            {activeView === 'chooser' && chooserPanel}
-            {activeView === 'form' && (
-              <>
-                {backToChooser}
-                {errorBanner}
-
-                {lookup?.kind === 'owned_elsewhere' ? (
-                  <div
-                    role="alert"
-                    data-testid="lookup-owned-elsewhere"
-                    className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
-                  >
-                    <div className="font-semibold">{t('lookup.owned_elsewhere_title')}</div>
-                    <div className="mt-1 text-amber-700">{t('lookup.owned_elsewhere_body')}</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLookup(null);
-                        // Clear the identity fields so the user can retry.
-                        // Other field values stay.
-                        setFormData((prev) => {
-                          const next = { ...prev };
-                          for (const key of [
-                            identity?.email,
-                            identity?.phone,
-                            'email',
-                            'phone',
-                            'phone_number',
-                            'mobile',
-                          ]) {
-                            if (key) delete next[key];
-                          }
-                          return next;
-                        });
-                      }}
-                      className="mt-3 text-[12px] font-semibold underline text-amber-900 hover:text-amber-700"
-                    >
-                      {t('lookup.owned_elsewhere_cta')}
-                    </button>
-                  </div>
-                ) : null}
-
-                {!isAccountOnly && (
-                  <RjsfThemedForm
-                    schema={formSchema}
-                    uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
-                    formData={formData}
-                    // Location widgets report resolved coordinates here; they
-                    // read it as `registry.formContext`, not as a prop.
-                    formContext={{
-                      // Keep only lat/lng from the richer `ResolvedPlace`.
-                      onLocationResolved: (place: ResolvedPlace | null) =>
-                        setResolvedLocations(place ? [{ lat: place.lat, lng: place.lng }] : []),
-                      // The multi-value widget already emits this shape.
-                      onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
-                    }}
-                    onChange={(e, id) => {
-                      setFormData(e.formData as Record<string, unknown>);
-                      fieldErrors.onFormChange(id, { before: formData, after: e.formData });
-                    }}
-                    onSubmit={handleSubmit}
-                    {...fieldErrors.formProps}
-                    showErrorList={false}
-                    focusOnFirstError
-                    noHtml5Validate
-                  >
-                    <div className="mt-4 flex flex-col gap-3">
-                      {showBirthYear && (
-                        <div>
-                          <label className="block">
-                            <span className="text-[14px] font-medium text-(--bd-fg)">
-                              {t('year_of_birth_label')}
-                              <span className="text-rose-500 ml-0.5">*</span>
-                            </span>
-                            <SelectField
-                              {...yobFe.controlProps('year_of_birth')}
-                              value={yearOfBirth}
-                              onChange={setYearOfBirth}
-                              className="mt-1"
-                              required
-                              placeholder={t('year_of_birth_placeholder')}
-                              options={Array.from({ length: 101 }, (_, i) => currentYear - i).map(
-                                (y) => ({ value: String(y), label: y }),
-                              )}
-                            />
-                          </label>
-                          <FieldMessage
-                            id={yobFe.errorId('year_of_birth')}
-                            message={yobFe.message('year_of_birth')}
-                          />
-                        </div>
-                      )}
-                      {showConsent && isMinor && (
-                        // Minor: no consent here; they accept terms in the
-                        // Signalstack app later. Submit still proceeds.
-                        <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
-                          {t('u18_notice')}
-                        </div>
-                      )}
-                      {(() => {
-                        // Disabled only in flight; the click shows every field's error.
-                        const blocked = state.status === 'submitting';
-                        return (
-                          <button
-                            type="submit"
-                            disabled={blocked}
-                            onClick={() => {
-                              fieldErrors.markAttempted();
-                              yobFe.markAttempted();
-                            }}
-                            // Same background and text colour in both states;
-                            // disabled only lowers opacity.
-                            style={{ backgroundColor: cfg.brand.primary_color }}
-                            className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
-                    ${blocked ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90 bd-shadow-lg'}`}
-                          >
-                            {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
-                          </button>
-                        );
-                      })()}
+            {!isAccountOnly && (
+              <RjsfThemedForm
+                schema={formSchema}
+                uiSchema={mergedUiSchema as unknown as UiSchema<Record<string, unknown>>}
+                formData={formData}
+                // Location widgets report resolved coordinates here; they
+                // read it as `registry.formContext`, not as a prop.
+                formContext={{
+                  // Keep only lat/lng from the richer `ResolvedPlace`.
+                  onLocationResolved: (place: ResolvedPlace | null) =>
+                    setResolvedLocations(place ? [{ lat: place.lat, lng: place.lng }] : []),
+                  // The multi-value widget already emits this shape.
+                  onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
+                }}
+                onChange={(e, id) => {
+                  setFormData(e.formData as Record<string, unknown>);
+                  fieldErrors.onFormChange(id, { before: formData, after: e.formData });
+                }}
+                onSubmit={handleSubmit}
+                {...fieldErrors.formProps}
+                showErrorList={false}
+                focusOnFirstError
+                noHtml5Validate
+              >
+                <div className="mt-4 flex flex-col gap-3">
+                  {showBirthYear && (
+                    <div>
+                      <label className="block">
+                        <span className="text-[14px] font-medium text-(--bd-fg)">
+                          {t('year_of_birth_label')}
+                          <span className="text-rose-500 ml-0.5">*</span>
+                        </span>
+                        <SelectField
+                          {...yobFe.controlProps('year_of_birth')}
+                          value={yearOfBirth}
+                          onChange={setYearOfBirth}
+                          className="mt-1"
+                          required
+                          placeholder={t('year_of_birth_placeholder')}
+                          options={Array.from({ length: 101 }, (_, i) => currentYear - i).map(
+                            (y) => ({ value: String(y), label: y }),
+                          )}
+                        />
+                      </label>
+                      <FieldMessage
+                        id={yobFe.errorId('year_of_birth')}
+                        message={yobFe.message('year_of_birth')}
+                      />
                     </div>
-                  </RjsfThemedForm>
-                )}
-              </>
+                  )}
+                  {showConsent && isMinor && (
+                    // Minor: no consent here; they accept terms in the
+                    // Signalstack app later. Submit still proceeds.
+                    <div className="rounded-[12px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[14px] text-(--bd-fg)">
+                      {t('u18_notice')}
+                    </div>
+                  )}
+                  {(() => {
+                    // Disabled only in flight; the click shows every field's error.
+                    const blocked = state.status === 'submitting';
+                    return (
+                      <button
+                        type="submit"
+                        disabled={blocked}
+                        onClick={() => {
+                          fieldErrors.markAttempted();
+                          yobFe.markAttempted();
+                        }}
+                        // Same background and text colour in both states;
+                        // disabled only lowers opacity.
+                        style={{ backgroundColor: cfg.brand.primary_color }}
+                        className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white transition-all
+                ${blocked ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90 bd-shadow-lg'}`}
+                      >
+                        {state.status === 'submitting' ? t('btn_submitting') : t('btn_submit')}
+                      </button>
+                    );
+                  })()}
+                </div>
+              </RjsfThemedForm>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+      </RegistrationShell>
       {consentGateElement}
-    </div>
+    </>
   );
 }
