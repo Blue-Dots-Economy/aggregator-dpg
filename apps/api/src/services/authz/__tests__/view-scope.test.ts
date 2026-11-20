@@ -40,7 +40,8 @@ function seedTree(): OrganisationStoreFake {
   return store;
 }
 
-const sorted = (r: Awaited<ReturnType<typeof withChildren>>) => (r.ok ? [...r.value].sort() : r);
+const sorted = (r: Awaited<ReturnType<typeof withChildren>>) =>
+  r.ok ? [...r.value].sort((a, b) => a.localeCompare(b)) : r;
 
 afterEach(() => _setOrganisationStore(null));
 

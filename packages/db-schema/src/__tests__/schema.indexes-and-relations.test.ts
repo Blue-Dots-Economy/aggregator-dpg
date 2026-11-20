@@ -198,11 +198,9 @@ describe('consent_record: indexes and links', () => {
   });
 
   it('has the audit-key index and the two partial link indexes', () => {
-    expect(cfg.indexes.map((i) => i.config.name).sort()).toEqual([
-      'consent_record_org_idx',
-      'consent_record_subject_idx',
-      'consent_record_user_idx',
-    ]);
+    expect(
+      cfg.indexes.map((i) => i.config.name).sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+    ).toEqual(['consent_record_org_idx', 'consent_record_subject_idx', 'consent_record_user_idx']);
     const idx = cfg.indexes.find((i) => i.config.name === 'consent_record_subject_idx')!;
     expect(idx.config.unique).toBe(false);
     expect(idx.config.columns.map(colName)).toEqual(['subject_type', 'subject_id']);

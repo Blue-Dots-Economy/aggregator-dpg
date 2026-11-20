@@ -60,7 +60,10 @@ describe('substitute', () => {
   });
 
   it('collects the tokens a fragment uses', () => {
-    expect(tokensUsed('{{a}} and {{b}} and {{a}}').sort()).toEqual(['a', 'b']);
+    expect(tokensUsed('{{a}} and {{b}} and {{a}}').sort((a, b) => a.localeCompare(b))).toEqual([
+      'a',
+      'b',
+    ]);
   });
 });
 

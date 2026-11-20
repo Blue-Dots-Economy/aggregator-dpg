@@ -46,7 +46,9 @@ describe('edgeCatalogue', () => {
     const out = edgeCatalogue(roles, 'rev-7', 'enforce');
     expect(out.mode).toBe('enforce');
     expect(out.revision).toBe('rev-7');
-    expect(Object.keys(out.roles)).toEqual([...Object.keys(out.roles)].sort());
+    expect(Object.keys(out.roles)).toEqual(
+      [...Object.keys(out.roles)].sort((a, b) => a.localeCompare(b)),
+    );
     expect(out.roles['auditor']).toEqual({ permissions: ['campaigns.run', 'profiles.view'] });
     expect(out.roles['coordinator']?.permissions).toEqual(
       expect.arrayContaining(['profiles.onboard', 'profiles.view']),

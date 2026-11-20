@@ -49,11 +49,13 @@ const MATRIX: Record<string, string[]> = {
 
 describe('BUILTIN_ROLES', () => {
   it('holds exactly the six built-in roles of the catalogue', () => {
-    expect(shipped().map((r) => r.key)).toEqual(Object.keys(MATRIX).sort());
+    expect(shipped().map((r) => r.key)).toEqual(
+      Object.keys(MATRIX).sort((a, b) => a.localeCompare(b)),
+    );
   });
 
   it.each(Object.entries(MATRIX))('%s holds the catalogue permissions', (key, perms) => {
-    expect([...role(key).permissions].sort()).toEqual(perms);
+    expect([...role(key).permissions].sort((a, b) => a.localeCompare(b))).toEqual(perms);
   });
 
   it('maps each membership to one base role', () => {

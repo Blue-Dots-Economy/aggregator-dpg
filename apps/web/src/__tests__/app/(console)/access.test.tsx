@@ -86,7 +86,7 @@ describe.each(pages)('console access %s page', (_name, Page, emptyText, subtitle
       vi
         .mocked(consoleReadOptional)
         .mock.calls.map(([p]) => p)
-        .sort(),
+        .sort((a, b) => a.localeCompare(b)),
     ).toEqual(['/v1/rbac/permissions', '/v1/rbac/roles']);
     expect(screen.getByText(emptyText)).toBeInTheDocument();
     expect(screen.getByText(subtitle)).toBeInTheDocument();

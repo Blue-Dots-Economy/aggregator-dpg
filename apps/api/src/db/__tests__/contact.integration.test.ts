@@ -761,9 +761,11 @@ suite('contact (migration 0025) — integration', () => {
           WHERE table_schema = 'public' AND table_name IN ('users', 'aggregator_orgs')
             AND column_name IN ('contact', 'contact_phone', 'contact_email', 'owner_email', 'owner_phone', 'contact_id')`,
       );
-      expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual([
-        'contact_id',
-      ]);
+      expect(
+        cols.rows
+          .map((r: { column_name: string }) => r.column_name)
+          .sort((a, b) => a.localeCompare(b)),
+      ).toEqual(['contact_id']);
       expect(cols.rows.every((r: { is_nullable: string }) => r.is_nullable === 'NO')).toBe(true);
       const trig = await pool.query(
         `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%contact%' ORDER BY 1`,

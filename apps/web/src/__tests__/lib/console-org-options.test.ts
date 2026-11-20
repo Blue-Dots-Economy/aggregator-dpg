@@ -102,7 +102,7 @@ describe('orgsBelow / topmostOwned', () => {
     expect(
       orgsBelow('s', tree)
         .map((o) => o.id)
-        .sort(),
+        .sort((a, b) => a.localeCompare(b)),
     ).toEqual(['a', 'd']);
     expect(orgsBelow('a', tree)).toEqual([]);
   });

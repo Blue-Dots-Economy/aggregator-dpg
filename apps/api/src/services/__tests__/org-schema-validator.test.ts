@@ -119,7 +119,12 @@ describe('validateOrgRegistration (default schema)', () => {
       domains: ['astronaut'],
     });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(Object.keys(r.errors).sort()).toEqual(['domains', 'gst_number', 'website']);
+    if (!r.ok)
+      expect(Object.keys(r.errors).sort((a, b) => a.localeCompare(b))).toEqual([
+        'domains',
+        'gst_number',
+        'website',
+      ]);
   });
 });
 
