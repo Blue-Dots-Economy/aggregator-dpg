@@ -209,19 +209,16 @@ async function orgList(
   const allInvites = invites !== null && !invites.next_cursor;
   const defaultIds = new Set(orgs.filter((o) => o.is_default).map((o) => o.id));
   const counted = rows.filter((r) => !defaultIds.has(r.id));
+  let footer: string | null = null;
+  if (!complete) footer = t('org.children_more');
+  else if (invites?.next_cursor) footer = t('open_invites.more', { count: invites.invites.length });
   return (
     <MemberList
       kind="orgs"
       rows={rows}
       counts={memberCounts(counted, {}, complete && allInvites)}
       columns={[t('orgs.col_joined')]}
-      footer={
-        complete
-          ? invites?.next_cursor
-            ? t('open_invites.more', { count: invites.invites.length })
-            : null
-          : t('org.children_more')
-      }
+      footer={footer}
       initialFilter={initialFilter}
     />
   );

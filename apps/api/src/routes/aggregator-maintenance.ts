@@ -135,7 +135,7 @@ const CleanupResponseSchema = z
  *
  * @param app - Fastify instance to attach the route to.
  */
-export async function registerAggregatorMaintenanceRoutes(base: FastifyInstance): Promise<void> {
+export function registerAggregatorMaintenanceRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/admin/v1/aggregator-registrations/cleanup-stale',

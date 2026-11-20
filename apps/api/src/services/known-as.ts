@@ -91,7 +91,8 @@ export function knownAsKeyFrom(name: string, taken: ReadonlySet<string>): string
     .toLowerCase()
     .replace(/['`]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/^_+/, '');
+  base = trimTrailingUnderscores(base);
   if (/^\d/.test(base)) base = `v_${base}`;
   base = cut(base, KEY_MAX);
   if (base === '') {
@@ -109,7 +110,14 @@ export function knownAsKeyFrom(name: string, taken: ReadonlySet<string>): string
 
 /** Cuts a key to `max` characters and drops trailing underscores. */
 function cut(key: string, max: number): string {
-  return key.slice(0, max).replace(/_+$/, '');
+  return trimTrailingUnderscores(key.slice(0, max));
+}
+
+/** Drops trailing underscores; a loop, as `/_+$/` backtracks on long runs. */
+function trimTrailingUnderscores(key: string): string {
+  let end = key.length;
+  while (end > 0 && key[end - 1] === '_') end -= 1;
+  return key.slice(0, end);
 }
 
 /** Outcome of {@link fillKnownAsKeys}. */

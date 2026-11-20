@@ -10,13 +10,23 @@
   var params = new URLSearchParams(window.location.search);
   var button = document.getElementById('signOutAndSwitch');
 
+  // Only an absolute http(s) address is ever followed or linked.
+  function httpUrl(uri) {
+    try {
+      var url = new URL(uri);
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   if (!button) {
     // Keycloak shows the confirmation page only after checking this address
     // against the client's registered list; an invalid one gets the error page.
-    var postLogout = params.get('post_logout_redirect_uri');
+    var postLogout = httpUrl(params.get('post_logout_redirect_uri'));
     if (postLogout) {
       try {
-        sessionStorage.setItem(STORED_POST_LOGOUT, postLogout);
+        sessionStorage.setItem(STORED_POST_LOGOUT, postLogout.href);
       } catch (e) {
         // Storage unavailable: a failed confirmation keeps the plain sign-out link.
       }
@@ -24,7 +34,8 @@
       // button already used and disabled, which leaves no way forward.
       window.addEventListener('pageshow', function (event) {
         var confirm = document.querySelector('input[name="confirmLogout"]');
-        if (event.persisted && confirm && confirm.disabled) window.location.replace(postLogout);
+        if (event.persisted && confirm && confirm.disabled)
+          window.location.replace(postLogout.href);
       });
     }
     return;
@@ -34,11 +45,8 @@
   if (allowed.length === 0) return;
 
   function originOf(uri) {
-    try {
-      return new URL(uri).origin;
-    } catch (e) {
-      return null;
-    }
+    var url = httpUrl(uri);
+    return url ? url.origin : null;
   }
 
   var redirectUri = params.get('redirect_uri');
@@ -64,7 +72,8 @@
     } catch (e) {
       return;
     }
-    if (stored && allowed.indexOf(originOf(stored)) !== -1) button.href = stored;
+    var storedUrl = stored ? httpUrl(stored) : null;
+    if (storedUrl && allowed.indexOf(storedUrl.origin) !== -1) button.href = storedUrl.href;
     return;
   }
 

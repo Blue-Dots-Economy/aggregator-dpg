@@ -19,8 +19,8 @@ import type { RbacMode, RbacRuntime } from './runtime.js';
  *
  * @returns The built-in role definitions.
  */
-export async function shippedRoles(): Promise<RoleDefinition[]> {
-  return structuredClone(BUILTIN_ROLES) as RoleDefinition[];
+export function shippedRoles(): Promise<RoleDefinition[]> {
+  return Promise.resolve(structuredClone(BUILTIN_ROLES) as RoleDefinition[]);
 }
 
 /**

@@ -17,11 +17,11 @@ import type { Pool } from 'pg';
 import { closeDb, getDb, getPool } from './client.js';
 import { logger } from '../logger.js';
 import { runMigrationGuards } from './migration-guards.js';
-import { MIGRATION_LOCK_SQL_KEY, migrateWithLock as migrateWithLockCore } from './migrate-core.js';
+import { migrateWithLock as migrateWithLockCore } from './migrate-core.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export { MIGRATION_LOCK_SQL_KEY };
+export { MIGRATION_LOCK_SQL_KEY } from './migrate-core.js';
 
 /**
  * Applies all pending migrations in `migrationsFolder` under the migration

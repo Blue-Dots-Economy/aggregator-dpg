@@ -53,7 +53,7 @@ const INDIA_NATIONAL_DIGITS = 10;
 const MAX_TOTAL_DIGITS = 15;
 
 function flagOf(iso: string): string {
-  return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+  return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + (c.codePointAt(0) ?? 0) - 65));
 }
 
 /**

@@ -34,7 +34,15 @@ const TONE = {
 } as const;
 
 /** Centred card with an icon, a title, a short explanation and actions. */
-function AccessCard({ tone, icon, title, body, children, footer, role }: AccessCardProps) {
+function AccessCard({
+  tone,
+  icon,
+  title,
+  body,
+  children,
+  footer,
+  role,
+}: Readonly<AccessCardProps>) {
   return (
     <section
       role={role}

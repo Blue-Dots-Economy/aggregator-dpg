@@ -689,7 +689,7 @@ describe('PostgresUserStore.update / updateStatus', () => {
     });
 
     const set = callArgs(captured, 'set')?.[0] as Record<string, unknown>;
-    expect(Object.keys(set).sort()).toEqual(
+    expect(Object.keys(set).sort((a, b) => a.localeCompare(b))).toEqual(
       [
         'signalstackOrgName',
         'serves',
@@ -698,7 +698,7 @@ describe('PostgresUserStore.update / updateStatus', () => {
         'status',
         'updatedBy',
         'updatedAt',
-      ].sort(),
+      ].sort((a, b) => a.localeCompare(b)),
     );
   });
 

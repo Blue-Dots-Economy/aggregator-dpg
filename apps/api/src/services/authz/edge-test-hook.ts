@@ -28,7 +28,8 @@ export function edgeFetchRecorder(): EdgeFetchRecorder {
   const rec: EdgeFetchRecorder = {
     bodies: [],
     fetch: ((_url: string, init?: RequestInit) => {
-      rec.bodies.push(JSON.parse(String(init?.body ?? 'null')));
+      const body = init?.body;
+      rec.bodies.push(JSON.parse(typeof body === 'string' ? body : 'null'));
       return Promise.resolve(new Response(null, { status: 204 }));
     }) as unknown as typeof fetch,
   };

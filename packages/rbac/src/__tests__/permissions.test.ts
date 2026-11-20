@@ -66,7 +66,7 @@ describe('effectivePermissions', () => {
   it('adds a live additional role held in the organisation', () => {
     const held = [{ roleKey: 'verifier', orgId: 'A', expiresAt: null }];
     expect(effectivePermissions(index, coordinator(held), new Set(['A']), NOW)).toEqual(
-      [...COORD, 'profiles.verify'].sort(),
+      [...COORD, 'profiles.verify'].sort((a, b) => a.localeCompare(b)),
     );
   });
 
@@ -235,8 +235,8 @@ describe('effectiveRoleKeys', () => {
     const fromKeys = new Set(
       effectiveRoleKeys(index, subject, NOW).flatMap((k) => index.byKey.get(k)?.permissions ?? []),
     );
-    expect([...fromKeys].sort()).toEqual(
-      [...effectivePermissions(index, subject, null, NOW)].sort(),
+    expect([...fromKeys].sort((a, b) => a.localeCompare(b))).toEqual(
+      [...effectivePermissions(index, subject, null, NOW)].sort((a, b) => a.localeCompare(b)),
     );
   });
 });

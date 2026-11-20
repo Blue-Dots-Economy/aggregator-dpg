@@ -175,7 +175,9 @@ suite('organisation store tree rules (Postgres)', () => {
       expect(top.ok && top.value).toEqual(expect.arrayContaining([a, defaultId]));
       expect(top.ok && top.value).not.toContain(b);
       const below = await store.childIds([a, b]);
-      expect(below.ok && [...below.value].sort()).toEqual([b, c].sort());
+      expect(below.ok && [...below.value].sort((a, b) => a.localeCompare(b))).toEqual(
+        [b, c].sort((a, b) => a.localeCompare(b)),
+      );
       expect(await store.childIds([])).toEqual({ ok: true, value: [] });
       const page = await store.search({ orgIds: null, parentId: a });
       expect(page.ok && page.value.rows.map((o) => o.id)).toEqual([b]);
@@ -252,7 +254,7 @@ suite('organisation store tree rules (Postgres)', () => {
         store.create(slow('r1'), permissiveTreeRules({ maxChildren: 1 })),
         store.create(slow('r2'), permissiveTreeRules({ maxChildren: 1 })),
       ]);
-      expect(results.map(code).sort()).toEqual(['CHILD_LIMIT', 'ok']);
+      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['CHILD_LIMIT', 'ok']);
     });
 
     it('lets one of two concurrent creates take the last org slot', async () => {
@@ -265,7 +267,7 @@ suite('organisation store tree rules (Postgres)', () => {
         store.create(slow('r1'), permissiveTreeRules({ maxTotalOrgs: 2 })),
         store.create(slow('r2'), permissiveTreeRules({ maxTotalOrgs: 2 })),
       ]);
-      expect(results.map(code).sort()).toEqual(['TOTAL_LIMIT', 'ok']);
+      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['ok', 'TOTAL_LIMIT']);
     });
   });
 
@@ -672,7 +674,7 @@ suite('organisation store tree rules (Postgres)', () => {
           store.move(b, { parentId: a }, permissiveTreeRules()),
         ]),
       );
-      expect(results.map(code).sort()).toEqual(['PARENT_CYCLE', 'ok']);
+      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['ok', 'PARENT_CYCLE']);
     });
 
     it('keeps a valid key when a known_as change races a move', async () => {

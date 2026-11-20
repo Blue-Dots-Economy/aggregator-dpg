@@ -64,7 +64,7 @@ const LookupResponseSchema = z
  *
  * @param app - Fastify instance.
  */
-export async function registerPublicLookupRoute(base: FastifyInstance): Promise<void> {
+export function registerPublicLookupRoute(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/public/v1/aggregators/:orgSlug/lookup',

@@ -19,7 +19,8 @@ export type WorkerRole = (typeof WORKER_ROLES)[number];
 
 /** True when `value` names a known worker role. */
 function isWorkerRole(value: string): value is WorkerRole {
-  return WORKER_ROLES.some((role) => role === value);
+  const roles: readonly string[] = WORKER_ROLES;
+  return roles.includes(value);
 }
 
 /**

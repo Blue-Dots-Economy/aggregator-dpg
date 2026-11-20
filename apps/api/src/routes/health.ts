@@ -43,7 +43,7 @@ async function probe(fn: () => Promise<unknown>, ms = 2000): Promise<'ok' | 'err
   }
 }
 
-export async function registerHealthRoutes(base: FastifyInstance): Promise<void> {
+export function registerHealthRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/health/live',

@@ -167,13 +167,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     // Counts retries only; the 401 token refresh does not use the budget.
     let attempt = 0;
     for (;;) {
-      const controller = this.timeoutMs ? new AbortController() : undefined;
-      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
       try {
-        const res = await this.fetchImpl(url, {
-          ...currentInit,
-          ...(controller ? { signal: controller.signal } : {}),
-        });
+        const res = await this.fetchOnce(url, currentInit);
 
         if (res.status === 401 && this.auth.kind === 'bearer' && !remintDone) {
           remintDone = true;
@@ -190,7 +185,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           return res;
         }
 
-        if (attempt < this.maxRetries && (res.status === 429 || res.status >= 500)) {
+        if (attempt < this.maxRetries && isRetryableStatus(res.status)) {
           await this.backoff(attempt);
           attempt += 1;
           continue;
@@ -203,11 +198,23 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           continue;
         }
         throw e;
-      } finally {
-        if (timer) clearTimeout(timer);
       }
     }
     // Unreachable: the loop always returns or throws.
+  }
+
+  /** One fetch attempt, aborted after `timeoutMs` when that is set. */
+  private async fetchOnce(url: string, init: SignalStackRequestInit): Promise<Response> {
+    const controller = this.timeoutMs ? new AbortController() : undefined;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : undefined;
+    try {
+      return await this.fetchImpl(url, {
+        ...init,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /** Sleeps for `retryBaseMs * 2^attempt` ms before the next retry. */
@@ -983,6 +990,11 @@ function parseJsonObject(bodyText: string): Record<string, unknown> | null {
   }
 }
 
+/** Whether a status is worth a retry: rate limited or a server error. */
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 /** Reads `obj[key]` when it is a string. */
 function stringField(obj: Record<string, unknown>, key: string): string | null {
   const value = obj[key];
@@ -1043,12 +1055,9 @@ function extractUpstreamMessage(bodyText: string): string | null {
   const parsed = parseJsonObject(bodyText);
   if (!parsed) return null;
   const errField = parsed['error'];
-  const errCode =
-    typeof errField === 'string'
-      ? errField
-      : isObject(errField)
-        ? stringField(errField, 'code')
-        : null;
+  let errCode: string | null = null;
+  if (typeof errField === 'string') errCode = errField;
+  else if (isObject(errField)) errCode = stringField(errField, 'code');
   const messageText =
     stringField(parsed, 'message') ??
     (isObject(errField) ? stringField(errField, 'message') : null);

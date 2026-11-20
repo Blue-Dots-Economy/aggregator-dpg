@@ -326,7 +326,9 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       expect(body.kind).toBe('admin');
       expect(body.is_network_admin).toBe(true);
-      expect(body.orgs.map((o) => o.id).sort()).toEqual([ROOT, DEFAULT].sort());
+      expect(body.orgs.map((o) => o.id).sort((a, b) => a.localeCompare(b))).toEqual(
+        [ROOT, DEFAULT].sort((a, b) => a.localeCompare(b)),
+      );
       expect(body.user.contact.email).toBe('na@net.org');
     });
 
@@ -598,10 +600,14 @@ describe('console routes /v1/user, /v1/org', () => {
 
   describe('POST /v1/user/search', () => {
     const ids = (res: { json: () => unknown }) =>
-      (res.json() as { users: Array<{ id: string }> }).users.map((u) => u.id).sort();
+      (res.json() as { users: Array<{ id: string }> }).users
+        .map((u) => u.id)
+        .sort((a, b) => a.localeCompare(b));
 
     it('scopes an owner to its org, and the network admin to the orgs it owns', async () => {
-      expect(ids(await post('/v1/user/search', 'a', {}))).toEqual([C1, C3].sort());
+      expect(ids(await post('/v1/user/search', 'a', {}))).toEqual(
+        [C1, C3].sort((a, b) => a.localeCompare(b)),
+      );
       // The network admin owns the root and the Default org; neither has a coordinator here.
       expect(ids(await post('/v1/user/search', 'na', {}))).toEqual([]);
     });
@@ -920,9 +926,11 @@ describe('console routes /v1/user, /v1/org', () => {
         })
       ).json() as Page;
       expect(second.next_cursor).toBeNull();
-      expect([...first.invites, ...second.invites].map((i) => i.email).sort()).toEqual(
-        ['one@x.org', 'three@x.org', 'two@x.org'].sort(),
-      );
+      expect(
+        [...first.invites, ...second.invites]
+          .map((i) => i.email)
+          .sort((a, b) => a.localeCompare(b)),
+      ).toEqual(['one@x.org', 'three@x.org', 'two@x.org'].sort((a, b) => a.localeCompare(b)));
     });
 
     it('keeps org invites out of the coordinator list and lists them separately', async () => {
@@ -957,12 +965,14 @@ describe('console routes /v1/user, /v1/org', () => {
 
   describe('POST /v1/org/search', () => {
     const ids = (res: { json: () => unknown }) =>
-      (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();
+      (res.json() as { orgs: Array<{ id: string }> }).orgs
+        .map((o) => o.id)
+        .sort((a, b) => a.localeCompare(b));
 
     it('scopes an owner to its org; the network admin sees every aggregator org', async () => {
       expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A]);
       expect(ids(await post('/v1/org/search', 'na', {}))).toEqual(
-        [DEFAULT, ORG_A, ORG_B, ORG_P].sort(),
+        [DEFAULT, ORG_A, ORG_B, ORG_P].sort((a, b) => a.localeCompare(b)),
       );
     });
 
@@ -1055,7 +1065,9 @@ describe('console routes /v1/user, /v1/org', () => {
       });
 
       it('lets an owner read its direct children, but not edit them', async () => {
-        expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B].sort());
+        expect(ids(await post('/v1/org/search', 'a', {}))).toEqual(
+          [ORG_A, ORG_B].sort((a, b) => a.localeCompare(b)),
+        );
         expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(200);
         const edit = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { legal_name: null });
         expect(edit.statusCode).toBe(403);
@@ -1240,7 +1252,7 @@ describe('console routes /v1/user, /v1/org', () => {
       });
       expect(res.statusCode).toBe(400);
       const error = (res.json() as { error: { fields: { field_errors: object } } }).error;
-      expect(Object.keys(error.fields.field_errors).sort()).toEqual([
+      expect(Object.keys(error.fields.field_errors).sort((a, b) => a.localeCompare(b))).toEqual([
         'domains',
         'gst_number',
         'website',
@@ -1865,8 +1877,12 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('lists its own orgs and their direct children, never the one above', async () => {
       const ids = (res: { json: () => unknown }) =>
-        (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();
-      expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B].sort());
+        (res.json() as { orgs: Array<{ id: string }> }).orgs
+          .map((o) => o.id)
+          .sort((a, b) => a.localeCompare(b));
+      expect(ids(await post('/v1/org/search', 'a', {}))).toEqual(
+        [ORG_A, ORG_B].sort((a, b) => a.localeCompare(b)),
+      );
       expect(ids(await post('/v1/org/search', 'b', {}))).toEqual([ORG_B]);
     });
 
@@ -1885,8 +1901,8 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it("lists only its own coordinators, never a child org's", async () => {
       const res = await post('/v1/user/search', 'a', {});
-      const ids = (res.json() as Users).users.map((u) => u.id).sort();
-      expect(ids).toEqual([C1, C3].sort());
+      const ids = (res.json() as Users).users.map((u) => u.id).sort((a, b) => a.localeCompare(b));
+      expect(ids).toEqual([C1, C3].sort((a, b) => a.localeCompare(b)));
       expect(emailOf(res, C1)).toBe('c1@x.org');
     });
 
@@ -2539,7 +2555,10 @@ describe('console routes /v1/user, /v1/org', () => {
           assignable: Array<{ role_key: string; org_id: string }>;
         };
         expect(res.base).toEqual([{ role_key: 'coordinator', org_id: ORG_A }]);
-        expect(res.assignable.map((r) => r.role_key).sort()).toEqual(['data_export', 'pii_access']);
+        expect(res.assignable.map((r) => r.role_key).sort((a, b) => a.localeCompare(b))).toEqual([
+          'data_export',
+          'pii_access',
+        ]);
       });
 
       it('assigns PII Access for 90 days and revokes it; the base role keeps personal data', async () => {

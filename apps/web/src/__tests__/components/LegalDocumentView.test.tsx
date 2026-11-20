@@ -189,14 +189,14 @@ describe('<LegalDocumentView />', () => {
     const privacyClasses = screen
       .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
       .map((link) => link.className)
-      .sort();
+      .sort((a, b) => a.localeCompare(b));
     unmount();
 
     renderView('#terms', groups);
     const termsClasses = screen
       .getAllByRole('link', { name: /Privacy Policy|Terms of Service/ })
       .map((link) => link.className)
-      .sort();
+      .sort((a, b) => a.localeCompare(b));
 
     expect(termsClasses).toEqual(privacyClasses);
   });
@@ -213,10 +213,9 @@ describe('<LegalDocumentView />', () => {
     expect(otherLinks).toHaveLength(2);
     // The FIRST group's documents own the bare `#terms` fragment — that is
     // what `/terms` redirects to. Later groups keep their audience-scoped ids.
-    expect(otherLinks.map((l) => l.getAttribute('href')).sort()).toEqual([
-      '#aggregator-terms',
-      '#terms',
-    ]);
+    expect(
+      otherLinks.map((l) => l.getAttribute('href')).sort((a, b) => a.localeCompare(b)),
+    ).toEqual(['#aggregator-terms', '#terms']);
     for (const link of otherLinks) {
       expect(link).not.toHaveAttribute('aria-current');
     }
