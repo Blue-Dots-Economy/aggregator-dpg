@@ -29,6 +29,54 @@ function isSafeHandoffUrl(url: string): boolean {
 }
 
 /**
+ * Sends the participant to the Signals UI in the same tab.
+ *
+ * Do not use `window.open(url, '_blank')`: this runs from a timer, and
+ * browsers block pop-ups opened without a user click. Errors from a blocked
+ * navigation are logged; the button stays on screen.
+ *
+ * @param url - Hand-off URL captured when the countdown started.
+ */
+export function navigateToSignals(url: string): void {
+  try {
+    window.location.assign(url);
+  } catch (err) {
+    console.error(
+      '[signals-handoff] navigation to the Signals UI was blocked; the participant stays on this page',
+      {
+        operation: 'signals-handoff.navigate',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+  }
+}
+
+/**
+ * The domain's Signals UI URL, or `null` when none is configured or it is unsafe.
+ *
+ * Not gated by the link's `signals_cta` setting: the voice page sends an
+ * under-18 participant, and a participant who has called, to Signals either way.
+ *
+ * @param domain - The link's domain id (e.g. `seeker`).
+ * @returns The configured Signals UI URL, or `null`.
+ */
+export function useSignalsUiUrl(domain: string): string | null {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const urls = cfg.signals_ui_urls;
+  const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
+  if (!url) return null;
+  if (!isSafeHandoffUrl(url)) {
+    console.error(
+      `[signals-cta] refusing a non-http(s) hand-off URL for domain "${domain}"; the sign-in option will not render`,
+      { operation: 'signals-cta.validate-url', status: 'rejected', domain },
+    );
+    return null;
+  }
+  return url;
+}
+
+/**
  * Resolve the Signals UI URL for this link, or `null` when the hand-off is off.
  *
  * Both must hold: the link's registration mode has `signals_cta` enabled, and
@@ -50,16 +98,8 @@ export function useSignalsHandoffUrl(
   submissionShape: 'account_only' | 'account_and_profile',
 ): string | null {
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  const urls = cfg.signals_ui_urls;
-  const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
+  const url = useSignalsUiUrl(domain);
   if (!url) return null;
-  if (!isSafeHandoffUrl(url)) {
-    console.error(
-      `[signals-cta] refusing a non-http(s) hand-off URL for domain "${domain}"; the sign-in option will not render`,
-      { operation: 'signals-cta.validate-url', status: 'rejected', domain },
-    );
-    return null;
-  }
   const modes = cfg.registration_modes;
   const mode =
     registrationMode && modes && Object.hasOwn(modes, registrationMode)
@@ -89,5 +129,28 @@ export function SignalsSignInCta({ href }: Readonly<{ href: string }>) {
     >
       {t('signals_cta')}
     </a>
+  );
+}
+
+/**
+ * Renders "Already registered? Sign in with OTP" as one line of small text.
+ *
+ * @param props.href - Signals UI URL from {@link useSignalsHandoffUrl}, used as is.
+ * @returns The sign-in line, its link opened in a new tab.
+ */
+export function SignalsSignInLine({ href }: Readonly<{ href: string }>) {
+  const t = useTranslations('profile.public_reg');
+  return (
+    <p className="text-center text-[13px] text-ink-500">
+      {t('signals_sign_in_prompt')}{' '}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-(--bd-primary-600) underline-offset-2 hover:underline"
+      >
+        {t('signals_sign_in_link')}
+      </a>
+    </p>
   );
 }

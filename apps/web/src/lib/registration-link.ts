@@ -12,9 +12,11 @@ export const LinkIdentitySchema = IdentitySelectorsSchema.partial();
 /** Identity field names for a link's domain. */
 export type LinkIdentity = z.infer<typeof LinkIdentitySchema>;
 
-/** The voice bot a link resolves to, as the public page shows it. The number is not included. */
+/** The voice bot a link resolves to, as the public page shows it. */
 export const LinkVoiceBotSchema = z.object({
   display_name: z.string(),
+  /** The number the participant calls, shown before they register. */
+  phone: z.string(),
   /** Language codes the bot speaks, as configured, for example `hi`. Show them with `languageNames`. */
   languages: z.array(z.string()),
   description: z.string().optional(),
