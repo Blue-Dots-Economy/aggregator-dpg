@@ -124,8 +124,9 @@ export async function loadCountsBatch(
   const liveUploads = uploads.filter(
     (u) => u.status !== 'completed' && u.status !== 'pending' && u.status !== 'uploaded',
   );
-  for (const u of liveUploads) {
-    out.set(u.id, await loadCountsFromRedis(u.id));
-  }
+  const live = await Promise.all(
+    liveUploads.map(async (u) => [u.id, await loadCountsFromRedis(u.id)] as const),
+  );
+  for (const [id, counts] of live) out.set(id, counts);
   return out;
 }

@@ -159,13 +159,22 @@ export function bulkHeaderColumns(schema: Record<string, unknown>): BulkHeaderCo
   return { required, allowed: new Set([...properties, ...WELL_KNOWN_COLUMNS]) };
 }
 
+/** A header cell as text: strings as-is, other scalars stringified, anything else `''`. */
+function cellText(cell: unknown): string {
+  if (typeof cell === 'string') return cell;
+  if (typeof cell === 'number' || typeof cell === 'boolean' || typeof cell === 'bigint') {
+    return String(cell);
+  }
+  return '';
+}
+
 /**
  * The header record's cells as column names: each cell trimmed, a missing cell `''`.
  *
  * @param record - The first non-empty record of the CSV.
  */
 export function normaliseHeaderCells(record: readonly unknown[]): string[] {
-  return record.map((h) => String(h ?? '').trim());
+  return record.map((h) => cellText(h).trim());
 }
 
 /** Why a header fails: required columns missing, or columns the schema does not declare. */

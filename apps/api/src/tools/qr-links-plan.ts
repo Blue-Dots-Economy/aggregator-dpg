@@ -377,13 +377,14 @@ export async function buildLinksPlan(input: {
       continue;
     }
     try {
-      const planned = await planRow(row, email, modeKey, {
+      const rowContext = {
         cfg,
         now,
         cache,
         bound,
         claimed: claimedBy.get(email) ?? new Set<string>(),
-      });
+      };
+      const planned = await planRow(row, email, modeKey, rowContext);
       problems.push(...planned.problems);
       if (planned.link) links.push(planned.link);
     } catch (err) {
