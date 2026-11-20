@@ -37,7 +37,7 @@ export function useCreateLink() {
   return useMutation({
     mutationFn: (input: CreateLinkInput) => onboardingService.createLink(input),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -48,7 +48,7 @@ export function useUpdateLink() {
     mutationFn: ({ id, patch }: { id: string; patch: UpdateLinkInput }) =>
       onboardingService.updateLink(id, patch),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -58,7 +58,7 @@ export function useActivateLink() {
   return useMutation({
     mutationFn: (id: string) => onboardingService.activateLink(id),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -68,7 +68,7 @@ export function useDeactivateLink() {
   return useMutation({
     mutationFn: (id: string) => onboardingService.deactivateLink(id),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -125,7 +125,7 @@ export function useBulkUpload() {
       maxBytes?: number | undefined;
     }) => onboardingService.uploadCsv(file, participantType, attestation, maxBytes),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
     },
   });
 }
