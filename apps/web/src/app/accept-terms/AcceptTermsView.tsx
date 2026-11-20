@@ -117,12 +117,9 @@ export function AcceptTermsView({
     body = (
       <>
         {outcome === 'changed' && (
-          <p
-            role="status"
-            className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
-          >
+          <output className="mb-3 block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             {t('changed')}
-          </p>
+          </output>
         )}
         {/* A new version remounts the gate, so reading starts again. */}
         <ConsentGate

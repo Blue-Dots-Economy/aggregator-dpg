@@ -499,18 +499,18 @@ async function main(args: string[], io: CommandIo): Promise<number> {
 export async function run(args: string[], io: CommandIo): Promise<number> {
   try {
     return await main(args, io);
-  } catch (thrown) {
-    const uploadId = thrown instanceof UploadFailure ? thrown.uploadId : undefined;
-    const err = thrown instanceof UploadFailure ? thrown.failure : thrown;
-    if (thrown instanceof UploadFailure && thrown.started) {
-      const reason = logReadFailure(thrown.uploadId, err);
+  } catch (error_) {
+    const uploadId = error_ instanceof UploadFailure ? error_.uploadId : undefined;
+    const err = error_ instanceof UploadFailure ? error_.failure : error_;
+    if (error_ instanceof UploadFailure && error_.started) {
+      const reason = logReadFailure(error_.uploadId, err);
       io.out(`FAILED: upload ${uploadId} started; check with --upload-id ${uploadId} (${reason})`);
       return 1;
     }
-    if (thrown instanceof FollowUpFailure) {
-      const reason = logReadFailure(thrown.uploadId, thrown.failure);
+    if (error_ instanceof FollowUpFailure) {
+      const reason = logReadFailure(error_.uploadId, error_.failure);
       io.out(
-        `FAILED: upload ${thrown.uploadId}: ${reason}; try --upload-id ${thrown.uploadId} again later; do not start a new upload`,
+        `FAILED: upload ${error_.uploadId}: ${reason}; try --upload-id ${error_.uploadId} again later; do not start a new upload`,
       );
       return 1;
     }
@@ -588,19 +588,6 @@ function isEntry(): boolean {
   );
 }
 
-/** Closes every connection the command opened so the process can exit. */
-async function closeAll(): Promise<void> {
-  const [{ closeDb }, { closeRedis }, { closeBulkQueue }, { closeRateLimiter }] = await Promise.all(
-    [
-      import('../db/client.js'),
-      import('../services/redis/index.js'),
-      import('../services/bulk-queue/index.js'),
-      import('../services/rate-limiter/index.js'),
-    ],
-  );
-  await Promise.allSettled([closeDb(), closeRedis(), closeBulkQueue(), closeRateLimiter()]);
-}
-
 if (isEntry()) {
   initObjectStorage(config);
   const code = await run(process.argv.slice(2), {
@@ -612,11 +599,22 @@ if (isEntry()) {
     callTimeoutMs: config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   });
-  await withTimeout(closeAll(), config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS, 'shutdown').catch(
-    (err: unknown) => {
-      logger.warn({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
-    },
+  // Close every connection the command opened so the process can exit.
+  const [{ closeDb }, { closeRedis }, { closeBulkQueue }, { closeRateLimiter }] = await Promise.all(
+    [
+      import('../db/client.js'),
+      import('../services/redis/index.js'),
+      import('../services/bulk-queue/index.js'),
+      import('../services/rate-limiter/index.js'),
+    ],
   );
+  await withTimeout(
+    Promise.allSettled([closeDb(), closeRedis(), closeBulkQueue(), closeRateLimiter()]),
+    config.BULK_UPLOAD_CMD_CALL_TIMEOUT_MS,
+    'shutdown',
+  ).catch((err: unknown) => {
+    logger.warn({ operation: 'tools.bulkUpload', status: 'failure', error: errorMessage(err) });
+  });
   // A call that timed out may still hold a connection open.
   process.exit(code);
 }

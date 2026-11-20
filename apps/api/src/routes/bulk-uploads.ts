@@ -213,7 +213,7 @@ const ErrorsCsvResponseSchema = z
   })
   .loose();
 
-export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<void> {
+export function registerBulkUploadsRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   // The 200 reply is a file, so it has no response schema; `Reply` types it instead.
   app.get<{ Querystring: z.output<typeof TemplateQuerySchema>; Reply: string | Buffer }>(

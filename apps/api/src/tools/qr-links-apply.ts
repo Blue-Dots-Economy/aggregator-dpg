@@ -110,8 +110,9 @@ export async function applyLinksPlan(
       report.slug = link.existing.slug;
       report.url = link.existing.url;
       report.voiceBot = link.existing.voiceBotKey ?? '';
-    } else if (!recordCreate(report, await create(link, log, opts.callTimeoutMs))) {
-      failedRow = report;
+    } else {
+      const created = await create(link, log, opts.callTimeoutMs);
+      if (!recordCreate(report, created)) failedRow = report;
     }
     log.info({
       status: report.outcome === 'failed' ? 'failure' : 'success',
