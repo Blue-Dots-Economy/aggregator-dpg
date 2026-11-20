@@ -53,10 +53,10 @@ export async function manageableOrgIds(
   const manages = (orgId: string) => (perms[orgId] ?? []).includes('org.manage');
   const rootPerms = rootId ? (perms[rootId] ?? []) : [];
   if (ROOT_WIDE[purpose].some((c) => rootPerms.includes(c))) return reach;
-  const owned = actor.orgs
-    .filter((o) => o.orgType === 'aggregator' && manages(o.id))
-    .map((o) => o.id);
-  const narrowed = reach.filter((id) => owned.includes(id));
+  const owned = new Set(
+    actor.orgs.filter((o) => o.orgType === 'aggregator' && manages(o.id)).map((o) => o.id),
+  );
+  const narrowed = reach.filter((id) => owned.has(id));
   if (narrowed.length === reach.length) return reach;
   // Log before returning, in both modes. `enforce` is the mode that actually
   // withholds organisations, and the caller turns that into a 404 that looks
