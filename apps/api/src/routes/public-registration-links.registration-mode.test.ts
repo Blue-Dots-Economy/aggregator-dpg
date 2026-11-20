@@ -744,10 +744,11 @@ describe('schema validation failure branches (account_and_profile)', () => {
         keyword: string;
         params?: { missingProperty?: string };
       }>;
-      expect(issues.map((i) => i.params?.missingProperty).sort()).toEqual([
-        'licence_number',
-        'licence_type',
-      ]);
+      expect(
+        issues
+          .map((i) => i.params?.missingProperty)
+          .sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+      ).toEqual(['licence_number', 'licence_type']);
       expect(issues.some((i) => i.keyword === 'if')).toBe(false);
     });
 

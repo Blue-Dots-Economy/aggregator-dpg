@@ -70,7 +70,7 @@ const SupportRequestSchema = z
  *
  * @param app - The Fastify instance to attach routes to.
  */
-export async function registerSupportRoutes(base: FastifyInstance): Promise<void> {
+export function registerSupportRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/support/config',

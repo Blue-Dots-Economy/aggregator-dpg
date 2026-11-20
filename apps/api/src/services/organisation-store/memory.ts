@@ -600,7 +600,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     if (requested === undefined) return this.root;
     if (this.root?.id === requested) return this.root;
     const o = this.byId.get(requested);
-    return o && o.status === 'active' && !o.isDefault ? o : null;
+    return o?.status === 'active' && !o.isDefault ? o : null;
   }
 
   /** Ids of every org below `id`, at most {@link DESCENDANT_LEVEL_CAP} levels down. */

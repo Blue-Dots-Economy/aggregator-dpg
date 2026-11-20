@@ -498,7 +498,7 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
       buildOrganisation({ id: 'y', slug: 'y', parentId: 'x' }),
     ]);
     const r = await store.descendantIds(['s']);
-    expect(r.ok && [...r.value].sort()).toEqual(['a', 'd']);
+    expect(r.ok && [...r.value].sort((a, b) => a.localeCompare(b))).toEqual(['a', 'd']);
     const both = await store.descendantIds(['s', 'd']);
     expect(both.ok && both.value).toEqual(['a']);
     expect(await store.descendantIds([])).toEqual({ ok: true, value: [] });
@@ -810,7 +810,10 @@ describe('InMemoryOrganisationStore — tree rules', () => {
           rules({ maxChildren: 1 }),
         );
       const results = await Promise.all([make('r1'), make('r2')]);
-      expect(results.map(code).sort()).toEqual(['CHILD_LIMIT', 'ok']);
+      expect(results.map(code).sort((a, b) => (a ?? '').localeCompare(b ?? ''))).toEqual([
+        'CHILD_LIMIT',
+        'ok',
+      ]);
     });
   });
 

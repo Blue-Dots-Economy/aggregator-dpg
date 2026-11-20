@@ -276,7 +276,7 @@ export class InMemoryUserStore extends UserStoreBase {
   ): Promise<StoreResult<Coordinator | null>> {
     const existing = this.byId.get(id);
     // Only pending → active; anything else means already decided.
-    if (!existing || existing.status !== 'pending') return { ok: true, value: null };
+    if (existing?.status !== 'pending') return { ok: true, value: null };
     return this.update(id, { status: 'active', updatedBy });
   }
 

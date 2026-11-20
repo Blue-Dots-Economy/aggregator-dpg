@@ -67,7 +67,7 @@ describe('InMemoryRoleStore.listUsersExpiredBetween', () => {
       },
     ]);
     const res = await store.listUsersExpiredBetween(at(-60_000), NOW);
-    expect(res.ok && [...res.value].sort()).toEqual(['u1', 'u2']);
+    expect(res.ok && [...res.value].sort((a, b) => a.localeCompare(b))).toEqual(['u1', 'u2']);
   });
 
   it('excludes an expiry exactly at the window start', async () => {

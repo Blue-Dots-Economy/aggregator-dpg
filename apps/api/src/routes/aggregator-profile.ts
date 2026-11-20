@@ -213,45 +213,8 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
 
       const userStore = getUserStore();
 
-      // A change to org details is refused before any write. Sending back the
-      // current values is not a change.
-      const sentOrgDetails =
-        body.aggregator.url !== undefined ||
-        body.aggregator.locations !== undefined ||
-        body.aggregator.contact?.company !== undefined ||
-        body.aggregator.contact?.gstNumber !== undefined;
-      if (sentOrgDetails) {
-        const current = await userStore.findById(auth.aggregatorId);
-        if (!current.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(current.error.message),
-            fields: { sub_operation: 'userStore.findById' },
-          });
-        }
-        const now = current.value;
-        const same = (a: unknown, b: unknown) =>
-          JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-        const changed = [
-          ...(body.aggregator.url !== undefined && !same(body.aggregator.url, now?.url)
-            ? ['url']
-            : []),
-          ...(body.aggregator.locations !== undefined &&
-          !same(body.aggregator.locations, now?.locations)
-            ? ['locations']
-            : []),
-          ...(body.aggregator.contact?.company !== undefined &&
-          !same(body.aggregator.contact.company, now?.contact.company)
-            ? ['contact.company']
-            : []),
-          ...(body.aggregator.contact?.gstNumber !== undefined &&
-          !same(body.aggregator.contact.gstNumber, now?.contact.gstNumber)
-            ? ['contact.gstNumber']
-            : []),
-        ];
-        if (changed.length > 0) {
-          throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: changed } });
-        }
-      }
+      // A change to org details is refused before any write.
+      await assertOrgDetailsUnchanged(userStore, auth.aggregatorId, body.aggregator);
 
       // ─── 1. Write the phone to Keycloak first. ─────────────────────────────
       // A Keycloak failure aborts before the database write.
@@ -303,20 +266,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
 
       const result = await userStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
-        // Restore the Keycloak phone. Best effort; logged on failure.
-        const revert = await getIdpAdmin().setAttributes(auth.userId, {
-          [KC_ATTR.PHONE_NUMBER]: previousPhone,
-        });
-        if (!revert.ok) {
-          log.error(
-            {
-              status: 'failure',
-              sub_operation: 'idp.setAttributes.revert',
-              code: revert.error.code,
-            },
-            'DB update failed and the Keycloak phone could not be restored',
-          );
-        }
+        await restoreKcPhone(auth.userId, previousPhone, log);
       }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
@@ -355,6 +305,81 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       });
     },
   );
+}
+
+/**
+ * Refuses a change to org details, which belong to the coordinator's
+ * organisation. Sending back the current values is not a change.
+ *
+ * @param userStore - The coordinator store.
+ * @param aggregatorId - The caller's coordinator id.
+ * @param patch - The validated `aggregator` patch.
+ * @throws 409 ORG_DETAILS_READ_ONLY when a sent org detail differs from the stored one.
+ */
+async function assertOrgDetailsUnchanged(
+  userStore: ReturnType<typeof getUserStore>,
+  aggregatorId: string,
+  patch: z.infer<typeof AggregatorPatchSchema>,
+): Promise<void> {
+  const sentOrgDetails =
+    patch.url !== undefined ||
+    patch.locations !== undefined ||
+    patch.contact?.company !== undefined ||
+    patch.contact?.gstNumber !== undefined;
+  if (!sentOrgDetails) return;
+  const current = await userStore.findById(aggregatorId);
+  if (!current.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(current.error.message),
+      fields: { sub_operation: 'userStore.findById' },
+    });
+  }
+  const now = current.value;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const changed = [
+    ...(patch.url !== undefined && !same(patch.url, now?.url) ? ['url'] : []),
+    ...(patch.locations !== undefined && !same(patch.locations, now?.locations)
+      ? ['locations']
+      : []),
+    ...(patch.contact?.company !== undefined && !same(patch.contact.company, now?.contact.company)
+      ? ['contact.company']
+      : []),
+    ...(patch.contact?.gstNumber !== undefined &&
+    !same(patch.contact.gstNumber, now?.contact.gstNumber)
+      ? ['contact.gstNumber']
+      : []),
+  ];
+  if (changed.length > 0) {
+    throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: changed } });
+  }
+}
+
+/**
+ * Restores the Keycloak phone after a failed database write. Best effort;
+ * logged on failure.
+ *
+ * @param userId - The caller's Keycloak user id.
+ * @param previousPhone - The phone stored before the request.
+ * @param log - The request logger.
+ */
+async function restoreKcPhone(
+  userId: string,
+  previousPhone: string,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  const revert = await getIdpAdmin().setAttributes(userId, {
+    [KC_ATTR.PHONE_NUMBER]: previousPhone,
+  });
+  if (!revert.ok) {
+    log.error(
+      {
+        status: 'failure',
+        sub_operation: 'idp.setAttributes.revert',
+        code: revert.error.code,
+      },
+      'DB update failed and the Keycloak phone could not be restored',
+    );
+  }
 }
 
 async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promise<IdpUser | null> {

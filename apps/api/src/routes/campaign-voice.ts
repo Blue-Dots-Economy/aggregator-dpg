@@ -29,7 +29,7 @@ import { httpError } from '../errors/http-error.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignVoiceRoutes(base: FastifyInstance): Promise<void> {
+export function registerCampaignVoiceRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/voice',

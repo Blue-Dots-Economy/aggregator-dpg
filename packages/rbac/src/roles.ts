@@ -21,6 +21,33 @@ const BASE_ACCOUNT: Record<BaseFor, 'admin' | 'coordinator'> = {
 };
 
 /**
+ * Lists the rules a base role breaks.
+ *
+ * @param r - The role.
+ * @param baseFor - The role's `baseFor`, known to be set.
+ * @param at - The role's label for the messages.
+ * @returns One message per broken rule.
+ */
+function baseRoleIssues(r: RoleDefinition, baseFor: BaseFor, at: string): string[] {
+  const issues: string[] = [];
+  if (!r.isBuiltin) issues.push(`${at}: only a built-in role can be a base role`);
+  if (r.assignedBy !== null) issues.push(`${at}: a base role is not assigned by hand`);
+  if (r.maxDays !== null) issues.push(`${at}: a base role has no expiry`);
+  if (r.accountType !== BASE_ACCOUNT[baseFor]) {
+    issues.push(`${at}: ${baseFor} is held by ${BASE_ACCOUNT[baseFor]} accounts`);
+  }
+  const rootOnly = baseFor === 'root_owner';
+  const types = r.assignableOrgTypes;
+  if (rootOnly && (types.length !== 1 || types[0] !== 'network_facilitator')) {
+    issues.push(`${at}: root_owner is held in the root organisation only`);
+  }
+  if (!rootOnly && types.includes('network_facilitator')) {
+    issues.push(`${at}: ${baseFor} is not held in the root organisation`);
+  }
+  return issues;
+}
+
+/**
  * Lists every rule a set of roles breaks.
  *
  * @param roles - Built-in roles alone, or the whole catalogue.
@@ -37,20 +64,7 @@ export function roleCatalogueIssues(roles: readonly RoleDefinition[]): string[] 
       issues.push(`${at}: duplicate permission`);
     }
     if (r.baseFor) {
-      if (!r.isBuiltin) issues.push(`${at}: only a built-in role can be a base role`);
-      if (r.assignedBy !== null) issues.push(`${at}: a base role is not assigned by hand`);
-      if (r.maxDays !== null) issues.push(`${at}: a base role has no expiry`);
-      if (r.accountType !== BASE_ACCOUNT[r.baseFor]) {
-        issues.push(`${at}: ${r.baseFor} is held by ${BASE_ACCOUNT[r.baseFor]} accounts`);
-      }
-      const rootOnly = r.baseFor === 'root_owner';
-      const types = r.assignableOrgTypes;
-      if (rootOnly && (types.length !== 1 || types[0] !== 'network_facilitator')) {
-        issues.push(`${at}: root_owner is held in the root organisation only`);
-      }
-      if (!rootOnly && types.includes('network_facilitator')) {
-        issues.push(`${at}: ${r.baseFor} is not held in the root organisation`);
-      }
+      issues.push(...baseRoleIssues(r, r.baseFor, at));
     } else if (r.assignedBy === null) {
       issues.push(`${at}: an additional role needs assigned_by`);
     }

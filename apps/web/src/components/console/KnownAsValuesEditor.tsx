@@ -201,7 +201,7 @@ export function KnownAsValuesEditor({
   /** The message key of the first problem in the rows, or null. */
   function problem(): string | null {
     const names = rows.map((r) => r.name.trim().toLowerCase());
-    if (names.some((n) => n === '')) return 'org.known_as_values_name_required';
+    if (names.includes('')) return 'org.known_as_values_name_required';
     if (new Set(names).size !== names.length) return 'org.known_as_values_name_repeated';
     return null;
   }

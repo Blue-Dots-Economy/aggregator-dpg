@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 const viewer = buildRole({ key: 'viewer', permissions: ['profiles.view'] });
-const roleKeys = () => [...getRbacRuntime()!.roles.byKey.keys()].sort();
+const roleKeys = () => [...getRbacRuntime()!.roles.byKey.keys()].sort((a, b) => a.localeCompare(b));
 
 describe('initRbac', () => {
   it('loads nothing when off', async () => {

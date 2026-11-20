@@ -147,12 +147,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (result.duplicate) {
         setUploadNotice(t('csv.duplicate_notice'));
-        recent.refetch();
+        void recent.refetch();
         return;
       }
       // Show the success note and refresh the list. Processing continues in the worker.
       setToast(t('csv.success_note'));
-      recent.refetch();
+      void recent.refetch();
       // Return to the onboarding overview after the toast has been shown.
       setTimeout(() => router.push('/onboarding'), 2500);
     } catch (err) {
@@ -161,7 +161,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         setPickedFile(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
         setUploadNotice(t('csv.start_unconfirmed'));
-        recent.refetch();
+        void recent.refetch();
         return;
       }
       if (requestErrorCode(err) === 'CONSENT_REQUIRED') {
@@ -301,7 +301,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       <FieldMessage id={fe.errorId('attestation')} message={fe.message('attestation')} />
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={upload.isPending}>
+        <Button
+          onClick={() => {
+            void onUpload();
+          }}
+          disabled={upload.isPending}
+        >
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
@@ -470,7 +475,9 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
           canDownload={can('profiles.view_pii')}
           downloading={downloading}
           downloadError={downloadError}
-          onDownload={onDownloadErrors}
+          onDownload={() => {
+            void onDownloadErrors();
+          }}
         />
       </td>
     </tr>

@@ -94,7 +94,7 @@ export async function userInReach(actor: Actor, id: string): Promise<RoleOutcome
   const memberships: Membership[] = owned.value
     .filter((o) => o.status === 'active')
     .map((o) => ({ orgId: o.id, orgType: 'aggregator' as OrgType, relation: 'owner' as const }));
-  if (root.value && root.value.ownerUserId === id) {
+  if (root.value?.ownerUserId === id) {
     memberships.push({ orgId: root.value.id, orgType: 'network_facilitator', relation: 'owner' });
   }
   const reachable = memberships.filter((m) => reachesOrg(actor, m.orgId));
@@ -116,6 +116,21 @@ function ruleRefusal(role: RoleDefinition, user: TargetUser, m: Membership): Rol
   if (role.accountType !== user.userType) return 'account_type';
   if (!role.assignableOrgTypes.includes(m.orgType)) return 'org_type';
   return null;
+}
+
+/** The additional roles a caller holding `callerHolds` may assign `user` in membership `m`. */
+function assignableIn(
+  roles: RbacRuntime['roles'],
+  callerHolds: ReadonlySet<string>,
+  user: TargetUser,
+  m: Membership,
+): UserRoles['assignable'] {
+  const out: UserRoles['assignable'] = [];
+  for (const role of roles.byKey.values()) {
+    if (role.baseFor || !role.assignedBy || !callerHolds.has(role.assignedBy)) continue;
+    if (ruleRefusal(role, user, m) === null) out.push({ roleKey: role.key, orgId: m.orgId });
+  }
+  return out;
 }
 
 /** A user's roles and the additional roles the caller may assign. */
@@ -161,12 +176,7 @@ export async function listUserRoles(
     const callerHolds = new Set(
       actorPermissions(rt.value.roles, actor, targetOf(m, root.value), now.getTime()),
     );
-    for (const role of rt.value.roles.byKey.values()) {
-      if (role.baseFor || !role.assignedBy || !callerHolds.has(role.assignedBy)) continue;
-      if (ruleRefusal(role, user.value, m) === null) {
-        assignable.push({ roleKey: role.key, orgId: m.orgId });
-      }
-    }
+    assignable.push(...assignableIn(rt.value.roles, callerHolds, user.value, m));
   }
   return { ok: true, value: { base, additional, assignable } };
 }

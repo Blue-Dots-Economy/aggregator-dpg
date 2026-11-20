@@ -53,7 +53,10 @@ export class OpaAuthorizer extends AuthorizerBase {
    */
   constructor(private readonly options: OpaAuthorizerOptions) {
     super();
-    this.base = options.baseUrl.replace(/\/+$/, '');
+    // Trailing slashes dropped with a loop: `/\/+$/` backtracks on long runs.
+    let end = options.baseUrl.length;
+    while (end > 0 && options.baseUrl[end - 1] === '/') end -= 1;
+    this.base = options.baseUrl.slice(0, end);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 

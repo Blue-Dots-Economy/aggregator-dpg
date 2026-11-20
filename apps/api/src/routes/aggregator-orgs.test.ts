@@ -304,7 +304,7 @@ describe('aggregator-orgs routes', () => {
     const error = (res.json() as { error: { code: string; fields: { field_errors: object } } })
       .error;
     expect(error.code).toBe('SCHEMA_VALIDATION');
-    expect(Object.keys(error.fields.field_errors).sort()).toEqual([
+    expect(Object.keys(error.fields.field_errors).sort((a, b) => a.localeCompare(b))).toEqual([
       'domains',
       'gst_number',
       'website',

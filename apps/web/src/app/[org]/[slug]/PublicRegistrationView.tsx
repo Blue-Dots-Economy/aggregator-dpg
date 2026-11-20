@@ -14,7 +14,7 @@ import {
   withExtraMessages,
 } from '@/components/forms/useFieldErrors';
 import { FieldMessage, useHandFieldErrors } from '@/components/forms/useHandFieldErrors';
-import { readableFormErrors, serverFieldErrors } from '@/lib/readable-form-errors';
+import { serverFieldErrors } from '@/lib/readable-form-errors';
 import { requestErrorKind } from '@/lib/request-errors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
@@ -173,8 +173,98 @@ interface ItemLocation {
   label?: string;
 }
 
+/** What decides the extra keys on a registration submit body. */
+interface SubmitBodyOptions {
+  showConsent: boolean;
+  consentGiven: boolean;
+  isAccountOnly: boolean;
+  showBirthYear: boolean;
+  birthYear: string;
+  locations: ItemLocation[];
+}
+
+/**
+ * The registration submit body.
+ *
+ * The server accepts partial profiles (Signals marks them `draft`) and records
+ * consent before building the profile. Consent flags are sent only when the
+ * domain shows the consent step, and the birth year only when the domain
+ * collects it. `consent_profile` is not sent for `account_only`; the server
+ * rejects it there.
+ *
+ * @param values - RJSF formData (or the minimal-identity payload).
+ * @param o - The consent, birth-year and location settings for this submit.
+ * @returns The JSON body.
+ */
+function submitBody(
+  values: Record<string, unknown>,
+  o: SubmitBodyOptions,
+): Record<string, unknown> {
+  return {
+    ...values,
+    ...(o.showConsent
+      ? {
+          consent_terms: o.consentGiven,
+          consent_privacy: o.consentGiven,
+          ...(o.isAccountOnly ? {} : { consent_profile: o.consentGiven }),
+        }
+      : {}),
+    ...(o.showBirthYear ? { year_of_birth: o.birthYear.trim() } : {}),
+    // Picked coordinates. Omitted when none, so Signals geocodes the
+    // address text. Never sent for account_only, which has no profile.
+    ...(!o.isAccountOnly && o.locations.length > 0 ? { item_locations: o.locations } : {}),
+  };
+}
+
+/**
+ * The done state for a 409 body whose outcome is `skipped` (already registered
+ * here), or null for any other 409.
+ *
+ * @param body - The parsed 409 body.
+ * @returns The done state, or null.
+ */
+function duplicateState(body: unknown): SubmitState | null {
+  const dup = SubmitResponseSchema.safeParse(body);
+  if (!dup.success || dup.data.outcome !== 'skipped') return null;
+  return { status: 'done', submissionId: dup.data.submission_id ?? '', outcome: 'skipped' };
+}
+
+/**
+ * The done state for an accepted registration. A body that does not match
+ * still shows the done screen, without a reference; an error would invite a
+ * second submission.
+ *
+ * @param submitPath - The submit URL, for the shape-error log.
+ * @param body - The parsed response body.
+ * @returns The done state.
+ */
+function acceptedState(submitPath: string, body: unknown): SubmitState {
+  const accepted = SubmitResponseSchema.safeParse(body);
+  if (!accepted.success) logShapeError(submitPath, body, accepted.error.issues);
+  return {
+    status: 'done',
+    submissionId: accepted.success ? (accepted.data.submission_id ?? '') : '',
+    outcome: accepted.success && accepted.data.outcome === 'skipped' ? 'skipped' : 'passed',
+  };
+}
+
+/**
+ * The request-error key for a failed submit; logs anything but a network error.
+ *
+ * @param err - What the submit threw.
+ * @returns `network` when the request never reached the server, else `generic`.
+ */
+function submitFailureKey(err: unknown): 'network' | 'generic' {
+  // `fetch` rejects with a TypeError when the request never reached the server.
+  if (err instanceof TypeError) return 'network';
+  console.error('[public-registration] submit handling failed', {
+    error_type: err instanceof Error ? err.name : typeof err,
+  });
+  return 'generic';
+}
+
 /** Readable RJSF errors; kept exported here for existing callers. */
-export { readableFormErrors };
+export { readableFormErrors } from '@/lib/readable-form-errors';
 
 /**
  * Maps a schema property's custom markers to a uiSchema entry for a custom widget.
@@ -638,33 +728,23 @@ export function PublicRegistrationView({
         // are sent only when the domain shows the consent step, and the
         // birth year only when the domain collects it. `consent_profile`
         // is not sent for `account_only`; the server rejects it there.
-        body: JSON.stringify({
-          ...values,
-          ...(showConsent
-            ? {
-                consent_terms: consentGiven,
-                consent_privacy: consentGiven,
-                ...(isAccountOnly ? {} : { consent_profile: consentGiven }),
-              }
-            : {}),
-          ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
-          // Picked coordinates. Omitted when none, so Signals geocodes the
-          // address text. Never sent for account_only, which has no profile.
-          ...(!isAccountOnly && resolvedLocations.length > 0
-            ? { item_locations: resolvedLocations }
-            : {}),
-        }),
+        body: JSON.stringify(
+          submitBody(values, {
+            showConsent,
+            consentGiven,
+            isAccountOnly,
+            showBirthYear,
+            birthYear,
+            locations: resolvedLocations,
+          }),
+        ),
       });
       const body: unknown = await res.json().catch(() => null);
       // 409 with outcome=skipped means already registered here; show the done screen.
       if (res.status === 409) {
-        const dup = SubmitResponseSchema.safeParse(body);
-        if (dup.success && dup.data.outcome === 'skipped') {
-          setState({
-            status: 'done',
-            submissionId: dup.data.submission_id ?? '',
-            outcome: 'skipped',
-          });
+        const dup = duplicateState(body);
+        if (dup) {
+          setState(dup);
           return;
         }
       }
@@ -681,28 +761,12 @@ export function PublicRegistrationView({
         });
         return;
       }
-      // The server accepted the registration. A body that does not match still
-      // shows the done screen, without a reference; an error would invite a
-      // second submission.
-      const accepted = SubmitResponseSchema.safeParse(body);
-      if (!accepted.success) logShapeError(submitPath, body, accepted.error.issues);
-      setState({
-        status: 'done',
-        submissionId: accepted.success ? (accepted.data.submission_id ?? '') : '',
-        outcome: accepted.success && accepted.data.outcome === 'skipped' ? 'skipped' : 'passed',
-      });
+      setState(acceptedState(submitPath, body));
     } catch (err) {
-      // `fetch` rejects with a TypeError when the request never reached the server.
-      const network = err instanceof TypeError;
-      if (!network) {
-        console.error('[public-registration] submit handling failed', {
-          error_type: err instanceof Error ? err.name : typeof err,
-        });
-      }
       setState({
         status: 'error',
         title: t('error_submission_title'),
-        detail: tRequest(network ? 'network' : 'generic'),
+        detail: tRequest(submitFailureKey(err)),
       });
     }
   };
