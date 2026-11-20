@@ -394,7 +394,7 @@
     "create_link": {
       "title": "पंजीकरण लिंक साझा करें",
       "new_badge": "नया",
-      "field_org_name": "अपने [[org]] का नाम दर्ज करें",
+      "field_org_name": "[[org]]",
       "field_state": "राज्य",
       "field_event": "कार्यक्रम",
       "field_event_date": "कार्यक्रम की तारीख",

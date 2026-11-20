@@ -394,7 +394,7 @@
     "create_link": {
       "title": "ನೋಂದಣಿ ಲಿಂಕ್ ಹಂಚಿಕೊಳ್ಳಿ",
       "new_badge": "ಹೊಸ",
-      "field_org_name": "ನಿಮ್ಮ [[org]]ಯ ಹೆಸರನ್ನು ನಮೂದಿಸಿ",
+      "field_org_name": "[[org]]",
       "field_state": "ರಾಜ್ಯ",
       "field_event": "ಕಾರ್ಯಕ್ರಮ",
       "field_event_date": "ಕಾರ್ಯಕ್ರಮದ ದಿನಾಂಕ",

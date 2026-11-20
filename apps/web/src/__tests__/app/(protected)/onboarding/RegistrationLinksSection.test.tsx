@@ -204,6 +204,22 @@ describe('<CreateLinkSection />', () => {
     expect(screen.getByText('Seekers')).toBeInTheDocument();
   });
 
+  it('falls back to instance config aggregator name when profile org is absent and keeps it locked', () => {
+    useProfile.mockReturnValue({ data: null });
+    useProfileRaw.mockReturnValue({ data: null });
+    useAggregatorConfig.mockReturnValue({
+      data: {
+        ...cfg,
+        aggregator: { name: 'Instance Org Name' },
+      },
+    });
+    renderCreate();
+    const input = screen.getByDisplayValue('Instance Org Name');
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveAttribute('readonly');
+    expect(input).toBeDisabled();
+  });
+
   it('keeps Create enabled and, on an empty submit, shows each missing field under it', async () => {
     const user = userEvent.setup();
     renderCreate();
