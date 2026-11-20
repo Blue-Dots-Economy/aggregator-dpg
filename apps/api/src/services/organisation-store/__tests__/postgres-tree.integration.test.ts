@@ -267,7 +267,7 @@ suite('organisation store tree rules (Postgres)', () => {
         store.create(slow('r1'), permissiveTreeRules({ maxTotalOrgs: 2 })),
         store.create(slow('r2'), permissiveTreeRules({ maxTotalOrgs: 2 })),
       ]);
-      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['TOTAL_LIMIT', 'ok']);
+      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['ok', 'TOTAL_LIMIT']);
     });
   });
 
@@ -674,7 +674,7 @@ suite('organisation store tree rules (Postgres)', () => {
           store.move(b, { parentId: a }, permissiveTreeRules()),
         ]),
       );
-      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['PARENT_CYCLE', 'ok']);
+      expect(results.map(code).sort((a, b) => a.localeCompare(b))).toEqual(['ok', 'PARENT_CYCLE']);
     });
 
     it('keeps a valid key when a known_as change races a move', async () => {
