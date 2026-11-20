@@ -95,7 +95,7 @@ export const FilterSchema = z.object({
  * @returns A schema that parses the value to the requested names, without repeats.
  */
 export function fieldsQuerySchema<const T extends readonly [string, ...string[]]>(allowed: T) {
-  const name = allowed.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const name = allowed.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join('|');
   const pattern = new RegExp(`^(?:(?:${name})(?:,(?:${name}))*)?$`);
   return z
     .string()

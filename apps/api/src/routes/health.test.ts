@@ -17,7 +17,7 @@ async function buildApp() {
   const app = Fastify();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
-  await registerHealthRoutes(app);
+  registerHealthRoutes(app);
   await app.ready();
   return app;
 }

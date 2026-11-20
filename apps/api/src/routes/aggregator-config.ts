@@ -20,10 +20,10 @@ import {
   BrandTypographySchema,
   DashboardTileDefSchema,
   DashboardTilesSchema,
+  DEFAULT_INVITE_ROLE_LABEL,
   RegistrationModeSchema,
   StatusRuleSchema,
 } from '@aggregator-dpg/network-config/interface';
-import { DEFAULT_INVITE_ROLE_LABEL } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
@@ -122,7 +122,7 @@ const AggregatorConfigResponseSchema = z.object({
 /** Wire shape of `GET /v1/aggregator-config`. */
 type PublicAggregatorConfig = z.infer<typeof AggregatorConfigResponseSchema>;
 
-export async function registerAggregatorConfigRoutes(base: FastifyInstance): Promise<void> {
+export function registerAggregatorConfigRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregator-config',

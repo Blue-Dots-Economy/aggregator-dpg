@@ -51,7 +51,8 @@ type SupportType = (typeof SUPPORT_TYPES)[number];
 
 /** Narrows a picked value to a request type the API accepts. */
 function isSupportType(value: string): value is SupportType {
-  return SUPPORT_TYPES.some((type) => type === value);
+  const types: readonly string[] = SUPPORT_TYPES;
+  return types.includes(value);
 }
 
 type SupportField = 'name' | 'email' | 'phone' | 'details' | 'consent';
@@ -173,7 +174,10 @@ function attachmentKey(file: File): string {
  * @param props - Open state and change handler.
  * @returns The modal overlay element, or null when closed.
  */
-export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.Element | null {
+export function SupportDialog({
+  open,
+  onOpenChange,
+}: Readonly<SupportDialogProps>): JSX.Element | null {
   // Render the portal only on the client, since `document` is client-only.
   const isClient = useIsClient();
   if (!open || !isClient) return null;

@@ -198,9 +198,10 @@ function MoveDialog({
               {t('org.move_count', { count: data.subtree_size })}
             </p>
           </>
-        ) : message ? null : (
+        ) : null}
+        {!data && !message ? (
           <p className="text-[13px] text-ink-500">{t('org.move_loading')}</p>
-        )}
+        ) : null}
         {message ? <output className="text-[13px] text-rose-600">{message}</output> : null}
         <div className="flex items-center justify-end gap-3">
           <Button

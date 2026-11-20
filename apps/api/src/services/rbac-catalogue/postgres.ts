@@ -46,7 +46,8 @@ function dbFailure(op: string, e: unknown): CatalogueStoreResult<never> {
 
 /** Reads the `revision` column of a `REVISION` result. */
 function revisionOf(result: { rows: Array<Record<string, unknown>> }): string {
-  return String(result.rows[0]?.['revision'] ?? '');
+  const revision = result.rows[0]?.['revision'];
+  return typeof revision === 'string' ? revision : '';
 }
 
 /** Maps a role to its stored columns. */
@@ -225,7 +226,8 @@ export class PostgresRbacCatalogue extends RbacCatalogueBase {
     try {
       // Sorted here, not by the database's collation, so every store orders alike.
       const rows = await getDb().select().from(permission);
-      return { ok: true, value: rows.sort((a, b) => a.key.localeCompare(b.key)) };
+      rows.sort((a, b) => a.key.localeCompare(b.key));
+      return { ok: true, value: rows };
     } catch (e) {
       return dbFailure('rbacCatalogue.listPermissions', e);
     }

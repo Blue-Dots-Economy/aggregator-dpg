@@ -88,7 +88,7 @@ export const getAggregatorFeatures = cache(
       const label = cfg.data.organisation?.invite_role_label;
       return {
         custom_roles: cfg.data.features?.custom_roles === true,
-        invite_role_label: label ? label : null,
+        invite_role_label: label || null,
       };
     } catch (err) {
       warnSafe({

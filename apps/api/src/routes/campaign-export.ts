@@ -24,7 +24,7 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignExportRoutes(base: FastifyInstance): Promise<void> {
+export function registerCampaignExportRoutes(base: FastifyInstance): void {
   const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/export',

@@ -96,13 +96,16 @@ async function syncAll(
   return counts;
 }
 
+/** How a locked job run ended. */
+type JobOutcome = 'ran' | 'skipped' | 'failed';
+
 /** Runs one job under its lock; logs the outcome; never throws. */
 async function runJob(
   name: 'sweep' | 'reconcile',
   lockMs: number,
   deps: SweepDeps,
   work: () => Promise<Record<string, unknown>>,
-): Promise<'ran' | 'skipped' | 'failed'> {
+): Promise<JobOutcome> {
   const start = deps.now();
   try {
     let summary: Record<string, unknown> = {};
@@ -141,7 +144,7 @@ async function runJob(
 export async function sweepTokenRoles(
   sweepMs: number = config.RBAC_TOKEN_ROLES_SWEEP_MS,
   deps: SweepDeps = defaultSweepDeps(),
-): Promise<'ran' | 'skipped' | 'failed'> {
+): Promise<JobOutcome> {
   return runJob('sweep', Math.max(sweepMs, 1_000), deps, async () => {
     const now = deps.now();
     const window = 2 * Math.max(sweepMs, 1_000);
@@ -164,7 +167,7 @@ export async function sweepTokenRoles(
  */
 export async function reconcileTokenRoles(
   deps: SweepDeps = defaultSweepDeps(),
-): Promise<'ran' | 'skipped' | 'failed'> {
+): Promise<JobOutcome> {
   return runJob('reconcile', 10 * 60_000, deps, async () => {
     const ids = await deps.listUserIds();
     const outcomes = await syncAll(ids, 'reconcile', deps);
