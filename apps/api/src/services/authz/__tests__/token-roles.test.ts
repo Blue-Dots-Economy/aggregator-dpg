@@ -17,8 +17,10 @@ import {
   syncTokenRoles,
   tokenRolesOf,
   requestTokenRolesSync,
+  withUserAttributesLock,
   type TokenRolesDeps,
 } from '../token-roles.js';
+import { _setRedis } from '../../redis/index.js';
 
 const NOW = 1_800_000_000_000;
 const ORG = '00000000-0000-4000-8000-0000000000f1';
@@ -509,5 +511,64 @@ describe('requestTokenRolesSync', () => {
   it('starts nothing with RBAC off', () => {
     _setRbacRuntime(null);
     expect(() => requestTokenRolesSync(['c1', null, 'c1'], 'test')).not.toThrow();
+  });
+});
+
+describe('withUserAttributesLock', () => {
+  /** The Redis calls the lock makes: `SET … PX … NX` to take it, `EVAL` to release it. */
+  function fakeRedis(opts: { held?: boolean; down?: boolean } = {}) {
+    const keys = new Map<string, string>();
+    if (opts.held) keys.set('rbac:token-roles:lock:u1', 'someone-else');
+    return {
+      keys,
+      async set(key: string, value: string) {
+        if (opts.down) throw new Error('redis down');
+        if (keys.has(key)) return null;
+        keys.set(key, value);
+        return 'OK';
+      },
+      async eval(_script: string, _n: number, key: string, token: string) {
+        if (keys.get(key) !== token) return 0;
+        keys.delete(key);
+        return 1;
+      },
+    };
+  }
+
+  afterEach(() => {
+    _setRedis(null);
+    vi.useRealTimers();
+  });
+
+  it('runs the write holding the user lock and releases it', async () => {
+    const redis = fakeRedis();
+    _setRedis(redis as never);
+    const seen: boolean[] = [];
+    const res = await withUserAttributesLock('u1', async () => {
+      seen.push(redis.keys.has('rbac:token-roles:lock:u1'));
+      return 'done';
+    });
+    expect(res).toEqual({ acquired: true, value: 'done' });
+    expect(seen).toEqual([true]);
+    expect(redis.keys.size).toBe(0);
+  });
+
+  it('gives up without running the write while another writer holds the lock', async () => {
+    vi.useFakeTimers();
+    const redis = fakeRedis({ held: true });
+    _setRedis(redis as never);
+    const fn = vi.fn(async () => 'done');
+    const pending = withUserAttributesLock('u1', fn);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await pending).toEqual({ acquired: false });
+    expect(fn).not.toHaveBeenCalled();
+    expect(redis.keys.get('rbac:token-roles:lock:u1')).toBe('someone-else');
+  });
+
+  it('runs the write unlocked when Redis is down', async () => {
+    _setRedis(fakeRedis({ down: true }) as never);
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const res = await withUserAttributesLock('u1', async () => 'done');
+    expect(res).toEqual({ acquired: true, value: 'done' });
   });
 });
