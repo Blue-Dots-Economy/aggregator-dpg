@@ -241,6 +241,24 @@ async function redisLock<T>(
 }
 
 /**
+ * Runs `fn` holding the per-user lock that guards writes to that user's
+ * Keycloak attributes.
+ *
+ * `setAttributes` reads and rewrites the whole Keycloak user, so another writer
+ * of the same user must hold this lock too, or one of the two writes is lost.
+ *
+ * @param userId - The account (`users.id`) whose Keycloak user is written.
+ * @param fn - The read-and-write to run under the lock.
+ * @returns `fn`'s value, or `acquired: false` when the lock stayed busy.
+ */
+export function withUserAttributesLock<T>(
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  return redisLock(userId, fn);
+}
+
+/**
  * Recomputes one user's role keys from the database and writes them to their
  * Keycloak `roles` attribute. Never throws.
  *
