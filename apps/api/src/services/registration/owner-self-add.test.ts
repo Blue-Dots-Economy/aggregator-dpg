@@ -149,7 +149,9 @@ describe('ownerSelfAdd', () => {
     expect(row.serves).toEqual(['seeker']);
     expect(row.contactEmail).toBe(EMAIL);
     expect(row.contactPhone).toBe(PHONE);
-    expect(row.name).toBe('Owner Person');
+    expect(row.name).toBe('Org f1');
+    expect(row.orgSlug).toMatch(/^org-f1-/);
+    expect(row.contact.name).toBe('Owner Person');
     expect(row.status).toBe('active');
     expect(row.signalstackOrgId).toBeTruthy();
     expect(row.updatedBy).toBe(ADMIN);
