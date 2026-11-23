@@ -100,6 +100,20 @@ describe('voice_bots schema', () => {
     if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+919876543210');
   });
 
+  it('accepts an Indian landline', () => {
+    const r = AggregatorYamlSchema.safeParse(
+      yamlWith({ voice_bots: [{ ...BOT, phone: '+91 120 440 4274' }] }),
+    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+911204404274');
+  });
+
+  it('rejects a +91 number starting with 0', () => {
+    expect(errorText(yamlWith({ voice_bots: [{ ...BOT, phone: '+91 0120440427' }] }))).toContain(
+      'phone',
+    );
+  });
+
   it('rejects empty languages and empty domains', () => {
     expect(
       AggregatorYamlSchema.safeParse(yamlWith({ voice_bots: [{ ...BOT, languages: [] }] })).success,
