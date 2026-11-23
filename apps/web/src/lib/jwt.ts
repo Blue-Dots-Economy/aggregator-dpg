@@ -8,6 +8,7 @@
  * @module apps/web/src/lib/jwt
  */
 
+import { readUserIdClaim } from '@aggregator-dpg/shared-primitives/user-id-claim';
 import { readJsonObject } from './json-object';
 
 /**
@@ -27,17 +28,18 @@ export function decodeJwtClaims(token: string): Record<string, unknown> | null {
 }
 
 /**
- * Returns the non-empty `aggregator_id` claim, or `null` when absent.
+ * Returns the coordinator's user id: the `user_id` claim, else `aggregator_id`.
  *
- * Only coordinators have it; org owners and the network admin do not.
+ * Only coordinators have it; org owners and the network admin do not. A token
+ * whose two claims differ is not trusted to name a coordinator, so it reads as
+ * `null`, the same as an admin token; the API refuses such a token anyway.
  *
  * @param token - A Keycloak access token.
- * @returns The aggregator id, or `null`.
+ * @returns The user id, or `null`.
  */
 export function tokenAggregatorId(token: string): string | null {
-  const claims = decodeJwtClaims(token);
-  const id = claims?.['aggregator_id'];
-  return typeof id === 'string' && id.length > 0 ? id : null;
+  const claim = readUserIdClaim(decodeJwtClaims(token));
+  return claim.kind === 'present' ? claim.userId : null;
 }
 
 /**

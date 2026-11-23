@@ -66,6 +66,20 @@ describe('tokenAggregatorId', () => {
   it('returns null for a malformed token', () => {
     expect(tokenAggregatorId('garbage')).toBeNull();
   });
+
+  it('returns the user_id claim of a new token that has no aggregator_id', () => {
+    expect(tokenAggregatorId(makeToken({ user_id: 'agg-42' }))).toBe('agg-42');
+  });
+
+  it('returns the id when user_id and aggregator_id are equal', () => {
+    expect(tokenAggregatorId(makeToken({ user_id: 'agg-42', aggregator_id: 'agg-42' }))).toBe(
+      'agg-42',
+    );
+  });
+
+  it('returns null when user_id and aggregator_id differ, so the token is not treated as a coordinator', () => {
+    expect(tokenAggregatorId(makeToken({ user_id: 'agg-42', aggregator_id: 'agg-7' }))).toBeNull();
+  });
 });
 
 describe('tokenRealmRoles', () => {
