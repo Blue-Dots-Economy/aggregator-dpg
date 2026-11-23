@@ -356,9 +356,11 @@ describe('POST /v1/user/activate', () => {
       const OWNER_ADMIN = '00000000-0000-4000-8000-0000000000a2';
       const TEAM = '00000000-0000-4000-8000-0000000000e2';
       const savedMode = config.OWNER_SELF_ADD_MODE;
+      let ownerSub = '';
 
       beforeEach(async () => {
-        subjects.owner = await seedChild();
+        ownerSub = await seedChild();
+        subjects.owner = ownerSub;
         const child = await orgs.findById(CHILD);
         if (!child.ok || !child.value) throw new Error('seed');
         orgs.seed([{ ...child.value, ownerUserId: OWNER_ADMIN }]);
@@ -378,13 +380,13 @@ describe('POST /v1/user/activate', () => {
             userId: OWNER_ADMIN,
             userType: 'admin',
             provider: IDP_PROVIDER,
-            subject: subjects.owner,
+            subject: ownerSub,
           },
           {
             userId: TEAM,
             userType: 'coordinator',
             provider: IDP_PROVIDER,
-            subject: subjects.owner,
+            subject: ownerSub,
           },
         ]);
         _setIdentityStore(identities);
@@ -400,7 +402,7 @@ describe('POST /v1/user/activate', () => {
         expect(res.json()).toEqual({ status: 'active', account: 'org_owner', activated: true });
         const team = await users.findById(TEAM);
         expect(team.ok && team.value?.status).toBe('active');
-        const kc = await idp.findById(subjects.owner);
+        const kc = await idp.findById(ownerSub);
         expect(kc.ok && kc.value?.attributes?.[KC_ATTR.AGGREGATOR_ID]).toBeUndefined();
       });
 
