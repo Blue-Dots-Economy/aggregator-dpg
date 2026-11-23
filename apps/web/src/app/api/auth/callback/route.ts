@@ -107,7 +107,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (typeof settled === 'string') return failure(req, settled);
   const tokens = settled;
 
-  // A coordinator (token has `aggregator_id`) lands in the portal. An org owner
+  // A coordinator (token has `user_id` or `aggregator_id`) lands in the portal. An org owner
   // or the network admin (realm role `org_owner`) lands in the console.
   // Anyone else is refused.
   const isCoordinator = Boolean(tokenAggregatorId(tokens.accessToken));
