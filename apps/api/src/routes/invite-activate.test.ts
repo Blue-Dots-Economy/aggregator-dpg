@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
@@ -16,6 +16,10 @@ import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setRbacRuntime } from '../services/authz/runtime.js';
 import { testRbacRuntime } from '../services/authz/testing.js';
+import { config } from '../config.js';
+import { IdentityStoreFake } from '../services/identity-store/testing.js';
+import { _setIdentityStore } from '../services/identity-store/index.js';
+import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 
 const ROOT = '00000000-0000-4000-8000-000000000001';
 const PARENT = '00000000-0000-4000-8000-0000000000c1';
@@ -346,6 +350,77 @@ describe('POST /v1/user/activate', () => {
       const roles = await idp.listRealmRoles(subjects.owner);
       expect(roles.ok && roles.value).toContain('org_owner');
       expect(mailer.outbox.map((m) => m.to)).toEqual(['owner@parent.org']);
+    });
+
+    describe('with a team account created at registration', () => {
+      const OWNER_ADMIN = '00000000-0000-4000-8000-0000000000a2';
+      const TEAM = '00000000-0000-4000-8000-0000000000e2';
+      const savedMode = config.OWNER_SELF_ADD_MODE;
+
+      beforeEach(async () => {
+        subjects.owner = await seedChild();
+        const child = await orgs.findById(CHILD);
+        if (!child.ok || !child.value) throw new Error('seed');
+        orgs.seed([{ ...child.value, ownerUserId: OWNER_ADMIN }]);
+        users.seed([
+          buildCoordinator({
+            id: TEAM,
+            parentOrgId: CHILD,
+            isDefaultOrg: false,
+            status: 'pending',
+            serves: ['seeker'],
+            contact: { name: 'Ravi', email: OWNER_EMAIL, phone: '+919876500000' },
+          }),
+        ]);
+        const identities = new IdentityStoreFake();
+        identities.seed([
+          {
+            userId: OWNER_ADMIN,
+            userType: 'admin',
+            provider: IDP_PROVIDER,
+            subject: subjects.owner,
+          },
+          {
+            userId: TEAM,
+            userType: 'coordinator',
+            provider: IDP_PROVIDER,
+            subject: subjects.owner,
+          },
+        ]);
+        _setIdentityStore(identities);
+      });
+      afterEach(() => {
+        config.OWNER_SELF_ADD_MODE = savedMode;
+        _setIdentityStore(null);
+      });
+
+      it('approves the owner’s team account with the org, without writing it to Keycloak', async () => {
+        config.OWNER_SELF_ADD_MODE = 'auto';
+        const res = await activate('owner');
+        expect(res.json()).toEqual({ status: 'active', account: 'org_owner', activated: true });
+        const team = await users.findById(TEAM);
+        expect(team.ok && team.value?.status).toBe('active');
+        const kc = await idp.findById(subjects.owner);
+        expect(kc.ok && kc.value?.attributes?.[KC_ATTR.AGGREGATOR_ID]).toBeUndefined();
+      });
+
+      it('leaves the team account pending on an off instance', async () => {
+        config.OWNER_SELF_ADD_MODE = 'off';
+        expect((await activate('owner')).statusCode).toBe(200);
+        const team = await users.findById(TEAM);
+        expect(team.ok && team.value?.status).toBe('pending');
+      });
+
+      it('still activates the org when the team account cannot be approved', async () => {
+        config.OWNER_SELF_ADD_MODE = 'auto';
+        const failing = new SignalStackWriterFake();
+        failing.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
+        _setSignalStackWriter(failing);
+        const res = await activate('owner');
+        expect(res.json()).toMatchObject({ account: 'org_owner', activated: true });
+        const team = await users.findById(TEAM);
+        expect(team.ok && team.value?.status).toBe('pending');
+      });
     });
 
     it('still activates when the owner’s decision stamp fails', async () => {

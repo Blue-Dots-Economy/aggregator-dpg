@@ -219,13 +219,25 @@ describe('GET /v1/aggregator-config', () => {
   it('always exposes features.custom_roles, false by default (opt-in)', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
     const body = res.json() as { features: { custom_roles: boolean } };
-    expect(body.features).toEqual({ custom_roles: false });
+    expect(body.features).toEqual({ custom_roles: false, owner_self_add: 'owner' });
   });
 
   it('exposes the bulk-upload size limit', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
     const body = res.json() as { bulk_upload_max_bytes: number };
     expect(body.bulk_upload_max_bytes).toBe(config.BULK_UPLOAD_MAX_BYTES);
+  });
+
+  it('reports OWNER_SELF_ADD_MODE as features.owner_self_add', async () => {
+    const prev = config.OWNER_SELF_ADD_MODE;
+    config.OWNER_SELF_ADD_MODE = 'auto';
+    try {
+      const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+      const body = res.json() as { features: { owner_self_add: string } };
+      expect(body.features.owner_self_add).toBe('auto');
+    } finally {
+      config.OWNER_SELF_ADD_MODE = prev;
+    }
   });
 
   it('reports features.custom_roles=true when the flag is on', async () => {

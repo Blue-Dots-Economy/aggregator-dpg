@@ -1203,7 +1203,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Creates the invited org under the inviting org as `pending`, with its Keycloak group and an owner user that can sign in but holds no access yet. The owner email must be the invited address. The org becomes active when the owner signs in with an email code and calls `POST /v1/user/activate`; no approval. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the inviting org can no longer take it. Reached with the web BFF service-account token.",
+        "description": "Creates the invited org under the inviting org as `pending`, with its Keycloak group and an owner user that can sign in but holds no access yet. The owner email must be the invited address. The org becomes active when the owner signs in with an email code and calls `POST /v1/user/activate`; no approval. When `OWNER_SELF_ADD_MODE` is `auto` and `team_consent` is sent, a coordinator account for the owner is also created, pending, serving the network domains the org chose (else every domain), with that consent; activation approves it. A failure there does not fail the registration. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the inviting org can no longer take it. Reached with the web BFF service-account token.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1250,6 +1250,28 @@
                     ]
                   },
                   "consent": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "given_at": {
+                        "type": "string"
+                      },
+                      "valid_till": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "given_at",
+                      "valid_till"
+                    ]
+                  },
+                  "team_consent": {
                     "type": "object",
                     "properties": {
                       "value": {
@@ -5298,7 +5320,7 @@
         "tags": [
           "console"
         ],
-        "description": "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated.",
+        "description": "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated, and so is the pending account an `auto` instance created at registration. 403 SELF_ADD_DISABLED when `OWNER_SELF_ADD_MODE` is `off`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -22962,10 +22984,19 @@
                       "properties": {
                         "custom_roles": {
                           "type": "boolean"
+                        },
+                        "owner_self_add": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "owner",
+                            "off"
+                          ]
                         }
                       },
                       "required": [
-                        "custom_roles"
+                        "custom_roles",
+                        "owner_self_add"
                       ],
                       "additionalProperties": false
                     },
