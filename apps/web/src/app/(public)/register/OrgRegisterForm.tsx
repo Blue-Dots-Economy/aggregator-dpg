@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
-import { toConsentDocs } from '../../../components/consent/consent-docs';
+import { toConsentDocs, type ConsentDoc } from '../../../components/consent/consent-docs';
 import {
   inviteSignInUrl,
   stampConsent,
@@ -65,7 +65,33 @@ export interface OrgRegisterFormProps {
   uiSchema: Record<string, unknown>;
   /** Terms/Privacy content for the org audience; omit when loading failed. */
   consentContent?: ConsentDocContent;
+  /**
+   * Terms/Privacy content for the team member audience. When set, the owner
+   * also reads and accepts it, and the org registration adds them to its team.
+   */
+  teamConsentContent?: ConsentDocContent;
   invite: OrgFormInvite;
+}
+
+/**
+ * Builds the gate's documents: the org's, then the team member's, labelled as such.
+ *
+ * @param org - Org consent content.
+ * @param team - Team member consent content, when the owner joins the team.
+ * @param teamTitle - Labels a team document from its own title.
+ * @returns The documents in reading order; the team ones carry `team-` ids.
+ */
+export function orgGateDocs(
+  org: ConsentDocContent | undefined,
+  team: ConsentDocContent | undefined,
+  teamTitle: (title: string) => string,
+): ConsentDoc[] {
+  const teamDocs = toConsentDocs(team).map((d) => ({
+    ...d,
+    id: `team-${d.id}`,
+    title: teamTitle(d.title),
+  }));
+  return [...toConsentDocs(org), ...teamDocs];
 }
 
 /**
@@ -74,6 +100,8 @@ export interface OrgRegisterFormProps {
  * The org registers under the inviting org and the owner email is locked to
  * the invited address. After the consent gate it posts to
  * `/api/invite/org/accept` and then goes to sign-in with that email pre-filled.
+ * With team consent content, the gate also holds the team member documents and
+ * the body carries `team_consent`, so the owner joins the org's team.
  *
  * @param props - The org JSON Schema + UI schema, consent content and the invite.
  * @returns The org registration content block.
@@ -82,6 +110,7 @@ export function OrgRegisterForm({
   schema,
   uiSchema,
   consentContent,
+  teamConsentContent,
   invite,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
@@ -90,7 +119,13 @@ export function OrgRegisterForm({
     owner: { email: invite.email },
   }));
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
-  const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
+  const consentDocs = useMemo(
+    () =>
+      orgGateDocs(consentContent, teamConsentContent, (title) =>
+        t('consent.team_doc_title', { title }),
+      ),
+    [consentContent, teamConsentContent, t],
+  );
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
     setState,
@@ -113,7 +148,8 @@ export function OrgRegisterForm({
     name: 'display_name',
   });
 
-  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
+  const teamScope = teamConsentContent ? t('consent.team_scope') : '';
+  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}${teamScope}.`;
 
   /** Runs after the gate is accepted: stamps consent, posts, then goes to sign-in. */
   const submitWithConsent = async (): Promise<void> => {
@@ -122,6 +158,7 @@ export function OrgRegisterForm({
     const body: Record<string, unknown> = {
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
+      ...(teamConsentContent ? { team_consent: stampConsent({ value: true }) } : {}),
       invite: invite.token,
     };
     const result = await submitRegistration(
@@ -156,6 +193,9 @@ export function OrgRegisterForm({
       <output className="mb-5 block text-[13.5px] text-ink-500">
         {t('invite_org_under', { parent: invite.parentName })}
       </output>
+      {teamConsentContent ? (
+        <p className="mb-5 text-[13.5px] text-ink-500">{t('consent.team_join_note')}</p>
+      ) : null}
 
       <RjsfThemedForm
         schema={formSchema}

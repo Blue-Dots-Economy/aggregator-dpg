@@ -16,6 +16,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ ownerSelfAddMode: vi.fn(async () => 'owner') }));
 vi.mock('@/lib/console-api.server', () => ({ consoleRead: vi.fn() }));
 vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn() }));
 vi.mock('@/lib/console-domains.server', () => ({
@@ -45,6 +46,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 
 import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
+import { ownerSelfAddMode } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
@@ -276,6 +278,17 @@ describe('console home — adding the owner to My Team', () => {
     await show();
     expect(addMyself()).toBeInTheDocument();
     expect(screen.queryByText(messages.console.org_home.you)).toBeNull();
+  });
+
+  it('hides it when the deployment turns self-add off', async () => {
+    vi.mocked(ownerSelfAddMode).mockResolvedValueOnce('off');
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: null }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    await show();
+    expect(addMyself()).toBeNull();
   });
 
   it('hides it once the account exists and tags the owner\'s own row "You"', async () => {
