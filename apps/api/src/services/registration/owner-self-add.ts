@@ -253,10 +253,10 @@ async function create(
   if (!recordConsent) return refuse('UNAVAILABLE', 'consent config');
 
   const users = getUserStore();
-  const name = org.ownerName ?? org.displayName;
-  const created = await createAggregatorWithSlug(users, name, {
+  // The account carries the organisation's name, which is also its Signals org name and link slug.
+  const created = await createAggregatorWithSlug(users, org.displayName, {
     domains: serves,
-    contact: { name, email: org.ownerEmail, phone: ownerPhone },
+    contact: { name: org.ownerName ?? org.displayName, email: org.ownerEmail, phone: ownerPhone },
     consent,
     recordConsent,
     orgId: org.id,
