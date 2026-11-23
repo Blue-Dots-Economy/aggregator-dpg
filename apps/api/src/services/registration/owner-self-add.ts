@@ -117,7 +117,7 @@ async function selfAdd(
   const existing = await getUserStore().findByContactEmail(org.ownerEmail);
   if (!existing.ok) return refuse('UNAVAILABLE', 'user store');
   const target: SelfAddTarget = {
-    actor,
+    ownerUserId: actor.userId,
     subject,
     org,
     serves,
@@ -128,12 +128,13 @@ async function selfAdd(
     : await create(target, ownerPhone, input.consent, log);
   if (!prepared.success) return prepared;
 
-  return approve(prepared.value, actor, log, requestId);
+  return approve(prepared.value, actor.userId, log, requestId);
 }
 
 /** What a self-add writes, once the caller and the org are checked. */
 interface SelfAddTarget {
-  actor: Actor;
+  /** The owner's admin account id. */
+  ownerUserId: string;
   /** The caller's IdP subject. */
   subject: string;
   org: Organisation;
@@ -179,7 +180,7 @@ async function reactivate(
   const updated = await getUserStore().update(row.id, {
     serves: target.serves,
     status: 'pending',
-    updatedBy: target.actor.userId,
+    updatedBy: target.ownerUserId,
   });
   if (!updated.ok) return refuse('UNAVAILABLE', 'user store update');
   return ok(row.id);
@@ -241,7 +242,7 @@ async function recordReactivationConsent(
  * links the login; a failed link deletes the row again.
  */
 async function create(
-  { actor, subject, org, serves, linkedCoordinator }: SelfAddTarget,
+  { ownerUserId, subject, org, serves, linkedCoordinator }: SelfAddTarget,
   ownerPhone: string,
   consent: SelfAddRequest['consent'],
   log: FastifyBaseLogger,
@@ -265,7 +266,7 @@ async function create(
     inviteId: null,
     profile: {},
     profileRef: null,
-    createdBy: actor.userId,
+    createdBy: ownerUserId,
   });
   if (!created.ok) {
     if (DUPLICATE_CODES.has(created.error.code)) {
@@ -290,16 +291,103 @@ async function create(
   return ok(id);
 }
 
+/** Inputs of {@link createOwnerTeamAccount}. */
+export interface OwnerTeamAccountInput {
+  /** The organisation, as just registered; its owner contact must have a phone. */
+  org: Organisation;
+  /** The owner's IdP subject. */
+  subject: string;
+  /** The profile types to serve, each a network domain id. */
+  serves: string[];
+  /** The server-stamped coordinator consent the owner gave at registration. */
+  consent: SelfAddRequest['consent'];
+}
+
+/**
+ * Creates the owner's coordinator account in an organisation that is still
+ * pending, linked to the owner's login, with its consent row in the same
+ * transaction. The account stays `pending` until the organisation is
+ * activated ({@link approveOwnerTeamAccount}).
+ *
+ * @param input - The organisation, the owner's login, the profile types and the consent.
+ * @param log - Request logger.
+ * @returns The new coordinator id, or why it was not created; never throws.
+ */
+export async function createOwnerTeamAccount(
+  input: OwnerTeamAccountInput,
+  log: FastifyBaseLogger,
+): Promise<SelfAddResult<string>> {
+  const { org } = input;
+  const slog = log.child({ operation: 'user.owner_team_account.create', org_id: org.id });
+  const out = await createTeamAccount(input, slog);
+  if (out.success) slog.info({ status: 'success', target_id: out.value });
+  else slog.warn({ status: 'failure', error: out.error.code });
+  return out;
+}
+
+async function createTeamAccount(
+  { org, subject, serves, consent }: OwnerTeamAccountInput,
+  log: FastifyBaseLogger,
+): Promise<SelfAddResult<string>> {
+  if (!org.ownerPhone) return refuse('OWNER_PHONE_REQUIRED', 'owner contact has no phone');
+  const networkCfg = await getNetworkConfig();
+  const unique = [...new Set(serves)];
+  if (unique.length === 0 || unique.some((d) => !networkCfg.domainIds.includes(d))) {
+    return refuse('NO_PROFILE_TYPES', 'serves lists a domain this network does not have');
+  }
+  return create(
+    { ownerUserId: org.ownerUserId, subject, org, serves: unique, linkedCoordinator: null },
+    org.ownerPhone,
+    consent,
+    log,
+  );
+}
+
+/**
+ * Approves the owner's pending coordinator account in an organisation that
+ * has just been activated. Does nothing when the owner has no pending
+ * account in that organisation.
+ *
+ * @param org - The activated organisation.
+ * @param log - Request logger.
+ * @param requestId - Forwarded to Signals as `x-request-id`.
+ * @returns The approved account id, `null` when there was nothing to approve, or why it failed; never throws.
+ */
+export async function approveOwnerTeamAccount(
+  org: Organisation,
+  log: FastifyBaseLogger,
+  requestId?: string,
+): Promise<SelfAddResult<string | null>> {
+  const slog = log.child({ operation: 'user.owner_team_account.approve', org_id: org.id });
+  const found = await getUserStore().findByContactEmail(org.ownerEmail);
+  if (!found.ok) {
+    slog.error({ status: 'failure', error: 'UNAVAILABLE', sub_operation: 'userStore' });
+    return refuse('UNAVAILABLE', 'user store');
+  }
+  const row = found.value;
+  if (row?.status !== 'pending' || row.parentOrgId !== org.id) {
+    slog.debug({ status: 'skipped' });
+    return ok(null);
+  }
+  const approved = await approve(row.id, org.ownerUserId, slog, requestId);
+  if (!approved.success) {
+    slog.warn({ status: 'failure', error: approved.error.code, target_id: row.id });
+    return approved;
+  }
+  slog.info({ status: 'success', target_id: row.id });
+  return ok(row.id);
+}
+
 /** Runs the approval for the prepared row and returns it. */
 async function approve(
   id: string,
-  actor: Actor,
+  decidedBy: string,
   log: FastifyBaseLogger,
   requestId: string | undefined,
 ): Promise<SelfAddResult<Coordinator>> {
   const outcome = await approveCoordinator({
     aggregatorId: id,
-    decidedBy: actor.userId,
+    decidedBy,
     log,
     ...(requestId ? { requestId } : {}),
   });

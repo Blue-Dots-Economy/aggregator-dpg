@@ -368,7 +368,8 @@
   },
   "signals_ui_urls": {},
   "features": {
-    "custom_roles": false
+    "custom_roles": false,
+    "owner_self_add": "owner"
   },
   "bulk_upload_max_bytes": 10485760,
   "organisation": {
