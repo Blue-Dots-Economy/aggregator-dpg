@@ -374,6 +374,29 @@ describe('ownerSelfAdd', () => {
       for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     });
 
+    it('records a derived consent with the given versions and source', async () => {
+      orgs.seed([pendingOrg()]);
+      const out = await createOwnerTeamAccount(
+        {
+          org: pendingOrg(),
+          subject: SUB,
+          serves: ['seeker'],
+          consent: CONSENT,
+          derivedConsent: { termsVersion: 7, privacyVersion: 5, source: 'owner-team-backfill' },
+        },
+        log,
+      );
+      if (!out.success) throw new Error(`create failed: ${out.error.code}`);
+      expect(ledger.list()).toEqual([
+        expect.objectContaining({
+          subjectId: out.value,
+          termsVersion: 7,
+          privacyVersion: 5,
+          source: 'owner-team-backfill',
+        }),
+      ]);
+    });
+
     it('refuses profile types the network does not have', async () => {
       const out = await create(['not-a-domain']);
       expect(out.success ? 'ok' : out.error.code).toBe('NO_PROFILE_TYPES');

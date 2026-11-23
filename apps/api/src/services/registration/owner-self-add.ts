@@ -19,7 +19,11 @@ import { getIdpAdmin, KC_ATTR } from '../idp-admin/index.js';
 import { getNetworkConfig } from '../network-config.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
-import { aggregatorConsentWriter, createAggregatorWithSlug } from './coordinator-row.js';
+import {
+  aggregatorConsentWriter,
+  createAggregatorWithSlug,
+  type DerivedConsent,
+} from './coordinator-row.js';
 
 /** Why a self-add was refused. */
 export interface SelfAddError {
@@ -246,11 +250,16 @@ async function create(
   ownerPhone: string,
   consent: SelfAddRequest['consent'],
   log: FastifyBaseLogger,
+  derived?: DerivedConsent,
 ): Promise<SelfAddResult<string>> {
   if (linkedCoordinator !== null) {
     return refuse('ALREADY_COORDINATOR', 'login already has a coordinator account');
   }
-  const recordConsent = await aggregatorConsentWriter({ consent, log });
+  const recordConsent = await aggregatorConsentWriter({
+    consent,
+    log,
+    ...(derived ? { derived } : {}),
+  });
   if (!recordConsent) return refuse('UNAVAILABLE', 'consent config');
 
   const users = getUserStore();
@@ -301,6 +310,8 @@ export interface OwnerTeamAccountInput {
   serves: string[];
   /** The server-stamped coordinator consent the owner gave at registration. */
   consent: SelfAddRequest['consent'];
+  /** Record the consent with these versions and source instead of the current config's. */
+  derivedConsent?: DerivedConsent;
 }
 
 /**
@@ -326,7 +337,7 @@ export async function createOwnerTeamAccount(
 }
 
 async function createTeamAccount(
-  { org, subject, serves, consent }: OwnerTeamAccountInput,
+  { org, subject, serves, consent, derivedConsent }: OwnerTeamAccountInput,
   log: FastifyBaseLogger,
 ): Promise<SelfAddResult<string>> {
   if (!org.ownerPhone) return refuse('OWNER_PHONE_REQUIRED', 'owner contact has no phone');
@@ -340,6 +351,7 @@ async function createTeamAccount(
     org.ownerPhone,
     consent,
     log,
+    derivedConsent,
   );
 }
 

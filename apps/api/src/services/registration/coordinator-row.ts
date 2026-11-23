@@ -25,6 +25,17 @@ const SLUG_RETRIES = 3;
 export type RegistrationConsent = z.infer<typeof RegistrationConsentSchema>;
 
 /**
+ * A consent taken over from another ledger row rather than given on a form:
+ * the document versions it covers and how it was derived.
+ */
+export interface DerivedConsent {
+  termsVersion: number;
+  privacyVersion: number;
+  /** The ledger `source`, naming how the consent was derived. */
+  source: string;
+}
+
+/**
  * Builds the consent-ledger write that `store.create` runs inside its transaction.
  *
  * The consent config is read now, before the transaction. A failed ledger
@@ -32,34 +43,42 @@ export type RegistrationConsent = z.infer<typeof RegistrationConsentSchema>;
  *
  * @param consent - The server-stamped registration consent (`valid_till` is stored).
  * @param log - Request-scoped child logger.
+ * @param derived - Versions and source to record instead of the current config's and `registration`.
  * @returns The hook to pass as `recordConsent`, or `null` when the consent config cannot be read (logged).
  */
 export async function aggregatorConsentWriter({
   consent,
   log,
+  derived,
 }: {
   consent: RegistrationConsent;
   log: FastifyBaseLogger;
+  derived?: DerivedConsent;
 }): Promise<RecordConsentHook | null> {
   const { network, brand } = resolveActiveNetwork();
   let termsVersion: number;
   let privacyVersion: number;
-  try {
-    const consentCfg = await loadConsentConfig(network, brand);
-    termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
-    privacyVersion = consentCfg.audiences.aggregator.documents.privacy.current_version;
-  } catch (e) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
-        network,
-        brand: brand ?? null,
-      },
-      'consent config load failed — registration refused',
-    );
-    return null;
+  if (derived) {
+    termsVersion = derived.termsVersion;
+    privacyVersion = derived.privacyVersion;
+  } else {
+    try {
+      const consentCfg = await loadConsentConfig(network, brand);
+      termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
+      privacyVersion = consentCfg.audiences.aggregator.documents.privacy.current_version;
+    } catch (e) {
+      log.error(
+        {
+          operation: 'consentLedger.recordAggregatorConsent',
+          status: 'failure',
+          error: e instanceof Error ? e.message : String(e),
+          network,
+          brand: brand ?? null,
+        },
+        'consent config load failed — registration refused',
+      );
+      return null;
+    }
   }
 
   return async (executor, aggregatorId) => {
@@ -72,6 +91,7 @@ export async function aggregatorConsentWriter({
         brand: brand ?? null,
         termsVersion,
         privacyVersion,
+        ...(derived ? { source: derived.source } : {}),
         validTill: new Date(consent.valid_till),
       });
     if (!result.success) {
