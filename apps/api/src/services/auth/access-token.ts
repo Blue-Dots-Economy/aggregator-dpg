@@ -17,6 +17,7 @@ import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { readUserIdClaim } from '@aggregator-dpg/shared-primitives/user-id-claim';
 import { recordLoginIdentity } from '../identity-store/record.js';
 import type { Coordinator } from '../user-store/interface.js';
 import { logActing, readActingHeader, resolveActingAccount } from './acting.js';
@@ -28,7 +29,7 @@ let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 export interface AuthContext {
   /** Keycloak `sub` claim — stable user id. */
   userId: string;
-  /** Custom claim mapped from the `aggregator_id` user attribute. */
+  /** The `user_id` claim, else the `aggregator_id` claim: the user's `users.id`. */
   aggregatorId: string;
   /**
    * The profile types the coordinator serves, from the multivalued
@@ -94,7 +95,7 @@ export interface AnyAuthContext {
    * `azp` and `sub` cannot.
    */
   preferredUsername?: string;
-  /** Whether this token is bound to an end user (has `aggregator_id`). */
+  /** Whether this token is bound to an end user (has `user_id` or `aggregator_id`). */
   isUser: boolean;
   aggregatorId?: string;
   email?: string;
@@ -121,9 +122,10 @@ export async function authenticate(
   const verified = await verifyRequest(req, opts);
   if (!verified.ok) return verified;
   const { sub, payload } = verified;
-  const aggregatorId = readAggregatorId(payload);
-  if (!aggregatorId) return missingAggregatorId();
-  return { ok: true, context: hydrateContext(sub, aggregatorId, payload) };
+  const claim = readUserIdClaim(payload);
+  if (claim.kind === 'mismatch') return claimMismatch(sub);
+  if (claim.kind === 'absent') return missingAggregatorId();
+  return { ok: true, context: hydrateContext(sub, claim.userId, payload) };
 }
 
 /** A verified Bearer token: its `sub` and claims. */
@@ -173,6 +175,28 @@ function missingAggregatorId(): AuthResult {
   return {
     ok: false,
     error: { code: 'MISSING_AGGREGATOR_ID', message: 'token has no aggregator_id claim' },
+  };
+}
+
+/**
+ * Rejects a token whose `user_id` and `aggregator_id` claims differ: it cannot
+ * be trusted to name one user, so it is treated as an invalid token (401).
+ *
+ * @param sub - The token subject, logged so the account can be found.
+ */
+function claimMismatch(sub: string): {
+  ok: false;
+  error: { code: 'INVALID_TOKEN'; message: string };
+} {
+  logger.warn({
+    operation: 'auth.user_id_claim',
+    status: 'failure',
+    error: 'CLAIM_MISMATCH',
+    sub,
+  });
+  return {
+    ok: false,
+    error: { code: 'INVALID_TOKEN', message: 'token user_id and aggregator_id claims differ' },
   };
 }
 
@@ -309,11 +333,13 @@ export async function authenticateAllowingActing(req: FastifyRequest): Promise<A
     logActing('MALFORMED');
     return actingInvalid('x-acting-account is not an account id');
   }
-  const claimed = readAggregatorId(payload);
-  if (!claimed) {
+  const claim = readUserIdClaim(payload);
+  if (claim.kind === 'mismatch') return claimMismatch(sub);
+  if (claim.kind === 'absent') {
     if (acting.kind === 'absent') return missingAggregatorId();
     return actingContext(sub, acting.id, payload);
   }
+  const claimed = claim.userId;
   if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
     logActing('CLAIM_MISMATCH');
     return actingInvalid('x-acting-account differs from the token aggregator_id');
@@ -486,7 +512,8 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
 }
 
 /**
- * Verifies the Bearer token without requiring an `aggregator_id` claim.
+ * Verifies the Bearer token without requiring a `user_id` or `aggregator_id`
+ * claim. A token whose two claims differ is still refused.
  *
  * Use on routes reached through the BFF, which attaches a service-account
  * token for anonymous callers. Accepts user and service tokens; handlers can
@@ -527,7 +554,9 @@ export async function authenticateAny(
     return { ok: false, error: { code: 'INVALID_TOKEN', message: 'missing sub claim' } };
   }
   const claims = payload as Record<string, unknown>;
-  const aggregatorId = readAggregatorId(payload);
+  const claim = readUserIdClaim(payload);
+  if (claim.kind === 'mismatch') return claimMismatch(payload.sub);
+  const aggregatorId = claim.kind === 'present' ? claim.userId : undefined;
   const ctx: AnyAuthContext = {
     subject: payload.sub,
     isUser: Boolean(aggregatorId),
@@ -556,14 +585,6 @@ function readStringList(v: unknown): string[] {
 function readStringOrFirst(v: unknown): string | undefined {
   if (typeof v === 'string' && v.length > 0) return v;
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
-  return undefined;
-}
-
-function readAggregatorId(payload: JWTPayload): string | undefined {
-  // A mapper may publish the attribute as a string or a one-element array.
-  const direct = (payload as Record<string, unknown>).aggregator_id;
-  if (typeof direct === 'string' && direct.length > 0) return direct;
-  if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
   return undefined;
 }
 

@@ -40,7 +40,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
-  // Only coordinators (tokens with `aggregator_id`) and org owners acting as
+  // Only coordinators (tokens with `user_id` or `aggregator_id`) and org owners acting as
   // their own coordinator account use this portal. Other org owners go to the
   // console; everyone else is logged out with a reason.
   const acting = session.actingAccountId !== undefined;

@@ -2,8 +2,10 @@
  * The online steps of the instance-upgrade tool (`@aggregator-dpg/api`).
  *
  * `enrich` runs after the database commit and before scale-up. `enable-owners`
- * is a one-off step that lets existing org owners sign in. Both call Keycloak
- * through the API's adapter, so they need the API's full environment.
+ * is a one-off step that lets existing org owners sign in. `backfill-user-id`
+ * is a one-off step, run once the release is deployed, that copies each
+ * coordinator's `aggregator_id` into `user_id`. All three call Keycloak through
+ * the API's adapter, so they need the API's full environment.
  * `instance-upgrade.ts` loads this module lazily so `check` and `run` do not
  * depend on it. Output carries counts and ids only.
  */
@@ -160,6 +162,135 @@ export function enrichExitCode(
   names: { failed: number },
 ): 0 | 1 {
   return identities.failed > 0 || identities.conflicts > 0 || names.failed > 0 ? 1 : 0;
+}
+
+/** Counts of `backfill-user-id`. */
+export interface UserIdClaimReport {
+  candidates: number;
+  /** Coordinators given `user_id` (on a dry run: that would be given it). */
+  copied: number;
+  /** Coordinators whose `user_id` already equals their id. */
+  already: number;
+  notInKeycloak: number;
+  /** Coordinators whose `user_id` holds a different value; left unchanged. */
+  conflicts: number;
+  /** Keycloak errors, on the lookup or the write; a re-run retries them. */
+  failed: number;
+  /** Coordinator ids whose `user_id` holds a different value. */
+  conflictIds: string[];
+}
+
+/** What `backfill-user-id` needs (fakes in tests). */
+export interface UserIdClaimDeps {
+  idp: IdpAdminAdapter;
+  /** Every coordinator id. */
+  listCandidates: () => Promise<string[]>;
+  /** Pause between Keycloak calls. */
+  pause?: (ms: number) => Promise<void>;
+}
+
+/** What happened to one coordinator in `backfill-user-id`. */
+type UserIdOutcome = 'copied' | 'already' | 'notInKeycloak' | 'conflict' | 'failed';
+
+/** Reads one coordinator's Keycloak user and, unless `dryRun`, sets a missing `user_id`. */
+async function copyUserId(
+  idp: IdpAdminAdapter,
+  id: string,
+  dryRun: boolean,
+): Promise<UserIdOutcome> {
+  const found = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, id);
+  if (!found.ok) return 'failed';
+  if (!found.value) return 'notInKeycloak';
+  const current = found.value.attributes?.[KC_ATTR.USER_ID]?.[0];
+  if (current === id) return 'already';
+  if (current !== undefined) return 'conflict';
+  if (dryRun) return 'copied';
+  const set = await idp.setAttributes(found.value.id, { [KC_ATTR.USER_ID]: id });
+  return set.ok ? 'copied' : 'failed';
+}
+
+/**
+ * Copies each coordinator's `aggregator_id` attribute into `user_id`, paced.
+ *
+ * Tokens carry both claims while clients move to `user_id`. Idempotent; a
+ * `user_id` that holds another value is reported and never overwritten.
+ * Each write rewrites the whole Keycloak user and takes no lock, so a write can
+ * be lost if API pods are starting at the same moment (their start-up roles
+ * reconcile rewrites every user). A dry run afterwards reports any coordinator
+ * still to copy; re-run until it reports none.
+ *
+ * @param deps - Keycloak and the candidate list.
+ * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
+ * @returns Per-outcome counts.
+ * @throws {RangeError} When `ratePerSecond` is not a positive number.
+ */
+export async function backfillUserIdClaim(
+  deps: UserIdClaimDeps,
+  opts: { dryRun: boolean; ratePerSecond: number },
+): Promise<UserIdClaimReport> {
+  if (!Number.isFinite(opts.ratePerSecond) || opts.ratePerSecond <= 0) {
+    throw new RangeError('--rate must be a positive number of calls per second');
+  }
+  const ids = await deps.listCandidates();
+  const report: UserIdClaimReport = {
+    candidates: ids.length,
+    copied: 0,
+    already: 0,
+    notInKeycloak: 0,
+    conflicts: 0,
+    failed: 0,
+    conflictIds: [],
+  };
+  const pause = deps.pause ?? sleep;
+  const gapMs = Math.ceil(1000 / opts.ratePerSecond);
+  for (const id of ids) {
+    // Sequential: paced against Keycloak.
+    const outcome = await copyUserId(deps.idp, id, opts.dryRun); // NOSONAR typescript:S9382
+    if (outcome === 'copied') report.copied += 1;
+    else if (outcome === 'already') report.already += 1;
+    else if (outcome === 'notInKeycloak') report.notInKeycloak += 1;
+    else if (outcome === 'failed') report.failed += 1;
+    else {
+      report.conflicts += 1;
+      report.conflictIds.push(id);
+    }
+    await pause(gapMs); // NOSONAR typescript:S9382
+  }
+  return report;
+}
+
+/** Every coordinator id, oldest first. */
+async function allCoordinators(): Promise<string[]> {
+  const rows = await getDb().execute<{ id: string }>(sql`
+    SELECT u.id::text AS id FROM users u
+     WHERE u.user_type = 'coordinator'
+     ORDER BY u.created_at`);
+  return rows.rows.map((r) => r.id);
+}
+
+/**
+ * Runs `backfill-user-id`: copies every coordinator's `aggregator_id` into `user_id`.
+ *
+ * One-off, run once the release is deployed; not part of `run-all`.
+ * Coordinators absent from Keycloak do not fail it.
+ *
+ * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
+ * @param out - Line printer.
+ * @returns Exit code: 1 when a lookup or write failed (re-run to resume) or a
+ *   `user_id` holds another value (listed by coordinator id), else 0.
+ */
+export async function backfillUserId(
+  opts: { dryRun: boolean; ratePerSecond: number },
+  out: Out,
+): Promise<number> {
+  const report = await backfillUserIdClaim(
+    { idp: getIdpAdmin(), listCandidates: allCoordinators },
+    opts,
+  );
+  const { conflictIds, ...counts } = report;
+  out(`backfill-user-id ${JSON.stringify(counts)}${opts.dryRun ? ' (dry run)' : ''}`);
+  for (const id of conflictIds) out(`  user_id differs: coordinator ${id}`);
+  return report.failed + report.conflicts > 0 ? 1 : 0;
 }
 
 /** Counts of `enable-owners`; ids name the orgs to follow up. */

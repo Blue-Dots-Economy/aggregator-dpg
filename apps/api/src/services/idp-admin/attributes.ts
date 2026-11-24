@@ -6,9 +6,11 @@
  */
 
 /**
- * Keycloak carries five attributes:
+ * Keycloak carries six attributes:
  *
  *   - `aggregator_id`      — reverse pointer to Postgres
+ *   - `user_id`            — the same value as `aggregator_id`, under the name
+ *                            that replaces it
  *   - `aggregator_type`    — multivalued: the profile types served. Its token
  *                            claim decides which domains a request may act on
  *   - `phoneNumber`        — read by the OTP login authenticator
@@ -22,6 +24,12 @@
 export const KC_ATTR = {
   /** Postgres aggregator UUID — reverse pointer from KC to our DB. */
   AGGREGATOR_ID: 'aggregator_id',
+  /**
+   * The coordinator's `users.id`, equal to {@link KC_ATTR.AGGREGATOR_ID}. Written
+   * at account creation; `instance-upgrade backfill-user-id` copies it onto
+   * coordinators created before it.
+   */
+  USER_ID: 'user_id',
   /** Multivalued: the network domain ids the coordinator serves. Absent when it serves none. */
   AGGREGATOR_TYPE: 'aggregator_type',
   /** Applicant phone in E.164. Read by the OTP login authenticator. */
