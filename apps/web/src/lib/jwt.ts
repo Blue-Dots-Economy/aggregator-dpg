@@ -37,7 +37,7 @@ export function decodeJwtClaims(token: string): Record<string, unknown> | null {
  * @param token - A Keycloak access token.
  * @returns The user id, or `null`.
  */
-export function tokenAggregatorId(token: string): string | null {
+export function tokenUserId(token: string): string | null {
   const claim = readUserIdClaim(decodeJwtClaims(token));
   return claim.kind === 'present' ? claim.userId : null;
 }

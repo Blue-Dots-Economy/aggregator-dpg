@@ -5,7 +5,7 @@
  * since the real adapter/store hit Keycloak/Redis. Uses the *real*
  * `signFlowState`/`verifyFlowState` from `@/lib/cookies` (pure HMAC, no I/O)
  * so the flow-cookie round trip is exercised for real. Crafts a fake JWT
- * (base64url payload, no real signature — `tokenAggregatorId` never
+ * (base64url payload, no real signature — `tokenUserId` never
  * verifies the signature) to drive the coordinator-gate branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

@@ -28,7 +28,7 @@ import {
   PORTAL_GATE_REASON,
   classifyNonCoordinator,
   decodeJwtClaims,
-  tokenAggregatorId,
+  tokenUserId,
 } from '@/lib/jwt';
 import { activateInvitee } from '@/lib/invite-activation';
 
@@ -110,7 +110,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // A coordinator (token has `user_id` or `aggregator_id`) lands in the portal. An org owner
   // or the network admin (realm role `org_owner`) lands in the console.
   // Anyone else is refused.
-  const isCoordinator = Boolean(tokenAggregatorId(tokens.accessToken));
+  const isCoordinator = Boolean(tokenUserId(tokens.accessToken));
   const population = isCoordinator
     ? null
     : classifyNonCoordinator(tokens.accessToken, await resolveSignalsRealmRoles());
