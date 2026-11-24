@@ -16,7 +16,7 @@
  * only when all pass. `check` and `run` need only `DATABASE_URL` and
  * `AGGREGATOR_NETWORK` (`AGGREGATOR_BRAND` is optional). `enrich`,
  * `enable-owners` and `backfill-user-id` need the full API environment.
- * `backfill-user-id` is a one-off, run with the app up, and is not part of
+ * `backfill-user-id` is a one-off, run once the release is deployed, and is not part of
  * `run-all`. Output is counts, check ids, error codes and
  * database ids, never row data. Exit codes: 0 ok, 1 refused or failed, 2 usage.
  */

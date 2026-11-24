@@ -214,9 +214,10 @@ async function copyUserId(
  *
  * Tokens carry both claims while clients move to `user_id`. Idempotent; a
  * `user_id` that holds another value is reported and never overwritten.
- * Each write rewrites the whole Keycloak user, so run it when nothing else
- * writes users: after the release's API pods have started (their start-up
- * roles reconcile rewrites every user), or with the API scaled down.
+ * Each write rewrites the whole Keycloak user and takes no lock, so a write can
+ * be lost if API pods are starting at the same moment (their start-up roles
+ * reconcile rewrites every user). A dry run afterwards reports any coordinator
+ * still to copy; re-run until it reports none.
  *
  * @param deps - Keycloak and the candidate list.
  * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
