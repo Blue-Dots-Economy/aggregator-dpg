@@ -405,7 +405,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   const log = logger.child({
     operation: 'auth.backfillSignalstackOrgId',
     aggregator_id: ctx.userId,
-    user_id: ctx.subject,
+    subject: ctx.subject,
   });
 
   const signalstack = getSignalStackWriter();
