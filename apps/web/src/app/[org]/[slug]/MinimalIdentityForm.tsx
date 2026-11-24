@@ -114,7 +114,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const hasName = name.trim().length > 0;
   const hasPhone = !!phoneKey && phone.trim().length > 0;
   const hasEmail = showEmail && email.trim().length > 0;
-  const phoneFormatOk = isValidPhone(phone);
+  const phoneFormatOk = isValidPhone(phone, phoneCountries);
   const emailFormatOk = looksLikeEmail(email.trim());
   const phoneValid = hasPhone && phoneFormatOk;
   const emailValid = hasEmail && emailFormatOk;

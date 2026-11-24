@@ -13,6 +13,8 @@
  * @module apps/web/lib/form-runtime-config
  */
 
+import { readPhoneCountries } from '@aggregator-dpg/shared-primitives/phone';
+
 /**
  * Values the form widgets need at runtime.
  *
@@ -46,7 +48,7 @@ export interface FormRuntimeConfig {
   referenceBaseUrl?: string;
   /**
    * Countries a phone field offers, `IN:+91,GB:+44` (first is the default).
-   * Absent means India only. Parsed by `parsePhoneCountries`.
+   * Absent means India only. Checked here, parsed by `parsePhoneCountries`.
    */
   phoneCountries?: string;
 }
@@ -90,7 +92,13 @@ export function getFormRuntimeConfig(): FormRuntimeConfig {
   const photonUrl = cleaned(process.env.PHOTON_URL);
   const geoCountry = countryCode(process.env.GEO_COUNTRY);
   const referenceBaseUrl = cleaned(process.env.REFERENCE_BASE_URL);
-  const phoneCountries = cleaned(process.env.PHONE_COUNTRIES);
+  const configured = cleaned(process.env.PHONE_COUNTRIES);
+  const phoneCheck = readPhoneCountries(configured);
+  if (!phoneCheck.ok) {
+    // The api and worker refuse to start on this; the portal falls back to India.
+    console.error('[formRuntimeConfig] PHONE_COUNTRIES ignored:', phoneCheck.error.message);
+  }
+  const phoneCountries = phoneCheck.ok ? configured : undefined;
   return {
     ...(googleMapsApiKey ? { googleMapsApiKey } : {}),
     ...(photonUrl ? { photonUrl } : {}),

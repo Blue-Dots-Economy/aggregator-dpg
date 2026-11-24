@@ -94,7 +94,8 @@ export function CallToRegisterForm(props: Readonly<CallToRegisterFormProps>): JS
   });
   const phoneError = ((): HandFieldError | null => {
     if (phone.trim().length === 0) return required(phoneLabel);
-    if (!isValidPhone(phone)) return { kind: 'invalid', message: copy.invalid(t('phone_invalid')) };
+    if (!isValidPhone(phone, phoneCountries))
+      return { kind: 'invalid', message: copy.invalid(t('phone_invalid')) };
     return null;
   })();
   const fe = useHandFieldErrors<CallField>('call-register', {

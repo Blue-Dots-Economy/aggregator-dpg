@@ -7,17 +7,25 @@
  * @module apps/web/src/lib/phone
  */
 
-import { normaliseContactPhone, normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import {
+  parsePhone,
+  phoneCountryInfo,
+  readPhoneCountries,
+  DEFAULT_PHONE_COUNTRIES as DEFAULT_COUNTRY_CODES,
+  type CountryCode,
+  type PhoneCountryList,
+  type PhoneKind,
+} from '@aggregator-dpg/shared-primitives/phone';
 
 /** A country a phone field can use. */
 export interface PhoneCountry {
   /** ISO 3166-1 alpha-2 code, e.g. `IN`. */
-  iso: string;
+  iso: CountryCode;
   /** Dial code with its plus, e.g. `+91`. */
   code: string;
   flag: string;
-  /** Digits in a national number, when known. */
-  nationalDigits?: number;
+  /** Digits in a mobile number after the dial code. */
+  nationalDigits: number;
   /** A valid national number, used to test a field's pattern. */
   sample: string;
 }
@@ -25,58 +33,34 @@ export interface PhoneCountry {
 /** The countries a phone field offers; the first is the default. */
 export type PhoneCountries = readonly [PhoneCountry, ...PhoneCountry[]];
 
-/** Known national lengths and sample numbers; other countries get the E.164 cap. */
-const KNOWN_COUNTRIES: Partial<Record<string, { nationalDigits: number; sample: string }>> = {
-  IN: { nationalDigits: 10, sample: '9876543210' },
-  GB: { nationalDigits: 10, sample: '7911123456' },
-  US: { nationalDigits: 10, sample: '2025550123' },
-  CA: { nationalDigits: 10, sample: '4165550123' },
-};
-const GENERIC_SAMPLE = '2345678901';
+function flagOf(iso: string): string {
+  return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + (c.codePointAt(0) ?? 0) - 65));
+}
 
-const INDIA: PhoneCountry = {
-  iso: 'IN',
-  code: '+91',
-  flag: '🇮🇳',
-  nationalDigits: 10,
-  sample: '9876543210',
-};
+function toPhoneCountry(iso: CountryCode): PhoneCountry {
+  return { ...phoneCountryInfo(iso), flag: flagOf(iso) };
+}
+
+function toPhoneCountries(list: PhoneCountryList): PhoneCountries {
+  const [first, ...rest] = list;
+  return [toPhoneCountry(first), ...rest.map((iso) => toPhoneCountry(iso))];
+}
 
 /** India only: the list when `PHONE_COUNTRIES` is unset. */
-export const DEFAULT_PHONE_COUNTRIES: PhoneCountries = [INDIA];
-
-/** India's dial code: a bare 10-digit number is read as Indian, as the API does. */
-export const IN_DIAL_CODE = INDIA.code;
+export const DEFAULT_PHONE_COUNTRIES: PhoneCountries = toPhoneCountries(DEFAULT_COUNTRY_CODES);
 
 /** National digits allowed for India; E.164 caps a whole number at 15 digits. */
 const INDIA_NATIONAL_DIGITS = 10;
 const MAX_TOTAL_DIGITS = 15;
 
-function flagOf(iso: string): string {
-  return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + (c.codePointAt(0) ?? 0) - 65));
-}
-
 /**
- * Reads the deployment's country list, `IN:+91,GB:+44` (ISO code and dial code,
- * first is the default). Bad or repeated entries are skipped; none left means India.
+ * Reads the deployment's country list, `IN:+91,GB:+44` (first is the default),
+ * with the same rules as the api. The web server checks the value first
+ * (`getFormRuntimeConfig`), so a bad value here falls back to India.
  */
 export function parsePhoneCountries(raw: string | undefined): PhoneCountries {
-  const list: PhoneCountry[] = [];
-  for (const entry of (raw ?? '').split(',')) {
-    const m = /^([A-Za-z]{2})\s*:\s*\+?([1-9]\d{0,2})$/.exec(entry.trim());
-    if (!m?.[1] || !m[2]) continue;
-    const iso = m[1].toUpperCase();
-    const code = `+${m[2]}`;
-    if (list.some((c) => c.code === code)) continue;
-    list.push({
-      iso,
-      code,
-      flag: flagOf(iso),
-      ...(KNOWN_COUNTRIES[iso] ?? { sample: GENERIC_SAMPLE }),
-    });
-  }
-  const [first, ...rest] = list;
-  return first ? [first, ...rest] : DEFAULT_PHONE_COUNTRIES;
+  const read = readPhoneCountries(raw);
+  return read.ok ? toPhoneCountries(read.value) : DEFAULT_PHONE_COUNTRIES;
 }
 
 /** The listed country for `code`, if any. */
@@ -90,6 +74,11 @@ export function phoneCountry(
 /** Name words that mark a phone field; a trailing "number"/"no" is allowed after them. */
 const PHONE_WORDS = new Set(['phone', 'mobile']);
 const NUMBER_WORDS = new Set(['number', 'no', 'num']);
+
+function isoCodes(countries: PhoneCountries): PhoneCountryList {
+  const [first, ...rest] = countries;
+  return [first.iso, ...rest.map((c) => c.iso)];
+}
 
 /** A country code and the number typed after it. */
 export interface PhoneParts {
@@ -167,8 +156,8 @@ export function nationalMaxLength(
 }
 
 /**
- * Splits a stored value into code and number. A bare 10-digit value is read as
- * an Indian number, and `+91…` always as India.
+ * Splits a stored value into code and number. A value without `+` is read in
+ * the first listed country, as the API does.
  */
 export function splitPhone(
   value: string | undefined | null,
@@ -177,15 +166,20 @@ export function splitPhone(
   const raw = (value ?? '').replace(/[\s\-()]/g, '');
   const digits = raw.replace(/\D/g, '');
   if (!raw.startsWith('+')) {
-    // `919876543210` is the +91 number without its plus.
-    if (digits.length === 2 + INDIA_NATIONAL_DIGITS && digits.startsWith('91')) {
-      return { code: IN_DIAL_CODE, national: digits.slice(2) };
+    const [home] = countries;
+    const homeDigits = home.code.slice(1);
+    // `919876543210` is the default country's number without its plus.
+    if (
+      digits.length === homeDigits.length + home.nationalDigits &&
+      digits.startsWith(homeDigits)
+    ) {
+      return { code: home.code, national: digits.slice(homeDigits.length) };
     }
     // `09876543210` carries the trunk 0.
-    if (digits.length === 1 + INDIA_NATIONAL_DIGITS && digits.startsWith('0')) {
-      return { code: IN_DIAL_CODE, national: digits.slice(1) };
+    if (digits.length === 1 + home.nationalDigits && digits.startsWith('0')) {
+      return { code: home.code, national: digits.slice(1) };
     }
-    return { code: IN_DIAL_CODE, national: digits };
+    return { code: home.code, national: digits };
   }
   const listed = countries.find((c) => digits.startsWith(c.code.slice(1)));
   if (listed) return { code: listed.code, national: digits.slice(listed.code.length - 1) };
@@ -206,9 +200,10 @@ export function nationalFromInput(
   code: string,
   countries: PhoneCountries = DEFAULT_PHONE_COUNTRIES,
 ): PhoneParts {
-  const trimmed = raw.trim();
+  const trimmed = raw.trim().replace(/^00(?=[1-9])/, '+'); // `0091…` dials +91
   if (trimmed.startsWith('+')) {
-    const parts = splitPhone(trimmed, countries);
+    const parsed = parsePhone(trimmed, { countries: isoCodes(countries), kind: 'any' });
+    const parts = splitPhone(parsed.ok ? parsed.value : trimmed, countries); // drops a trunk 0
     if (phoneCountry(parts.code, countries)) {
       const max = nationalMaxLength(parts.code, countries);
       return { code: parts.code, national: parts.national.slice(0, max) };
@@ -231,17 +226,24 @@ export function joinPhone(code: string, national: string): string | undefined {
   return digits ? `${code}${digits}` : undefined;
 }
 
-/**
- * True for an Indian mobile (`+91` and 10 digits starting 6-9, or the bare 10
- * digits) or another `+code` number the server's `normalisePhone` accepts.
- */
-export function isValidPhone(value: string): boolean {
-  return normalisePhone(value).ok;
+function accepts(value: string, countries: PhoneCountries, kind: PhoneKind): boolean {
+  return parsePhone(value, { countries: isoCodes(countries), kind }).ok;
 }
 
-/** True for any number the server accepts (landlines too); for optional contact fields. */
-export function isAcceptedPhone(value: string): boolean {
-  return normaliseContactPhone(value).ok;
+/** True for a mobile in one of the listed countries, as the server checks it. */
+export function isValidPhone(
+  value: string,
+  countries: PhoneCountries = DEFAULT_PHONE_COUNTRIES,
+): boolean {
+  return accepts(value, countries, 'mobile');
+}
+
+/** True for any number in the listed countries, landlines too; for contact fields. */
+export function isAcceptedPhone(
+  value: string,
+  countries: PhoneCountries = DEFAULT_PHONE_COUNTRIES,
+): boolean {
+  return accepts(value, countries, 'any');
 }
 
 /** Digits in each half of a 10-digit national number when grouped for reading. */
