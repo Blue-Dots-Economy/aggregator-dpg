@@ -34,7 +34,8 @@ import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
-import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone, phoneForSchema } from '../services/phone.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -100,6 +101,42 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
 
+  // Identity field names come from the network config.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
+      },
+      log,
+    );
+  }
+
+  // 1a. Check the phone; it is written back in the schema's form once the schema loads.
+  const phoneSourceKey = domainCfg.identity.phone;
+  const phoneRaw = stringCell(job.payload, phoneSourceKey)?.trim() ?? '';
+  let phoneNormalised: string | null = null;
+  if (phoneRaw) {
+    const phone = parseMobilePhone(phoneRaw);
+    if (!phone.ok) {
+      return await commit(
+        job,
+        {
+          outcome: 'failed',
+          category: 'normalisation',
+          reasons: [`phone: ${phone.error.message}`],
+          advice: [adviceForPhone(phoneSourceKey)],
+        },
+        log,
+      );
+    }
+    phoneNormalised = phone.value;
+  }
+
   // 1. Schema validation. Load the schema too, so array cells can be split
   // before Ajv runs; Ajv does not split delimited strings.
   const ref = { id: job.schemaId, version: job.schemaVersion };
@@ -117,6 +154,15 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         reasons: [`schema_load_failed: ${validatorResult.error.code}`],
       },
       log,
+    );
+  }
+  // 1a, continued. A spaced or dashed phone would fail the pattern, and networks that
+  // store bare digits need the number without its code.
+  if (phoneNormalised) {
+    job.payload[phoneSourceKey] = phoneForSchema(
+      phoneNormalised,
+      schemaResult.success ? schemaResult.value : null,
+      phoneSourceKey,
     );
   }
   // 1b. Remove the well-known geo column before Ajv runs. It is not a schema
@@ -183,40 +229,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
-  // Identity field names come from the network config.
-  const networkCfg = await getNetworkConfig();
-  const domainCfg = networkCfg.domains[job.participantType];
-  if (!domainCfg) {
-    return await commit(
-      job,
-      {
-        outcome: 'failed',
-        category: 'system_error',
-        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
-      },
-      log,
-    );
-  }
-  const phoneSourceKey = domainCfg.identity.phone;
   const emailSourceKey = domainCfg.identity.email;
-  const phoneRaw = stringCell(job.payload, phoneSourceKey) ?? '';
-  let phoneNormalised: string | null = null;
-  if (phoneRaw) {
-    const phone = normalisePhone(phoneRaw);
-    if (!phone.ok) {
-      return await commit(
-        job,
-        {
-          outcome: 'failed',
-          category: 'normalisation',
-          reasons: [`phone: ${phone.error.message}`],
-          advice: [adviceForPhone(phoneSourceKey)],
-        },
-        log,
-      );
-    }
-    phoneNormalised = phone.value;
-  }
   // Some domains have no email field.
   const emailNormalised = normaliseEmail(
     emailSourceKey ? (stringCell(job.payload, emailSourceKey) ?? null) : null,

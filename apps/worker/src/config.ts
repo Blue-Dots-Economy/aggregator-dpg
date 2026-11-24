@@ -10,6 +10,7 @@ import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
   campaignExportConfigFields,
+  phoneConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
 
@@ -87,6 +88,7 @@ const ConfigSchema = z.object({
   // ─── SignalStack outward push ───────────────────────────────────────────
   // Shared with the api via @aggregator-dpg/shared-primitives/config.
   ...signalStackConfigFields,
+  ...phoneConfigFields,
   /** Keycloak base URL, used only to get the Signals service token in bearer mode. */
   KEYCLOAK_URL: z.string().optional(),
   KEYCLOAK_REALM: z.string().optional(),

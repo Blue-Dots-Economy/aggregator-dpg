@@ -56,7 +56,7 @@ function typeName(type: unknown): string {
 }
 
 const PHONE_ADVICE = (column: string): string =>
-  `Check the format of the phone number in the "${column}" column. It should be a 10-digit mobile number, or + and the country code followed by the number.`;
+  `Check the format of the phone number in the "${column}" column. It should be a valid mobile number; add + and the country code for a number from another country.`;
 
 /**
  * Advice for one schema rule a row broke.
@@ -197,7 +197,7 @@ export function adviceForRejection(
       break;
     case 'normalisation':
       return [
-        'Check the format of the phone number on this row. It should be a 10-digit mobile number, or + and the country code followed by the number.',
+        'Check the format of the phone number on this row. It should be a valid mobile number; add + and the country code for a number from another country.',
       ];
     default:
       break;

@@ -121,6 +121,7 @@ vi.mock('../config.js', () => ({
     SIGNALSTACK_ITEM_NETWORK: 'blue_dot',
     LOG_LEVEL: 'silent',
     NODE_ENV: 'test',
+    PHONE_COUNTRIES: ['IN'],
   },
 }));
 
@@ -304,6 +305,40 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     const result = await processBulkRow(makeJob({ participantType: 'ghost' }));
     expect(result.category).toBe('system_error');
     expect(result.reasons[0]).toContain("unknown domain 'ghost'");
+  });
+
+  it('cleans a spaced or dashed phone before the schema check sees it', async () => {
+    const seen: unknown[] = [];
+    const validate = ((data: Record<string, unknown>) => {
+      seen.push(data['phone']);
+      return true;
+    }) as FakeValidate;
+    validate.errors = null;
+    validatorResult = { success: true, value: validate };
+    for (const phone of ['+91 98765 43210', '+91-98765-43210', '(98765) 43210']) {
+      const result = await processBulkRow(makeJob({ payload: { name: 'Asha', phone } }));
+      expect(result.outcome).toBe('passed');
+    }
+    expect(seen).toEqual(['+919876543210', '+919876543210', '+919876543210']);
+  });
+
+  it('writes the bare number where the schema stores bare digits', async () => {
+    const seen: unknown[] = [];
+    const validate = ((data: Record<string, unknown>) => {
+      seen.push(data['phone']);
+      return true;
+    }) as FakeValidate;
+    validate.errors = null;
+    validatorResult = { success: true, value: validate };
+    schemaResultVal = {
+      success: true,
+      value: { required: [], properties: { phone: { type: 'string', pattern: '^[0-9]{10}$' } } },
+    };
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+91 98765 43210' } }),
+    );
+    expect(result.outcome).toBe('passed');
+    expect(seen).toEqual(['9876543210']);
   });
 
   it('fails on an unnormalisable phone number', async () => {
