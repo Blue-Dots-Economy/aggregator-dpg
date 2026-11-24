@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const warn = vi.fn();
 vi.mock('@/lib/logger', () => ({ logger: { warn: (...a: unknown[]) => warn(...a) } }));
 
-import { getAggregatorFeatures, customRolesEnabled } from '@/lib/features.server';
+import { getAggregatorFeatures, customRolesEnabled, ownerSelfAddMode } from '@/lib/features.server';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -35,6 +35,7 @@ describe('features.server', () => {
     await expect(customRolesEnabled()).resolves.toBe(true);
     await expect(getAggregatorFeatures()).resolves.toEqual({
       custom_roles: true,
+      owner_self_add: 'owner',
       invite_role_label: null,
     });
   });
@@ -47,7 +48,29 @@ describe('features.server', () => {
       ) as unknown as typeof fetch;
     await expect(getAggregatorFeatures()).resolves.toEqual({
       custom_roles: false,
+      owner_self_add: 'owner',
       invite_role_label: 'Lead',
+    });
+  });
+
+  it('reads how owners join their team', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        json({ features: { custom_roles: false, owner_self_add: 'auto' } }),
+      ) as unknown as typeof fetch;
+    await expect(ownerSelfAddMode()).resolves.toBe('auto');
+  });
+
+  it('reads an unknown owner_self_add value as owner, keeping the other flags', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        json({ features: { custom_roles: true, owner_self_add: 'later' } }),
+      ) as unknown as typeof fetch;
+    await expect(getAggregatorFeatures()).resolves.toMatchObject({
+      custom_roles: true,
+      owner_self_add: 'owner',
     });
   });
 
@@ -74,6 +97,7 @@ describe('features.server', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(json(body)) as unknown as typeof fetch;
     await expect(getAggregatorFeatures()).resolves.toEqual({
       custom_roles: false,
+      owner_self_add: 'owner',
       invite_role_label: null,
     });
     expect(warn).toHaveBeenCalledWith(
@@ -108,6 +132,7 @@ describe('features.server', () => {
       .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
     await expect(getAggregatorFeatures()).resolves.toEqual({
       custom_roles: false,
+      owner_self_add: 'owner',
       invite_role_label: null,
     });
     warn.mockReset();
@@ -122,6 +147,7 @@ describe('features.server', () => {
       .mockResolvedValue(new Response('nope', { status: 503 })) as unknown as typeof fetch;
     await expect(getAggregatorFeatures()).resolves.toEqual({
       custom_roles: false,
+      owner_self_add: 'owner',
       invite_role_label: null,
     });
     warn.mockReset();

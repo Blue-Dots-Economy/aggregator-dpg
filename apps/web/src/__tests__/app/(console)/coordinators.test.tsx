@@ -17,6 +17,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ ownerSelfAddMode: vi.fn(async () => 'owner') }));
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NOT_FOUND');
@@ -48,6 +49,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 
 import ConsoleCoordinatorsPage from '@/app/(console)/console/coordinators/page';
 import { getConsoleActor } from '@/lib/console-actor';
+import { ownerSelfAddMode } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { networkDomains } from '@/lib/console-domains.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -322,6 +324,13 @@ describe('console coordinators page — adding the owner to My Team', () => {
     });
     show(await renderPage());
     expect(addMyself()).toBeInTheDocument();
+  });
+
+  it('does not offer it when the deployment turns self-add off', async () => {
+    vi.mocked(ownerSelfAddMode).mockResolvedValueOnce('off');
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({ orgs: [org({})] }) });
+    show(await renderPage());
+    expect(addMyself()).toBeNull();
   });
 
   it('does not offer it for the Default organisation alone', async () => {

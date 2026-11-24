@@ -32,6 +32,9 @@ import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _resetOrgSchemaValidator } from '../services/org-schema-validator.js';
+import { config } from '../config.js';
+import { IdentityStoreFake } from '../services/identity-store/testing.js';
+import { _setIdentityStore } from '../services/identity-store/index.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -312,6 +315,91 @@ describe('aggregator-orgs routes', () => {
     expect((error.fields.field_errors as Record<string, string>)['website']).toBe(
       'Please enter a website starting with https://',
     );
+  });
+
+  describe('owner joins the team at registration (OWNER_SELF_ADD_MODE)', () => {
+    const savedMode = config.OWNER_SELF_ADD_MODE;
+    let identities: IdentityStoreFake;
+    const teamConsent = {
+      value: true,
+      given_at: '2026-01-15T10:00:00Z',
+      valid_till: '2099-01-15T10:00:00Z',
+    };
+
+    beforeEach(() => {
+      identities = new IdentityStoreFake();
+      _setIdentityStore(identities);
+      config.OWNER_SELF_ADD_MODE = 'auto';
+    });
+    afterEach(() => {
+      config.OWNER_SELF_ADD_MODE = savedMode;
+      _setIdentityStore(null);
+    });
+
+    const ownerAccount = async () => {
+      const found = await userStore.findByContactEmail('ravi@enable.org');
+      return found.ok ? found.value : undefined;
+    };
+
+    it('auto: creates the pending owner account serving the chosen domains, with both consents', async () => {
+      const res = await acceptInvite({
+        ...orgBody,
+        domains: ['seeker'],
+        team_consent: teamConsent,
+      });
+
+      expect(res.statusCode).toBe(201);
+      const { org_id } = res.json() as { org_id: string };
+      const account = await ownerAccount();
+      expect(account).toMatchObject({ status: 'pending', parentOrgId: org_id, serves: ['seeker'] });
+      expect(consentLedger.list().map((r) => [r.subjectType, r.subjectId])).toEqual([
+        ['organisation', org_id],
+        ['user', account?.id],
+      ]);
+      const owner = await idp.findByEmail('ravi@enable.org');
+      const subject = owner.ok ? owner.value?.id : undefined;
+      expect(subject && (await identities.subjectOf(account?.id ?? '', 'keycloak'))).toEqual({
+        ok: true,
+        value: subject,
+      });
+    });
+
+    it('auto: serves every network domain when the org chose none', async () => {
+      await acceptInvite({ ...orgBody, team_consent: teamConsent });
+      expect((await ownerAccount())?.serves).toEqual(buildBlueDotConfig().domainIds);
+    });
+
+    it('auto: creates no team account without team_consent', async () => {
+      expect((await acceptInvite(orgBody)).statusCode).toBe(201);
+      expect(await ownerAccount()).toBeNull();
+      expect(consentLedger.list()).toHaveLength(1);
+    });
+
+    it('auto: 400 for a team_consent that is already expired, creating nothing', async () => {
+      const res = await acceptInvite({
+        ...orgBody,
+        team_consent: { ...teamConsent, valid_till: '2020-01-01T00:00:00Z' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(consentLedger.list()).toHaveLength(0);
+    });
+
+    it('auto: still registers the org when the team account cannot be created', async () => {
+      userStore.create = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
+      const res = await acceptInvite({ ...orgBody, team_consent: teamConsent });
+      expect(res.statusCode).toBe(201);
+      expect(consentLedger.list()).toHaveLength(1);
+    });
+
+    it('owner: ignores team_consent', async () => {
+      config.OWNER_SELF_ADD_MODE = 'owner';
+      expect((await acceptInvite({ ...orgBody, team_consent: teamConsent })).statusCode).toBe(201);
+      expect(await ownerAccount()).toBeNull();
+      expect(consentLedger.list()).toHaveLength(1);
+    });
   });
 
   it('records org consent in the ledger on successful registration', async () => {

@@ -83,7 +83,10 @@
       "modal_desc": "Please review the terms of service and privacy policy below.",
       "modal_close": "Close",
       "load_failed_title": "Terms unavailable",
-      "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
+      "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again.",
+      "team_doc_title": "My Team: {title}",
+      "team_scope": " for my organisation and for joining its team",
+      "team_join_note": "You will also join your organisation’s team, so you can onboard seekers and providers yourself. Please read the team member terms as well."
     },
     "invite_heading_invalid": "Invitation",
     "invite_invalid": "This invitation link is not valid. Use the link from your invitation email, or sign in if you already have an account.",

@@ -30,6 +30,8 @@ vi.mock('@/app/(public)/register/register-server', () => ({
   loadConsentContent,
 }));
 vi.mock('@/lib/invite-read.server', () => ({ readInvite }));
+const { ownerSelfAddMode } = vi.hoisted(() => ({ ownerSelfAddMode: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ ownerSelfAddMode }));
 
 import OwnerRegisterPage from '@/app/(public)/register/owner/page';
 
@@ -44,6 +46,7 @@ beforeEach(() => {
     ok: true,
     invite: { email: 'ravi@enable.org', expires_at: 'x', org: { id: 'p1', name: 'Parent Org' } },
   });
+  ownerSelfAddMode.mockReset().mockResolvedValue('owner');
   loadConsentContent.mockReset().mockResolvedValue({
     aggregator: { terms: {}, privacy: {} },
     org: { terms: { version: 1, title: 'T', content: 'T' }, privacy: {} },
@@ -90,6 +93,15 @@ describe('OwnerRegisterPage (server component)', () => {
     });
     expect(redirect).not.toHaveBeenCalled();
     expect(notFound).not.toHaveBeenCalled();
+  });
+
+  it('asks for the team member terms only when owners join their team at registration', async () => {
+    const owner = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(owner.props.teamConsentContent).toBeNull();
+
+    ownerSelfAddMode.mockResolvedValue('auto');
+    const auto = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(auto.props.teamConsentContent).toEqual({ terms: {}, privacy: {} });
   });
 
   it('passes the read org invite to the form', async () => {

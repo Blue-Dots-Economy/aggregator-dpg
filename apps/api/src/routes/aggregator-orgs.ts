@@ -19,7 +19,9 @@ import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { orgLocationsFrom } from '../services/org-location.js';
-import { validateOrgRegistration } from '../services/org-schema-validator.js';
+import { chosenNetworkDomains, validateOrgRegistration } from '../services/org-schema-validator.js';
+import { createOwnerTeamAccount } from '../services/registration/owner-self-add.js';
+import { config } from '../config.js';
 import {
   InviteReadQuerySchema,
   InviteReadResponseSchema,
@@ -51,6 +53,13 @@ import { treeRules } from '../services/known-as.js';
  * checked by {@link validateOrgRegistration}, so a schema field needs no code.
  * The parent is the inviting org, never the body.
  */
+/** A consent block as the registration form sends it; the server stamps the dates. */
+const RegistrationConsentBodySchema = z.object({
+  value: z.literal(true),
+  given_at: z.string(),
+  valid_till: z.string(),
+});
+
 const OrgInviteAcceptBodySchema = z
   .object({
     invite: z.string().min(1).max(4096),
@@ -61,11 +70,12 @@ const OrgInviteAcceptBodySchema = z
       email: z.email(),
       phone: z.string().min(1),
     }),
-    consent: z.object({
-      value: z.literal(true),
-      given_at: z.string(),
-      valid_till: z.string(),
-    }),
+    consent: RegistrationConsentBodySchema,
+    /**
+     * The owner's consent to the coordinator Terms and Privacy, so they also
+     * join the org's team. Read only when `OWNER_SELF_ADD_MODE` is `auto`.
+     */
+    team_consent: RegistrationConsentBodySchema.optional(),
     /**
      * The org's address, as picked from the autocomplete.
      *
@@ -101,6 +111,7 @@ const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'state',
   'owner',
   'consent',
+  'team_consent',
 ]);
 
 /**
@@ -153,7 +164,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'Register an organisation from an invite',
         description:
-          'Creates the invited org under the inviting org as `pending`, with its Keycloak group and an owner user that can sign in but holds no access yet. The owner email must be the invited address. The org becomes active when the owner signs in with an email code and calls `POST /v1/user/activate`; no approval. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the inviting org can no longer take it. Reached with the web BFF service-account token.',
+          'Creates the invited org under the inviting org as `pending`, with its Keycloak group and an owner user that can sign in but holds no access yet. The owner email must be the invited address. The org becomes active when the owner signs in with an email code and calls `POST /v1/user/activate`; no approval. When `OWNER_SELF_ADD_MODE` is `auto` and `team_consent` is sent, a coordinator account for the owner is also created, pending, serving the network domains the org chose (else every domain), with that consent; activation approves it. A failure there does not fail the registration. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the inviting org can no longer take it. Reached with the web BFF service-account token.',
         body: OrgInviteAcceptBodySchema,
         response: {
           201: OrgInviteAcceptedResponseSchema,
@@ -487,7 +498,7 @@ async function provisionOrgLogin(
     phoneE164: string;
     log: RequestLog;
   },
-): Promise<{ groupId: string }> {
+): Promise<{ groupId: string; ownerSubject: string }> {
   const { org, owner, log } = input;
   const group = await idp.createGroup(`org-${input.slug}`, {
     org_id: org.id,
@@ -555,7 +566,67 @@ async function provisionOrgLogin(
       fields: { sub_operation: 'orgStore.update.stamp', rolled_back: true },
     });
   }
-  return { groupId: group.value.id };
+  return { groupId: group.value.id, ownerSubject: ownerUser.value.id };
+}
+
+type TeamConsent = NonNullable<OrgForm['team_consent']>;
+
+/**
+ * Stamps the team consent when this instance adds owners to their team at registration.
+ *
+ * @returns The stamped consent, or `null` when the mode is not `auto` or none was sent.
+ * @throws {HttpError} SCHEMA_VALIDATION when `team_consent.valid_till` is not in the future.
+ */
+function teamConsentOf(body: OrgForm): TeamConsent | null {
+  if (config.OWNER_SELF_ADD_MODE !== 'auto' || !body.team_consent) return null;
+  const stamped = stampConsent(body.team_consent);
+  if (!stamped) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'team_consent.valid_till must be in the future.',
+      fields: { 'team_consent.valid_till': 'invalid' },
+    });
+  }
+  return stamped;
+}
+
+/**
+ * Creates the owner's pending coordinator account in the new org.
+ *
+ * The profile types are the network domains the org chose, else every domain
+ * of the network. A failure is logged and does not fail the registration: the
+ * owner can still add themselves from the console.
+ *
+ * @param input - The new org, the owner's login, the org's schema fields and the stamped team consent.
+ */
+async function addOwnerToTeam(input: {
+  org: Organisation;
+  ownerSubject: string;
+  schemaValues: Record<string, unknown>;
+  consent: TeamConsent;
+  log: RequestLog;
+}): Promise<void> {
+  try {
+    const domainIds = (await getNetworkConfig()).domainIds;
+    const chosen = (await chosenNetworkDomains(input.schemaValues)).filter((d) =>
+      domainIds.includes(d),
+    );
+    await createOwnerTeamAccount(
+      {
+        org: input.org,
+        subject: input.ownerSubject,
+        serves: chosen.length > 0 ? chosen : domainIds,
+        consent: input.consent,
+      },
+      input.log,
+    );
+  } catch (e) {
+    input.log.error({
+      status: 'failure',
+      sub_operation: 'ownerTeamAccount.create',
+      org_id: input.org.id,
+      error_type: e instanceof Error ? e.name : typeof e,
+    });
+  }
 }
 
 /**
@@ -612,6 +683,7 @@ async function acceptOrgInvite(req: FastifyRequest, reply: FastifyReply): Promis
     });
   }
   await assertOwnerFree(ownerEmail, phoneE164, body.owner.email);
+  const teamConsent = teamConsentOf(body);
 
   const orgStore = getOrganisationStore();
   await claimInvite(invite.jti);
@@ -624,7 +696,7 @@ async function acceptOrgInvite(req: FastifyRequest, reply: FastifyReply): Promis
       parentId: invite.org.isRoot ? undefined : invite.org.id,
       log,
     });
-    const { groupId } = await provisionOrgLogin(orgStore, getIdpAdmin(), {
+    const { groupId, ownerSubject } = await provisionOrgLogin(orgStore, getIdpAdmin(), {
       org,
       slug,
       owner: body.owner,
@@ -632,6 +704,9 @@ async function acceptOrgInvite(req: FastifyRequest, reply: FastifyReply): Promis
       log,
     });
     committed = true;
+    if (teamConsent) {
+      await addOwnerToTeam({ org, ownerSubject, schemaValues, consent: teamConsent, log });
+    }
     log.info(
       {
         status: 'success',

@@ -2,8 +2,8 @@
  * Console home page: the users of an owner of one organisation, those who
  * joined and those still invited, in one list. Everyone else is sent to the
  * organisations page. An owner without a coordinator account of their own gets
- * "Add myself to My Team" beside the invite button; the owner's own account is
- * tagged "You" in the list.
+ * "Add myself to My Team" beside the invite button, unless the deployment turns
+ * self-add off; the owner's own account is tagged "You" in the list.
  */
 
 import Link from 'next/link';
@@ -15,6 +15,7 @@ import { consoleRead } from '@/lib/console-api.server';
 import { canInvite, CONSOLE_HOME_HREF, coordinatorsHref, selfAddOrgs } from '@/lib/capabilities';
 import { AddMyselfButton } from '@/components/console/SelfAddDialog';
 import { loadConsentContent } from '@/app/(public)/register/register-server';
+import { ownerSelfAddMode } from '@/lib/features.server';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
@@ -52,7 +53,8 @@ export default async function ConsoleHomePage() {
   };
   return renderOrgHome(homeOrg, {
     showInvite: canInvite(me),
-    canAddSelf: selfAddOrgs(me).some((o) => o.id === homeOrg.id),
+    canAddSelf:
+      (await ownerSelfAddMode()) !== 'off' && selfAddOrgs(me).some((o) => o.id === homeOrg.id),
     ownAccountId: me.own_coordinator_account_id ?? null,
   });
 }

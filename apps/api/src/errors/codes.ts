@@ -231,6 +231,13 @@ export const ERR = {
     detail: 'You already have a team account.',
     hint: "POST /v1/user/self/add: the owner's contact or login already has a coordinator account (active, in another org, or on another login). One coordinator account per contact.",
   },
+  SELF_ADD_DISABLED: {
+    code: 'SELF_ADD_DISABLED',
+    status: 403,
+    title: 'Not available',
+    detail: 'Adding yourself to your team is not enabled on this instance.',
+    hint: 'POST /v1/user/self/add: OWNER_SELF_ADD_MODE is `off` on this instance.',
+  },
   SELF_ADD_UNAVAILABLE: {
     code: 'SELF_ADD_UNAVAILABLE',
     status: 503,

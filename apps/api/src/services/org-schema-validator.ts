@@ -73,6 +73,8 @@ interface CompiledOrgSchema {
   updatable: Set<string>;
   /** Properties that also need the GSTIN check. */
   gstin: Set<string>;
+  /** Properties whose values are network domain ids (`x-network-domains`). */
+  domainFields: Set<string>;
   /** Validator for the schema's own fields at registration. */
   validateFields: ValidateFunction;
   /** Validator for the updatable properties only, none required. */
@@ -126,9 +128,11 @@ async function compile(): Promise<CompiledOrgSchema> {
 
   const updatable = new Set<string>();
   const gstin = new Set<string>();
+  const domainFields = new Set<string>();
   for (const [name, prop] of Object.entries(properties)) {
     if (prop['x-updatable'] === true) updatable.add(name);
     if (prop['x-check'] === 'gstin') gstin.add(name);
+    if (prop['x-network-domains'] === true) domainFields.add(name);
   }
 
   const fields = new Set(Object.keys(properties).filter((k) => !FIXED_REGISTRATION_KEYS.has(k)));
@@ -147,6 +151,7 @@ async function compile(): Promise<CompiledOrgSchema> {
     fields,
     updatable,
     gstin,
+    domainFields,
     validateFields: ajv.compile(
       subSchema(
         fields,
@@ -244,6 +249,24 @@ export async function validateOrgRegistration(body: JsonRecord): Promise<OrgFiel
     : describe(c.validateFields, c.schema);
   checkGstin(c, values, errors);
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, values };
+}
+
+/**
+ * Lists the network domain ids an organisation chose in its `x-network-domains` fields.
+ *
+ * @param values - Schema-field values {@link validateOrgRegistration} accepted.
+ * @returns The chosen domain ids, without duplicates; empty when none were chosen.
+ * @throws {Error} If no org-registration schema can be found.
+ */
+export async function chosenNetworkDomains(values: JsonRecord): Promise<string[]> {
+  const c = await compiled();
+  const chosen = new Set<string>();
+  for (const name of c.domainFields) {
+    const value = values[name];
+    const list = Array.isArray(value) ? value : [value];
+    for (const v of list) if (typeof v === 'string' && v.length > 0) chosen.add(v);
+  }
+  return [...chosen];
 }
 
 /**

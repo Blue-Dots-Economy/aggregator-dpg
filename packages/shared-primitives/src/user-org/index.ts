@@ -349,6 +349,16 @@ export const SelfAddRequestSchema = z
   .strict();
 export type SelfAddRequest = z.infer<typeof SelfAddRequestSchema>;
 
+/**
+ * How an organisation owner joins their own team, set per instance.
+ *
+ * `auto`: the owner's coordinator account is created at organisation
+ * registration and approved when the organisation is activated. `owner`: the
+ * owner adds themselves from the console. `off`: owners cannot add themselves.
+ */
+export const OwnerSelfAddModeSchema = z.enum(['auto', 'owner', 'off']);
+export type OwnerSelfAddMode = z.infer<typeof OwnerSelfAddModeSchema>;
+
 // ─── Organisations ──────────────────────────────────────────────────────────
 
 /** An organisation as the console shows it. */
