@@ -14,7 +14,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { getUserStore } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
@@ -124,7 +124,7 @@ export function registerPublicLookupRoute(base: FastifyInstance): void {
       // Normalise to E.164, the form onboarding writes. Invalid input is a 400.
       let phoneNumber: string | undefined;
       if (q.phone_number) {
-        const normalised = normalisePhone(q.phone_number);
+        const normalised = parseMobilePhone(q.phone_number);
         if (!normalised.ok) {
           throw httpError('INVALID_PHONE', { detail: normalised.error.message });
         }

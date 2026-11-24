@@ -19,7 +19,7 @@ import {
   getEmailBrand,
 } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
-import { normaliseContactPhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseContactPhone } from '../services/phone.js';
 import { errorResponses } from '../errors/openapi.js';
 import { supportEmail, supportCc, supportPortalLink, supportAttachmentLimits } from '../config.js';
 import { checkSupportRate } from '../services/support-rate.js';
@@ -39,7 +39,10 @@ const SupportRequestSchema = z
     phone: z
       .string()
       .max(20)
-      .refine((v) => normaliseContactPhone(v).ok, 'phone must be a 10-15 digit number')
+      .superRefine((v, ctx) => {
+        const phone = parseContactPhone(v);
+        if (!phone.ok) ctx.addIssue({ code: 'custom', message: phone.error.message });
+      })
       .optional(),
     type: z.enum(['complaint', 'support_request']),
     details: z.string().trim().min(1).max(5000),

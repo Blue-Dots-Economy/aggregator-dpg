@@ -14,7 +14,7 @@ import type { Organisation, OrgStoreError } from '../services/organisation-store
 import { getUserStore } from '../services/user-store/index.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR, OWNER_CREATED_BY } from '../services/idp-admin/index.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { slugFromName } from '../services/slug.js';
@@ -343,7 +343,7 @@ type OrgForm = z.infer<typeof OrgInviteAcceptBodySchema>;
 type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
- * Checks an org form against the deployment's org-registration schema and normalises the owner phone.
+ * Normalises an org form's owner phone, then checks the form against the deployment's org-registration schema.
  *
  * @returns The schema-checked field values and the E.164 phone.
  * @throws {HttpError} SCHEMA_VALIDATION or INVALID_PHONE.
@@ -351,20 +351,24 @@ type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 async function checkOrgSubmission(
   body: OrgForm,
 ): Promise<{ schemaValues: Record<string, unknown>; phoneE164: string }> {
-  const schemaCheck = await validateOrgRegistration(body);
+  // The phone is cleaned first, so the schema checks the E.164 form, not the typed one.
+  const phoneResult = parseMobilePhone(body.owner.phone);
+  if (!phoneResult.ok) {
+    throw httpError('INVALID_PHONE', {
+      detail: phoneResult.error.message,
+      fields: { input: body.owner.phone },
+    });
+  }
+  const schemaCheck = await validateOrgRegistration({
+    ...body,
+    owner: { ...body.owner, phone: phoneResult.value },
+  });
   if (!schemaCheck.ok) {
     throw httpError('SCHEMA_VALIDATION', {
       detail: Object.entries(schemaCheck.errors)
         .map(([field, message]) => `${field}: ${message}`)
         .join('; '),
       fields: { field_errors: schemaCheck.errors },
-    });
-  }
-  const phoneResult = normalisePhone(body.owner.phone);
-  if (!phoneResult.ok) {
-    throw httpError('INVALID_PHONE', {
-      detail: phoneResult.error.message,
-      fields: { input: body.owner.phone },
     });
   }
   return { schemaValues: schemaCheck.values, phoneE164: phoneResult.value };

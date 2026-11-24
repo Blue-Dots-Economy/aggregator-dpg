@@ -9,6 +9,8 @@
  * @module @aggregator-dpg/shared-primitives
  */
 
+export * from './parse.js';
+
 /** Successful normalisation carrying the canonical value. */
 export interface PhoneNormaliseOk {
   ok: true;

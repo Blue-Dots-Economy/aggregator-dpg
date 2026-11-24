@@ -276,7 +276,7 @@ export const ERR = {
     status: 400,
     title: 'Invalid phone number',
     detail: 'The phone number format is not recognised. Include country code, e.g. +91…',
-    hint: 'normalisePhone() failed E.164 parse. Check libphonenumber output.',
+    hint: 'parsePhone() refused it: wrong length or range for its country, a country not in PHONE_COUNTRIES, or not a mobile.',
   },
 
   // ── IDP (Keycloak) ──────────────────────────────────────────────────────

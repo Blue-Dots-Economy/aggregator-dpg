@@ -10,3 +10,6 @@ policy/rbac/edge/routes.json
 # Helm chart templates use Go-template syntax (`{{ ... }}`) inside YAML,
 # which prettier's YAML parser cannot parse. Skip the templates dir.
 helm/**/templates/**
+
+# Byte copy of bluedots-schemas schemas/phone-cases.json; CI diffs it against that file.
+packages/shared-primitives/src/__tests__/fixtures/phone-cases.json

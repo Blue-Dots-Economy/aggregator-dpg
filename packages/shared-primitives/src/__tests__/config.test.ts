@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { signalStackConfigFields } from '../config/index.js';
+import { phoneConfigFields, signalStackConfigFields } from '../config/index.js';
 
 const schema = z.object(signalStackConfigFields);
 
@@ -39,5 +39,21 @@ describe('signalStackConfigFields', () => {
 
   it('rejects a non-string realm', () => {
     expect(() => schema.parse({ SIGNALSTACK_KEYCLOAK_REALM: 42 })).toThrow();
+  });
+});
+
+describe('phoneConfigFields', () => {
+  const phone = z.object(phoneConfigFields);
+
+  it('defaults to India when PHONE_COUNTRIES is unset', () => {
+    expect(phone.parse({}).PHONE_COUNTRIES).toEqual(['IN']);
+  });
+
+  it('parses the list in order', () => {
+    expect(phone.parse({ PHONE_COUNTRIES: 'GB:+44,IN:+91' }).PHONE_COUNTRIES).toEqual(['GB', 'IN']);
+  });
+
+  it('fails the parse on a bad entry', () => {
+    expect(() => phone.parse({ PHONE_COUNTRIES: 'IN=+91,GB:+44' })).toThrow(/IN=\+91/);
   });
 });

@@ -166,7 +166,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       payload: validBody({
         name: 'Different Name',
         email: 'typed@example.com',
-        phone: '+911112223334',
+        phone: '+918012345678',
         type: 'support_request',
       }),
     });
@@ -175,7 +175,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(sent.subject).toContain('Support Request from Different Name');
     expect(sent.replyTo).toBe('typed@example.com');
     expect(sent.text).toContain('typed@example.com');
-    expect(sent.text).toContain('+911112223334');
+    expect(sent.text).toContain('+918012345678');
   });
 
   it('returns 400 when consent is not true and does not send anything', async () => {

@@ -41,7 +41,7 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -143,7 +143,7 @@ type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
 type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
- * Checks a coordinator form, normalises its phone, stamps its consent and applies the submit rate limit.
+ * Normalises a coordinator form's phone, then checks the form, stamps its consent and applies the submit rate limit.
  *
  * @param body - The parsed form, validated against the registration JSON Schema.
  * @throws {HttpError} SCHEMA_VALIDATION, INVALID_PHONE or RATE_LIMITED.
@@ -163,14 +163,8 @@ async function checkCoordinatorSubmission(
       fields: { type: 'invalid' },
     });
   }
-  const validate = await getRegistrationValidator();
-  if (!validate(body)) {
-    throw httpError('SCHEMA_VALIDATION', {
-      detail: 'Payload failed JSON Schema validation.',
-      fields: { issues: validate.errors ?? [] },
-    });
-  }
-  const phoneResult = normalisePhone(body.contact.phone);
+  // The phone is cleaned first, so the schema checks the E.164 form, not the typed one.
+  const phoneResult = parseMobilePhone(body.contact.phone);
   if (!phoneResult.ok) {
     throw httpError('INVALID_PHONE', {
       detail: phoneResult.error.message,
@@ -179,6 +173,13 @@ async function checkCoordinatorSubmission(
   }
   const phoneE164 = phoneResult.value;
   const contact: BecknContact = { ...body.contact, phone: phoneE164 };
+  const validate = await getRegistrationValidator();
+  if (!validate({ ...body, contact })) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'Payload failed JSON Schema validation.',
+      fields: { issues: validate.errors ?? [] },
+    });
+  }
 
   const consent = stampConsent(body.consent);
   if (!consent) {
