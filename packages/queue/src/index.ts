@@ -66,6 +66,20 @@ export interface BulkRowProcessJob {
   payload: Record<string, unknown>;
 }
 
+/**
+ * The coordinator's `users.id` carried by a bulk job: `userId`, else
+ * `aggregatorId`.
+ *
+ * A job queued by a release before `userId` existed carries only
+ * `aggregatorId`, so read the id through this, never from either field.
+ *
+ * @param job - A bulk file or row job.
+ * @returns The coordinator's id.
+ */
+export function jobUserId(job: Pick<BulkFileProcessJob, 'userId' | 'aggregatorId'>): string {
+  return job.userId ?? job.aggregatorId;
+}
+
 export interface BulkFinaliseJob {
   uploadId: string;
 }

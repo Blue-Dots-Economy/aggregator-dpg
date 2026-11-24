@@ -26,6 +26,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  jobUserId,
   runBulkRowCommit,
   type BulkFinaliseJob,
   type BulkRowProcessJob,
@@ -512,10 +513,11 @@ export async function pushToSignalStack(
   if (!ss) return { success: true };
 
   // The worker has no JWT, so read the aggregator's Signals org id from the DB.
+  const userId = jobUserId(job);
   const orgIdRow = await getDb()
     .select({ signalstackOrgId: schema.users.signalstackOrgId })
     .from(schema.users)
-    .where(eq(schema.users.id, job.aggregatorId))
+    .where(eq(schema.users.id, userId))
     .limit(1);
   const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
   if (!signalstackOrgId) {
@@ -523,7 +525,7 @@ export async function pushToSignalStack(
       status: 'failure',
       sub: 'signalstack.push',
       code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
-      aggregator_id: job.aggregatorId,
+      aggregator_id: userId,
     });
     return {
       success: false,

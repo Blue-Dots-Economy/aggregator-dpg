@@ -31,6 +31,7 @@ import {
   CAMPAIGN_PROCESS_JOB_OPTS,
   bulkRedisKeys,
   createRedisConnection,
+  jobUserId,
 } from '../index.js';
 
 describe('QueueName', () => {
@@ -154,5 +155,15 @@ describe('createRedisConnection', () => {
   it('includes enableOfflineQueue when explicitly disabled', () => {
     createRedisConnection({ enableOfflineQueue: false });
     expect(redisCtorCalls[0]?.options).toMatchObject({ enableOfflineQueue: false });
+  });
+});
+
+describe('jobUserId', () => {
+  it('reads userId from a job queued by this release', () => {
+    expect(jobUserId({ userId: 'u-1', aggregatorId: 'u-1' })).toBe('u-1');
+  });
+
+  it('falls back to aggregatorId on a job queued before userId existed', () => {
+    expect(jobUserId({ aggregatorId: 'u-1' })).toBe('u-1');
   });
 });

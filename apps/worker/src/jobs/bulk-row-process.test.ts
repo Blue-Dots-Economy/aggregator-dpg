@@ -224,6 +224,21 @@ describe('pushToSignalStack — owned_elsewhere handling', () => {
     expect(result.success).toBe(true);
   });
 
+  it('pushes a row job that carries userId as well as aggregatorId', async () => {
+    // `job` above is the shape queued before userId existed; this is the current shape.
+    _setSignalStackWriter(new SignalStackWriterFake());
+
+    const result = await pushToSignalStack(
+      { ...job, userId: 'agg-1' },
+      'pid-4',
+      '+919876500002',
+      null,
+      logger,
+    );
+
+    expect(result.success).toBe(true);
+  });
+
   it('treats a disabled signalstack as success (push is opt-out)', async () => {
     _setSignalStackWriter(null);
 

@@ -107,6 +107,35 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe('processBulkFile — job shapes', () => {
+  it('processes a job queued before userId existed and writes both names on its row jobs', async () => {
+    // JOB carries only aggregatorId, the shape older releases queued.
+    const res = await processBulkFile(JOB);
+    expect(res).toEqual({ status: 'enqueued', totalRows: 2 });
+    expect(enqueueRowProcessBulk).toHaveBeenCalledWith([
+      expect.objectContaining({
+        rowIndex: expect.any(Number),
+        userId: 'agg-1',
+        aggregatorId: 'agg-1',
+      }),
+      expect.objectContaining({
+        rowIndex: expect.any(Number),
+        userId: 'agg-1',
+        aggregatorId: 'agg-1',
+      }),
+    ]);
+  });
+
+  it('carries the userId of a current job to its row jobs', async () => {
+    const res = await processBulkFile({ ...JOB, userId: 'u-2', aggregatorId: 'u-2' });
+    expect(res.status).toBe('enqueued');
+    expect(enqueueRowProcessBulk).toHaveBeenCalledWith([
+      expect.objectContaining({ userId: 'u-2', aggregatorId: 'u-2' }),
+      expect.objectContaining({ userId: 'u-2', aggregatorId: 'u-2' }),
+    ]);
+  });
+});
+
 describe('processBulkFile — success path', () => {
   it('enqueues rows then publishes reader_done (ordering invariant)', async () => {
     const res = await processBulkFile(JOB);
