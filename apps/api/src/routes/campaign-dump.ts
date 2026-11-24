@@ -64,7 +64,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each file in CAMPAIGN_DUMP_FILES (default: user, items, item_actions, aggregators). URLs expire after CAMPAIGN_DUMP_URL_TTL_SECONDS. Requires the campaign-manager system token (client_credentials). Files differ in last_modified when the export was caught mid-run; re-fetch then. Files absent from S3 are listed in missing; 404 DUMP_NOT_AVAILABLE when none is present.',
+          'Returns a short-lived pre-signed URL for each file in CAMPAIGN_DUMP_FILES (default: user, items, item_actions, aggregators, registration_links). URLs expire after CAMPAIGN_DUMP_URL_TTL_SECONDS. Requires the campaign-manager system token (client_credentials). Files differ in last_modified when the export was caught mid-run; re-fetch then. Files absent from S3 are listed in missing; 404 DUMP_NOT_AVAILABLE when none is present.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,

@@ -48,6 +48,7 @@ const KEYS = {
   items: 'blue_dot/blue_dot_up/items.ndjson.gz',
   item_actions: 'blue_dot/blue_dot_up/item_actions.ndjson.gz',
   aggregators: 'blue_dot/blue_dot_up/aggregators.ndjson.gz',
+  registration_links: 'blue_dot/blue_dot_up/registration_links.ndjson.gz',
 };
 
 /** Makes every HEAD succeed with a distinct size and timestamp. */
@@ -58,12 +59,14 @@ function allObjectsPresent(): void {
       [KEYS.items]: 23456,
       [KEYS.item_actions]: 34567,
       [KEYS.aggregators]: 45678,
+      [KEYS.registration_links]: 56789,
     };
     const times: Record<string, string> = {
       [KEYS.user]: '2026-08-26T00:30:58.000Z',
       [KEYS.items]: '2026-08-26T00:31:04.000Z',
       [KEYS.item_actions]: '2026-08-26T00:31:12.000Z',
       [KEYS.aggregators]: '2026-08-26T00:31:16.000Z',
+      [KEYS.registration_links]: '2026-08-26T00:31:18.000Z',
     };
     if (!(key in sizes)) return null;
     return { etag: 'e', contentLength: sizes[key]!, lastModified: new Date(times[key]!) };
@@ -138,7 +141,7 @@ describe('GET /v1/campaign/dump', () => {
     });
   }
 
-  it('returns all four default files with pre-signed URLs for the system token, and logs the grant', async () => {
+  it('returns all five default files with pre-signed URLs for the system token, and logs the grant', async () => {
     const infoSpy = vi.spyOn(logger, 'info');
     const res = await get('system');
     expect(res.statusCode).toBe(200);
@@ -146,12 +149,13 @@ describe('GET /v1/campaign/dump', () => {
     expect(body.network).toBe('blue_dot');
     expect(body.instance).toBe('blue_dot_up');
     expect(body.missing).toEqual([]);
-    expect(body.files).toHaveLength(4);
+    expect(body.files).toHaveLength(5);
     expect(body.files.map((f: { table: string }) => f.table)).toEqual([
       'user',
       'items',
       'item_actions',
       'aggregators',
+      'registration_links',
     ]);
     expect(body.files[0]).toMatchObject({
       table: 'user',
@@ -176,6 +180,7 @@ describe('GET /v1/campaign/dump', () => {
           { key: KEYS.items, last_modified: '2026-08-26T00:31:04.000Z' },
           { key: KEYS.item_actions, last_modified: '2026-08-26T00:31:12.000Z' },
           { key: KEYS.aggregators, last_modified: '2026-08-26T00:31:16.000Z' },
+          { key: KEYS.registration_links, last_modified: '2026-08-26T00:31:18.000Z' },
         ],
       }),
       expect.any(String),
@@ -226,9 +231,9 @@ describe('GET /v1/campaign/dump', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.missing).toEqual([missingKey]);
-      expect(body.files).toHaveLength(3);
+      expect(body.files).toHaveLength(4);
       expect(body.files.map((f: { table: string }) => f.table)).not.toContain(table);
-      expect(signDownloadUrlMock).toHaveBeenCalledTimes(3);
+      expect(signDownloadUrlMock).toHaveBeenCalledTimes(4);
       expect(signDownloadUrlMock.mock.calls.map((c) => c[0])).not.toContain(missingKey);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -256,6 +261,7 @@ describe('GET /v1/campaign/dump', () => {
       KEYS.items,
       KEYS.item_actions,
       KEYS.aggregators,
+      KEYS.registration_links,
     ]);
     expect(body.files).toBeUndefined();
     expect(signDownloadUrlMock).not.toHaveBeenCalled();
@@ -357,9 +363,10 @@ describe('GET /v1/campaign/dump', () => {
         'items',
         'item_actions',
         'aggregators',
+        'registration_links',
         'connections',
       ]);
-      expect(res.json().files[4]).toMatchObject({ key: extraKey, size_bytes: 999 });
+      expect(res.json().files[5]).toMatchObject({ key: extraKey, size_bytes: 999 });
     } finally {
       config.CAMPAIGN_DUMP_FILES = previousFiles;
     }
@@ -372,7 +379,7 @@ describe('GET /v1/campaign/dump', () => {
       const res = await get('system');
       expect(res.statusCode).toBe(200);
       expect(res.json().missing).toEqual(['blue_dot/blue_dot_up/connections.ndjson.gz']);
-      expect(res.json().files).toHaveLength(4);
+      expect(res.json().files).toHaveLength(5);
     } finally {
       config.CAMPAIGN_DUMP_FILES = previousFiles;
     }
@@ -393,7 +400,7 @@ describe('GET /v1/campaign/dump', () => {
     try {
       const res = await get('system');
       expect(res.statusCode).toBe(200);
-      expect(signDownloadUrlMock).toHaveBeenCalledTimes(4);
+      expect(signDownloadUrlMock).toHaveBeenCalledTimes(5);
       for (const call of signDownloadUrlMock.mock.calls) {
         expect(call[1]).toMatchObject({ ttlSeconds: 137 });
       }
@@ -413,6 +420,7 @@ describe('GET /v1/campaign/dump', () => {
       [KEYS.items]: '2026-08-26T00:40:00.000Z',
       [KEYS.item_actions]: '2026-08-26T00:45:00.000Z',
       [KEYS.aggregators]: '2026-08-26T00:55:00.000Z',
+      [KEYS.registration_links]: '2026-08-26T00:58:00.000Z',
     };
     signDownloadUrlMock.mockImplementation(async (key: string) => ({
       url: `https://s3.public.example/${key}?X-Amz-Signature=abc`,
@@ -437,7 +445,7 @@ describe('GET /v1/campaign/dump', () => {
     const res = await get('system');
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.files).toHaveLength(4);
+    expect(body.files).toHaveLength(5);
     const empty = body.files.find((f: { table: string }) => f.table === 'item_actions');
     expect(empty.size_bytes).toBe(0);
     expect(empty.url).toContain('X-Amz-Signature');
@@ -535,7 +543,7 @@ describe('GET /v1/campaign/dump', () => {
       auditFake.failWith = new Error('audit down');
       const res = await get('system');
       expect(res.statusCode).toBe(200);
-      expect(res.json().files).toHaveLength(4);
+      expect(res.json().files).toHaveLength(5);
     });
 
     it('does not write an audit row for a denied (non-system) caller', async () => {

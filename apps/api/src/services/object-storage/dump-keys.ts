@@ -8,7 +8,7 @@
 import { z } from 'zod';
 
 /** Files served when `CAMPAIGN_DUMP_FILES` is unset. */
-export const DEFAULT_DUMP_FILES = 'user,items,item_actions,aggregators';
+export const DEFAULT_DUMP_FILES = 'user,items,item_actions,aggregators,registration_links';
 
 /** Parses `CAMPAIGN_DUMP_FILES`: comma-separated, unique, word characters only. */
 export const dumpFilesSchema = z
