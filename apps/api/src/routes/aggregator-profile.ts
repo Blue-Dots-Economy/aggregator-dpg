@@ -130,7 +130,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
     },
     async (req, reply) => {
       const auth = await requireAuth(req, { allowActing: true });
-      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
+      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.subject });
       const start = Date.now();
 
       const userStore = getUserStore();
@@ -205,7 +205,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
+      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.subject });
       const start = Date.now();
 
       // Already validated and parsed by the route schema.
@@ -240,7 +240,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
         });
 
         const idp = getIdpAdmin();
-        const kcWrite = await idp.setAttributes(auth.userId, {
+        const kcWrite = await idp.setAttributes(auth.subject, {
           [KC_ATTR.PHONE_NUMBER]: phoneR.value,
         });
         if (!kcWrite.ok) {
@@ -259,14 +259,14 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
 
       // ─── 2. Coordinator-table updates ──────────────────────────────────────
       const patch: Parameters<typeof userStore.update>[1] = {
-        updatedBy: auth.userId,
+        updatedBy: auth.subject,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
 
       const result = await userStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
-        await restoreKcPhone(auth.userId, previousPhone, log);
+        await restoreKcPhone(auth.subject, previousPhone, log);
       }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
@@ -384,7 +384,7 @@ async function restoreKcPhone(
 
 async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promise<IdpUser | null> {
   try {
-    const result = await getIdpAdmin().findById(auth.userId);
+    const result = await getIdpAdmin().findById(auth.subject);
     if (result.ok) return result.value ?? null;
     log.warn(
       { sub_operation: 'fetchKcUser', code: result.error.code, hint: result.error.message },

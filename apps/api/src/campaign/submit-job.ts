@@ -137,7 +137,7 @@ export async function submitCampaignJob<C extends Record<string, unknown>>(
         getCampaignAuditWriter().recordRequested({
           correlationId: created.value.job.id,
           channel: opts.channel,
-          actorUserId: auth.userId,
+          actorUserId: auth.subject,
           actorSignalstackOrgId: orgId,
           ...(auth.azp ? { actorAzp: auth.azp } : {}),
           piiFields: opts.piiFields(content),

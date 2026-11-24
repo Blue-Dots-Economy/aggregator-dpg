@@ -57,7 +57,7 @@ export interface RouteCaller extends TokenIdentity {
 export function callerFromAuth(ctx: AuthContext): RouteCaller {
   return {
     ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
-    subject: ctx.userId,
+    subject: ctx.subject,
     preferredUsername: ctx.preferredUsername,
     ...(ctx.acting ? { acting: true } : {}),
   };

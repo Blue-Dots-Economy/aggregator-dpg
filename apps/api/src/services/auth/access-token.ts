@@ -27,8 +27,8 @@ let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
 export interface AuthContext {
-  /** Keycloak `sub` claim — stable user id. */
-  userId: string;
+  /** Keycloak `sub` claim: the login's stable id (not `users.id`). */
+  subject: string;
   /** The `user_id` claim, else the `aggregator_id` claim: the user's `users.id`. */
   aggregatorId: string;
   /**
@@ -207,15 +207,15 @@ function actingInvalid(message: string): AuthResult {
 /**
  * Builds an {@link AuthContext} from a verified token's optional claims.
  *
- * @param userId - The token `sub`.
+ * @param subject - The token `sub`.
  * @param aggregatorId - The resolved `aggregator_id`.
  * @param payload - The verified JWT payload.
  * @returns The auth context; optional fields set only when present.
  */
-function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
+function hydrateContext(subject: string, aggregatorId: string, payload: JWTPayload): AuthContext {
   const claims: Record<string, unknown> = payload;
   const ctx: AuthContext = {
-    userId,
+    subject,
     aggregatorId,
     serves: readStringList(claims.aggregator_type),
     ...identityOf(payload),
@@ -304,7 +304,7 @@ async function actingContext(
   logActing(null);
   const row = acting.value;
   const ctx: AuthContext = {
-    userId: sub,
+    subject: sub,
     aggregatorId: row.id,
     serves: row.serves,
     decisionMade: decisionOf(row.status),
@@ -392,7 +392,7 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
   // Record the coordinator's IdP login once per process per user; best-effort.
   await recordLoginIdentity(
     result.context.aggregatorId,
-    result.context.userId,
+    result.context.subject,
     'auth.recordIdentity',
   );
   return result;
@@ -409,7 +409,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   const log = logger.child({
     operation: 'auth.backfillSignalstackOrgId',
     aggregator_id: ctx.aggregatorId,
-    user_id: ctx.userId,
+    user_id: ctx.subject,
   });
 
   const signalstack = getSignalStackWriter();
@@ -472,8 +472,8 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   // column (read by the worker and public-link submit). The context is updated
   // in memory for the current request.
   const [attr, dbWrite] = await Promise.all([
-    idp.setAttributes(ctx.userId, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
-    store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.userId),
+    idp.setAttributes(ctx.subject, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
+    store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.subject),
   ]);
   if (!attr.ok) {
     log.warn(

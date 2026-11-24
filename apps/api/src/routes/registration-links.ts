@@ -237,7 +237,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const auth = await requireAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.create',
-        actor: auth.userId,
+        actor: auth.subject,
         aggregator_id: auth.aggregatorId,
       });
       const start = Date.now();
@@ -293,7 +293,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           registrationMode: modeKey,
           voiceBotKey,
           expiresAt: body.expires_at,
-          createdBy: auth.userId,
+          createdBy: auth.subject,
         });
         if (result.ok) {
           created = result.value;
@@ -383,7 +383,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const auth = await requireAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.voiceBots',
-        actor: auth.userId,
+        actor: auth.subject,
         aggregator_id: auth.aggregatorId,
       });
       const { domain } = req.query;
@@ -425,7 +425,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const auth = await requireAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.list',
-        actor: auth.userId,
+        actor: auth.subject,
         aggregator_id: auth.aggregatorId,
       });
       const start = Date.now();
@@ -495,7 +495,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.update',
-        actor: auth.userId,
+        actor: auth.subject,
         link_id: linkId,
       });
       const start = Date.now();
@@ -642,7 +642,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.activate',
-        actor: auth.userId,
+        actor: auth.subject,
         link_id: linkId,
       });
       const start = Date.now();
@@ -706,7 +706,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.deactivate',
-        actor: auth.userId,
+        actor: auth.subject,
         link_id: linkId,
       });
       const start = Date.now();

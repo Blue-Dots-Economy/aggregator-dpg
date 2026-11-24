@@ -122,7 +122,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.context).toMatchObject({
-      userId: SUB,
+      subject: SUB,
       aggregatorId: COORD,
       serves: ['seeker'],
       decisionMade: 'approved',

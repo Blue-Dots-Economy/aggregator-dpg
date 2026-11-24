@@ -234,7 +234,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const auth = await requireAuth(req);
 
       // Per-coordinator rate limit. Fails open on a Redis error.
-      const templateRate = await checkBulkTemplateRate(auth.userId);
+      const templateRate = await checkBulkTemplateRate(auth.subject);
       if (!templateRate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many template requests; please try again later.',
@@ -312,7 +312,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const auth = await requireAuth(req);
 
       // Per-coordinator rate limit.
-      const uploadRate = await checkBulkUploadRate(auth.userId);
+      const uploadRate = await checkBulkUploadRate(auth.subject);
       if (!uploadRate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many bulk uploads; please try again later.',
@@ -320,7 +320,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         });
       }
 
-      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
+      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.subject });
       const start = Date.now();
 
       // Check the type against the network config.
@@ -346,7 +346,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         storageKey: 'pending',
         schemaId,
         schemaVersion,
-        uploadedBy: auth.userId,
+        uploadedBy: auth.subject,
       });
       if (!created.ok) {
         log.error({
@@ -439,7 +439,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const body = req.body;
       const log = req.log.child({
         operation: 'bulkUploads.start',
-        actor: auth.userId,
+        actor: auth.subject,
         upload_id: uploadId,
       });
       const start = Date.now();
@@ -663,7 +663,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const { id: uploadId } = req.params;
       const log = req.log.child({
         operation: 'bulkUploads.errorsCsv',
-        actor: auth.userId,
+        actor: auth.subject,
         upload_id: uploadId,
       });
       const start = Date.now();
