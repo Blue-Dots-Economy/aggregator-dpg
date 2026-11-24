@@ -525,6 +525,7 @@ services:
     # Not published: every request reaches the API through aggregator-envoy,
     # which owns host port 4000 (docs/rbac/rbac-edge-enforcement.md §7.1).
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       PORT: "4000"
       HOST: "0.0.0.0"
@@ -712,6 +713,7 @@ services:
     container_name: sd-aggregator-web
     restart: unless-stopped
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
@@ -761,6 +763,7 @@ services:
     container_name: sd-aggregator-worker
     restart: unless-stopped
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/${AGGREGATOR_DB:-aggregator}

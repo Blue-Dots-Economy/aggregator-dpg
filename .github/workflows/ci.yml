@@ -57,6 +57,13 @@ jobs:
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
+      - name: Phone test cases match bluedots-schemas
+        shell: bash # -o pipefail, so a failed download fails the step
+        run: >-
+          curl -fsS --proto '=https' --tlsv1.2 --retry 3
+          https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/main/schemas/phone-cases.json
+          | diff - packages/shared-primitives/src/__tests__/fixtures/phone-cases.json
+
   typecheck:
     permissions:
       contents: read
