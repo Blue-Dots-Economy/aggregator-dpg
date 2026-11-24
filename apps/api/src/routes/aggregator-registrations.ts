@@ -237,7 +237,7 @@ async function acceptCoordinatorInvite(
   await claimInvite(invite.jti);
   let committed = false;
   try {
-    const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
+    const { userId, orgSlug } = await createCoordinatorRow(userStore, body, {
       contact,
       domains,
       consent,
@@ -247,7 +247,7 @@ async function acceptCoordinatorInvite(
       log,
     });
     const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
-      aggregatorId,
+      userId,
       types: domains,
       contact,
     });
@@ -256,14 +256,14 @@ async function acceptCoordinatorInvite(
       {
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: aggregatorId,
+        aggregator_id: userId,
         org_slug: orgSlug,
         keycloak_user_id: keycloakUserId,
       },
       'invited coordinator registered; awaiting email verification',
     );
     return reply.status(201).send({
-      aggregator_id: aggregatorId,
+      aggregator_id: userId,
       org_slug: orgSlug,
       status: 'pending',
       message: 'Registration received. Sign in with the code we email you to finish.',
@@ -412,7 +412,7 @@ async function createCoordinatorRow(
     locations: BecknLocation[];
     log: RequestLog;
   },
-): Promise<{ aggregatorId: string; orgSlug: string }> {
+): Promise<{ userId: string; orgSlug: string }> {
   const recordConsent = await aggregatorConsentWriter({ consent: row.consent, log: row.log });
   if (!recordConsent) {
     throw httpError('CONSENT_WRITE_FAILED', {
@@ -440,7 +440,7 @@ async function createCoordinatorRow(
         : {}),
     });
   }
-  return { aggregatorId: created.value.id, orgSlug: created.value.orgSlug };
+  return { userId: created.value.id, orgSlug: created.value.orgSlug };
 }
 
 /**
@@ -453,7 +453,7 @@ async function createCoordinatorLogin(
   userStore: ReturnType<typeof getUserStore>,
   idp: ReturnType<typeof getIdpAdmin>,
   user: {
-    aggregatorId: string;
+    userId: string;
     /** Every profile type served (multivalued claim). */
     types: string[];
     contact: BecknContact;
@@ -469,15 +469,15 @@ async function createCoordinatorLogin(
     firstName,
     lastName,
     attributes: {
-      [KC_ATTR.AGGREGATOR_ID]: user.aggregatorId,
-      [KC_ATTR.USER_ID]: user.aggregatorId,
+      [KC_ATTR.AGGREGATOR_ID]: user.userId,
+      [KC_ATTR.USER_ID]: user.userId,
       [KC_ATTR.AGGREGATOR_TYPE]: user.types,
       [KC_ATTR.PHONE_NUMBER]: user.contact.phone,
       [KC_ATTR.DECISION_MADE]: 'invited',
     },
   });
   if (created.ok) return created.value.id;
-  await userStore.deleteById(user.aggregatorId);
+  await userStore.deleteById(user.userId);
   if (created.error.code === 'USER_EXISTS') {
     throw httpError('USER_EXISTS', {
       cause: created.error,

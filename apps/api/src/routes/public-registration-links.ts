@@ -453,7 +453,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       const ss = getSignalStackWriter();
       let signalstackOrgId: string | null = null;
       if (ss) {
-        const aggLookup = await getUserStore().findById(link.aggregatorId);
+        const aggLookup = await getUserStore().findById(link.userId);
         if (!aggLookup.ok) {
           throw httpError('DB_UNAVAILABLE', {
             fields: { sub_operation: 'userStore.findById' },
@@ -465,7 +465,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         signalstackOrgId = aggLookup.value.signalstackOrgId;
         if (!signalstackOrgId) {
           throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-            fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+            fields: { aggregator_id: link.userId, link_id: link.id },
           });
         }
       }
@@ -484,7 +484,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           .insert(linkSubmissions)
           .values({
             linkId: link.id,
-            userId: link.aggregatorId,
+            userId: link.userId,
             metadataSnapshot: link.context,
             submittedData: body,
             outcome,
@@ -684,7 +684,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           detail: 'Signalstack integration is not configured.',
         });
       }
-      const aggLookup = await getUserStore().findById(link.aggregatorId);
+      const aggLookup = await getUserStore().findById(link.userId);
       if (!aggLookup.ok) {
         throw httpError('DB_UNAVAILABLE', { fields: { sub_operation: 'userStore.findById' } });
       }
@@ -694,7 +694,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       const actingOrgId = aggLookup.value.signalstackOrgId;
       if (!actingOrgId) {
         throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-          fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+          fields: { aggregator_id: link.userId, link_id: link.id },
         });
       }
 
@@ -726,7 +726,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       // The stored body keeps identity only; consent and birth year were stripped.
       const submission = {
         linkId: link.id,
-        userId: link.aggregatorId,
+        userId: link.userId,
         metadataSnapshot: link.context,
         submittedData: body,
       };

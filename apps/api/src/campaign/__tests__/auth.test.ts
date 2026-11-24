@@ -183,7 +183,7 @@ describe('campaign auth', () => {
   describe('requireCampaignAuth — reverse direction', () => {
     it('accepts a coordinator token', async () => {
       const ctx = await requireCampaignAuth(req('coordinator'));
-      expect(ctx.aggregatorId).toBe('agg-1');
+      expect(ctx.userId).toBe('agg-1');
       expect(ctx.signalstackOrgId).toBe('org_5d3b7fa4');
     });
 

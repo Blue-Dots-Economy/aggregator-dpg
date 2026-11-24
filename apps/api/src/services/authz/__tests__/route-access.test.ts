@@ -115,9 +115,9 @@ describe('recordRouteCaller', () => {
     const r = await getIdentityStore().subjectOf(userId, 'keycloak');
     return r.ok ? r.value : 'store failed';
   };
-  const caller = (aggregatorId?: string) => ({
-    subject: `sub-${aggregatorId ?? 'none'}`,
-    ...(aggregatorId ? { aggregatorId } : {}),
+  const caller = (userId?: string) => ({
+    subject: `sub-${userId ?? 'none'}`,
+    ...(userId ? { userId } : {}),
   });
 
   it("records a coordinator's login on a declared route", async () => {

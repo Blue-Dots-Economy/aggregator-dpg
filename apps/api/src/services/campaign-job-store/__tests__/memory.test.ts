@@ -8,5 +8,5 @@ import { randomUUID } from 'node:crypto';
 import { InMemoryCampaignJobStore } from '../memory.js';
 import { runStoreConformance, runInMemoryNotFoundConformance } from './conformance.js';
 
-runStoreConformance(() => new InMemoryCampaignJobStore(), { aggregatorId: randomUUID() });
+runStoreConformance(() => new InMemoryCampaignJobStore(), { userId: randomUUID() });
 runInMemoryNotFoundConformance(() => new InMemoryCampaignJobStore());

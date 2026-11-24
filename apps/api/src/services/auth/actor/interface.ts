@@ -5,7 +5,7 @@
  * verified token. The database is the authority, read on every request, so
  * ownership changes apply without a re-login.
  *
- * Shape: `resolve({ aggregatorId?, subject })` → `{ userId, userType, active, orgs, roles? }`.
+ * Shape: `resolve({ userId?, subject })` → `{ userId, userType, active, orgs, roles? }`.
  * Base roles follow `orgs`; additional roles come from `user_role`.
  *
  * Never throws across the service boundary.
@@ -50,7 +50,7 @@ export interface Actor {
 /** Input of {@link ActorResolverBase.resolve}: verified token claims. */
 export interface ResolveActorInput {
   /** The `aggregator_id` claim, when the token carries one. */
-  aggregatorId?: string;
+  userId?: string;
   /** The token's `sub` (the IdP login). */
   subject: string;
   /**

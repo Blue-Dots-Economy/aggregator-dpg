@@ -252,7 +252,7 @@ describe('POST /v1/campaign/email', () => {
   it('returns 429 CAMPAIGN_ACTIVE_LIMIT when the org already has the max active email jobs', async () => {
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: ORG,
         channel: 'email',
         metadata: [],
@@ -270,7 +270,7 @@ describe('POST /v1/campaign/email', () => {
   it('does not count another channel’s active jobs against the email cap', async () => {
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: ORG,
         channel: 'export',
         metadata: [],
@@ -409,7 +409,7 @@ describe('GET /v1/campaign/email/{job_id}', () => {
 
   async function seedJob(channel: 'email' | 'export') {
     const created = await store.createJob({
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       signalstackOrgId: ORG,
       channel,
       metadata: [],

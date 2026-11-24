@@ -28,11 +28,11 @@ class CountingIdp extends IdpAdminFake {
 }
 
 /** Creates a Keycloak user for a coordinator, with its current `aggregator_type`. */
-async function kcUser(idp: IdpAdminFake, aggregatorId: string, types?: string[]): Promise<string> {
+async function kcUser(idp: IdpAdminFake, userId: string, types?: string[]): Promise<string> {
   const created = await idp.createUser({
-    email: `${aggregatorId}@x.org`,
+    email: `${userId}@x.org`,
     attributes: {
-      [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
+      [KC_ATTR.AGGREGATOR_ID]: userId,
       ...(types ? { [KC_ATTR.AGGREGATOR_TYPE]: types } : {}),
     },
   });

@@ -123,7 +123,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
     if (!r.ok) return;
     expect(r.context).toMatchObject({
       subject: SUB,
-      aggregatorId: COORD,
+      userId: COORD,
       serves: ['seeker'],
       decisionMade: 'approved',
       signalstackOrgId: 'org_from_row',
@@ -160,7 +160,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
   it('accepts an upper-case header for a linked account', async () => {
     seed();
     const r = await requireApproved(makeReq(OWNER_CLAIMS, COORD.toUpperCase()));
-    expect(r.ok && r.context.aggregatorId).toBe(COORD);
+    expect(r.ok && r.context.userId).toBe(COORD);
   });
 
   it('(b) 403 ACTING_ACCOUNT_INVALID for a malformed header value', async () => {

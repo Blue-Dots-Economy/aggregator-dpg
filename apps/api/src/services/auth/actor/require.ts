@@ -85,7 +85,7 @@ async function verifiedUser(req: FastifyRequest): Promise<AnyAuthContext> {
 async function resolveActor(auth: AnyAuthContext, actingAccountId: string | null): Promise<Actor> {
   const resolved = await getActorResolver().resolve({
     subject: auth.subject,
-    ...(auth.aggregatorId ? { aggregatorId: auth.aggregatorId } : {}),
+    ...(auth.userId ? { userId: auth.userId } : {}),
     ...(actingAccountId === null ? {} : { actingAccountId }),
   });
   if (!resolved.ok) {

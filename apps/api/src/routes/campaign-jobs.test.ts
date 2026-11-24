@@ -21,7 +21,7 @@ async function seedJob(
   channel: 'export' | 'email' | 'voice' = 'export',
 ) {
   const created = await store.createJob({
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     signalstackOrgId: org,
     channel,
     metadata: [{ key: 'purpose', value: 'audit' }],

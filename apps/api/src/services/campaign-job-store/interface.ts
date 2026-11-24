@@ -96,7 +96,7 @@ export interface CreateJobItemInput {
 }
 
 export interface CreateJobInput {
-  aggregatorId: string;
+  userId: string;
   signalstackOrgId: string;
   channel: CampaignChannel;
   metadata: CampaignMetadataPair[];

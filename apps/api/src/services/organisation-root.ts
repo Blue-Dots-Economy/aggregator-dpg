@@ -537,8 +537,8 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
     return null;
   }
   if (existing.value) {
-    const aggregatorId = existing.value.attributes?.[KC_ATTR.AGGREGATOR_ID] ?? [];
-    if (aggregatorId.some((v) => v !== '')) {
+    const userId = existing.value.attributes?.[KC_ATTR.AGGREGATOR_ID] ?? [];
+    if (userId.some((v) => v !== '')) {
       logger.warn(
         {
           operation: 'ensureRootOrganisation.idp',

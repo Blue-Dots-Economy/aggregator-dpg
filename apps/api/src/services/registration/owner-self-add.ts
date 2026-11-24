@@ -298,7 +298,7 @@ async function approve(
   requestId: string | undefined,
 ): Promise<SelfAddResult<Coordinator>> {
   const outcome = await approveCoordinator({
-    aggregatorId: id,
+    userId: id,
     decidedBy: actor.userId,
     log,
     ...(requestId ? { requestId } : {}),

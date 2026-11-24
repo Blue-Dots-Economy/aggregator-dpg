@@ -56,7 +56,7 @@ export interface RouteCaller extends TokenIdentity {
  */
 export function callerFromAuth(ctx: AuthContext): RouteCaller {
   return {
-    ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
+    ...(ctx.userId ? { userId: ctx.userId } : {}),
     subject: ctx.subject,
     preferredUsername: ctx.preferredUsername,
     ...(ctx.acting ? { acting: true } : {}),
@@ -71,7 +71,7 @@ export function callerFromAuth(ctx: AuthContext): RouteCaller {
  */
 export function callerFromAny(ctx: AnyAuthContext): RouteCaller {
   return {
-    ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
+    ...(ctx.userId ? { userId: ctx.userId } : {}),
     subject: ctx.subject,
     preferredUsername: ctx.preferredUsername,
   };
@@ -224,9 +224,9 @@ export async function recordRouteCaller(req: FastifyRequest, caller: RouteCaller
   if (!getRbacRuntime()) return;
   const decl = req.routeOptions.config.rbac;
   // An acting owner's login is already linked; it is not the coordinator's own login.
-  if (!decl || !caller.aggregatorId || caller.acting) return;
+  if (!decl || !caller.userId || caller.acting) return;
   // The actor resolver accepts a coordinator only through its recorded login.
   // Best effort; never overwrites a different link.
   if ('access' in decl && decl.access === 'service') return;
-  await recordLoginIdentity(caller.aggregatorId, caller.subject, 'rbac.recordIdentity');
+  await recordLoginIdentity(caller.userId, caller.subject, 'rbac.recordIdentity');
 }

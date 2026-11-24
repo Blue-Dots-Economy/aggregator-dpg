@@ -70,7 +70,7 @@ function makeRow(overrides: Partial<RegistrationLink> = {}): RegistrationLink {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   return {
     id: 'link-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     slug: 'my-link',
     domain: 'seeker',
     context: {},
@@ -90,7 +90,7 @@ function makeInput(
   overrides: Partial<CreateRegistrationLinkInput> = {},
 ): CreateRegistrationLinkInput {
   return {
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     slug: 'my-link',
     domain: 'seeker',
     context: {},
@@ -302,7 +302,7 @@ describe('PostgresRegistrationLinksStore.findByOrgAndSlug', () => {
 
 describe('PostgresRegistrationLinksStore.findById', () => {
   it('returns the mapped row scoped to the aggregator', async () => {
-    const db = makeFakeDb(() => [makeRow({ id: 'link-1', aggregatorId: 'agg-1' })]);
+    const db = makeFakeDb(() => [makeRow({ id: 'link-1', userId: 'agg-1' })]);
     _setDbClients(null, db as never);
     const store = new PostgresRegistrationLinksStore();
 

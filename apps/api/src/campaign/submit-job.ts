@@ -79,7 +79,7 @@ export async function submitCampaignJob<C extends Record<string, unknown>>(
 ): Promise<void> {
   const auth = await requireCampaignAuth(req);
   const orgId = requireOrgId(auth);
-  const requestedBy = await resolveRequestedBy(auth.aggregatorId, auth.email);
+  const requestedBy = await resolveRequestedBy(auth.userId, auth.email);
 
   const content = opts.parseContent(envelope.content);
 
@@ -112,7 +112,7 @@ export async function submitCampaignJob<C extends Record<string, unknown>>(
 
   const idempotencyKey = readIdempotencyKey(req);
   const created = await store.createJob({
-    aggregatorId: auth.aggregatorId,
+    userId: auth.userId,
     signalstackOrgId: orgId,
     channel: opts.channel,
     metadata: envelope.metadata,
@@ -167,16 +167,13 @@ export async function submitCampaignJob<C extends Record<string, unknown>>(
 /**
  * Checks the aggregator is active and resolves the `requested_by` email (token email, else `contact_email`).
  *
- * @param aggregatorId - The requesting aggregator's id (from the auth token).
+ * @param userId - The requesting aggregator's id (from the auth token).
  * @param tokenEmail - The token's own `email` claim, if present.
  * @returns The resolved requester email.
  * @throws `FORBIDDEN` if the aggregator is not active or no email resolves.
  */
-async function resolveRequestedBy(
-  aggregatorId: string,
-  tokenEmail: string | undefined,
-): Promise<string> {
-  const found = await getUserStore().findById(aggregatorId);
+async function resolveRequestedBy(userId: string, tokenEmail: string | undefined): Promise<string> {
+  const found = await getUserStore().findById(userId);
   if (!found.ok || found.value?.status !== 'active') {
     throw httpError('FORBIDDEN', {
       detail: 'requesting aggregator is not active',

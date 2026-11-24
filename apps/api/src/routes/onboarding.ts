@@ -96,7 +96,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
 
       const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         ...r,
@@ -138,7 +138,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
         .groupBy(onboarding.source);
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         by_source: rows,
@@ -161,7 +161,7 @@ async function metricsFilter(
   query: z.infer<typeof RangeQuerySchema>,
 ): Promise<{ range: { from?: Date; to?: Date }; where: SQL | undefined }> {
   const range = parseRange(query);
-  const conditions = [eq(onboarding.userId, auth.aggregatorId)];
+  const conditions = [eq(onboarding.userId, auth.userId)];
   if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
   if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
   const byType = await profileTypeCondition(auth, query.domain);
@@ -215,7 +215,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
     }
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
-  if (!result.context.aggregatorId) {
+  if (!result.context.userId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
   await recordRouteCaller(req, callerFromAuth(result.context));

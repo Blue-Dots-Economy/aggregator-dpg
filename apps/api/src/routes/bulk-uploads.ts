@@ -340,7 +340,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
 
       const store = getBulkUploadsStore();
       const created = await store.create({
-        aggregatorId: auth.aggregatorId,
+        userId: auth.userId,
         participantType,
         // Placeholder; the real key needs the row id and is set below.
         storageKey: 'pending',
@@ -358,7 +358,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       }
 
       const uploadId = created.value.id;
-      const storedKey = buildKey('bulk-uploads', auth.aggregatorId, uploadId, 'raw.csv');
+      const storedKey = buildKey('bulk-uploads', auth.userId, uploadId, 'raw.csv');
       const rawRef: ObjectRef = { area: 'bulk-uploads', key: storedKey };
       const storage = getObjectStorage();
       const [signed, signedPut] = await Promise.all([
@@ -391,7 +391,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         status: 'success',
         latency_ms: Date.now() - start,
         upload_id: uploadId,
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
       });
 
       return reply.code(201).send({
@@ -445,7 +445,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const start = Date.now();
 
       const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
+      const found = await store.findById(uploadId, auth.userId);
       if (!found.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
       }
@@ -518,7 +518,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       // Record the attestation before the state change. Fails closed: no upload
       // is processed without one.
       const attestationRecorded = await recordBulkUploadAttestation({
-        aggregatorId: auth.aggregatorId,
+        userId: auth.userId,
         uploadId,
         log,
       });
@@ -529,7 +529,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       }
 
       // Re-uploading the same file is allowed, so a failure here is never a duplicate.
-      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.fingerprint);
+      const marked = await store.markUploaded(uploadId, auth.userId, head.fingerprint);
       if (!marked.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
       }
@@ -537,7 +537,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       try {
         await enqueueBulkFileProcess({
           uploadId: marked.value.id,
-          aggregatorId: auth.aggregatorId,
+          aggregatorId: auth.userId,
           s3Key: marked.value.storageKey,
           participantType: marked.value.participantType,
           schemaId: marked.value.schemaId,
@@ -587,7 +587,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const { limit, offset } = req.query;
 
       const store = getBulkUploadsStore();
-      const result = await store.list(auth.aggregatorId, { limit, offset });
+      const result = await store.list(auth.userId, { limit, offset });
       if (!result.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
       }
@@ -626,7 +626,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const { id: uploadId } = req.params;
 
       const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
+      const found = await store.findById(uploadId, auth.userId);
       if (!found.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
       }
@@ -669,7 +669,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const start = Date.now();
 
       const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
+      const found = await store.findById(uploadId, auth.userId);
       if (!found.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
       }
@@ -703,7 +703,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       // Only sign keys that match the errors.csv layout, never an arbitrary object.
       const expectedKeys = [
         `bulk-uploads/${upload.id}/errors.csv`,
-        buildKey('bulk-uploads', auth.aggregatorId, upload.id, 'errors.csv'),
+        buildKey('bulk-uploads', auth.userId, upload.id, 'errors.csv'),
       ];
       if (!expectedKeys.includes(upload.errorsCsvStorageKey)) {
         log.error({
@@ -928,7 +928,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
     }
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
-  if (!result.context.aggregatorId) {
+  if (!result.context.userId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
@@ -942,17 +942,17 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
  * versions go in their own columns. Returns `false` on any failure so the
  * caller aborts the upload.
  *
- * @param aggregatorId - The uploading aggregator (ledger subject).
+ * @param userId - The uploading aggregator (ledger subject).
  * @param uploadId - The bulk_uploads row this attestation authorises.
  * @param log - Request-scoped logger.
  * @returns `true` when the ledger row was written; `false` on any failure.
  */
 async function recordBulkUploadAttestation({
-  aggregatorId,
+  userId,
   uploadId,
   log,
 }: {
-  aggregatorId: string;
+  userId: string;
   uploadId: string;
   log: ReturnType<FastifyRequest['log']['child']>;
 }): Promise<boolean> {
@@ -988,7 +988,7 @@ async function recordBulkUploadAttestation({
 
   const result = await getConsentLedger().recordRegistrationConsent({
     subjectType: 'user',
-    subjectId: aggregatorId,
+    subjectId: userId,
     network,
     brand: brand ?? null,
     termsVersion,

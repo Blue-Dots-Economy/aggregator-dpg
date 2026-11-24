@@ -214,7 +214,7 @@ describe('POST /v1/campaign/voice', () => {
     // Seed the per-org active-job cap (default 3) so the request is the 4th.
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: 'org_5d3b7fa4-x',
         channel: 'voice',
         metadata: [],

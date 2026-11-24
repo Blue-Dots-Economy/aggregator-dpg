@@ -30,7 +30,7 @@ export interface AuthContext {
   /** Keycloak `sub` claim: the login's stable id (not `users.id`). */
   subject: string;
   /** The `user_id` claim, else the `aggregator_id` claim: the user's `users.id`. */
-  aggregatorId: string;
+  userId: string;
   /**
    * The profile types the coordinator serves, from the multivalued
    * `aggregator_type` claim; `[]` when absent. Set when the token is issued; a
@@ -97,7 +97,7 @@ export interface AnyAuthContext {
   preferredUsername?: string;
   /** Whether this token is bound to an end user (has `user_id` or `aggregator_id`). */
   isUser: boolean;
-  aggregatorId?: string;
+  userId?: string;
   email?: string;
 }
 
@@ -208,15 +208,15 @@ function actingInvalid(message: string): AuthResult {
  * Builds an {@link AuthContext} from a verified token's optional claims.
  *
  * @param subject - The token `sub`.
- * @param aggregatorId - The resolved `aggregator_id`.
+ * @param userId - The resolved `aggregator_id`.
  * @param payload - The verified JWT payload.
  * @returns The auth context; optional fields set only when present.
  */
-function hydrateContext(subject: string, aggregatorId: string, payload: JWTPayload): AuthContext {
+function hydrateContext(subject: string, userId: string, payload: JWTPayload): AuthContext {
   const claims: Record<string, unknown> = payload;
   const ctx: AuthContext = {
     subject,
-    aggregatorId,
+    userId,
     serves: readStringList(claims.aggregator_type),
     ...identityOf(payload),
   };
@@ -305,7 +305,7 @@ async function actingContext(
   const row = acting.value;
   const ctx: AuthContext = {
     subject: sub,
-    aggregatorId: row.id,
+    userId: row.id,
     serves: row.serves,
     decisionMade: decisionOf(row.status),
     ...identityOf(payload),
@@ -390,11 +390,7 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
     await backfillSignalstackOrgId(result.context);
   }
   // Record the coordinator's IdP login once per process per user; best-effort.
-  await recordLoginIdentity(
-    result.context.aggregatorId,
-    result.context.subject,
-    'auth.recordIdentity',
-  );
+  await recordLoginIdentity(result.context.userId, result.context.subject, 'auth.recordIdentity');
   return result;
 }
 
@@ -408,7 +404,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   const start = Date.now();
   const log = logger.child({
     operation: 'auth.backfillSignalstackOrgId',
-    aggregator_id: ctx.aggregatorId,
+    aggregator_id: ctx.userId,
     user_id: ctx.subject,
   });
 
@@ -419,7 +415,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   }
 
   const store = getUserStore();
-  const found = await store.findById(ctx.aggregatorId);
+  const found = await store.findById(ctx.userId);
   if (!found.ok) {
     log.warn(
       { status: 'failure', sub_operation: 'userStore.findById', code: found.error.code },
@@ -447,7 +443,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     );
   }
   const upsert = await signalstack.upsertAggregator({
-    external_id: ctx.aggregatorId,
+    external_id: ctx.userId,
     name: found.value.name,
     slug: found.value.orgSlug,
     ...(served.length > 0 ? { domains: served } : {}),
@@ -473,7 +469,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   // in memory for the current request.
   const [attr, dbWrite] = await Promise.all([
     idp.setAttributes(ctx.subject, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
-    store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.subject),
+    store.updateSignalstackOrgId(ctx.userId, orgId, ctx.subject),
   ]);
   if (!attr.ok) {
     log.warn(
@@ -556,17 +552,17 @@ export async function authenticateAny(
   const claims = payload as Record<string, unknown>;
   const claim = readUserIdClaim(payload);
   if (claim.kind === 'mismatch') return claimMismatch(payload.sub);
-  const aggregatorId = claim.kind === 'present' ? claim.userId : undefined;
+  const userId = claim.kind === 'present' ? claim.userId : undefined;
   const ctx: AnyAuthContext = {
     subject: payload.sub,
-    isUser: Boolean(aggregatorId),
+    isUser: Boolean(userId),
   };
   if (typeof claims.azp === 'string') ctx.authorizedParty = claims.azp;
   if (typeof claims.client_id === 'string') ctx.clientId = claims.client_id;
   if (typeof claims.preferred_username === 'string') {
     ctx.preferredUsername = claims.preferred_username;
   }
-  if (aggregatorId) ctx.aggregatorId = aggregatorId;
+  if (userId) ctx.userId = userId;
   if (typeof claims.email === 'string') ctx.email = claims.email;
   return { ok: true, context: ctx };
 }

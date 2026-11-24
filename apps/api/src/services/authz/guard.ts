@@ -62,7 +62,7 @@ export interface CheckOptions {
 /** Who the token says the caller is. */
 export interface TokenIdentity {
   /** `aggregator_id` claim, when present. */
-  aggregatorId?: string | undefined;
+  userId?: string | undefined;
   /** Keycloak `sub`. */
   subject: string;
 }

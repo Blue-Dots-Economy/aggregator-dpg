@@ -38,7 +38,7 @@ afterEach(() => {
 describe('authenticate', () => {
   it.each(SHAPES)('accepts the $name', async ({ claims }) => {
     const res = await authenticate(makeReq(claims));
-    expect(res.ok && res.context.aggregatorId).toBe(ID);
+    expect(res.ok && res.context.userId).toBe(ID);
   });
 
   it('refuses a token whose user_id and aggregator_id differ, as an invalid token', async () => {
@@ -62,7 +62,7 @@ describe('authenticate', () => {
 describe('authenticateAllowingActing', () => {
   it.each(SHAPES)('accepts the $name', async ({ claims }) => {
     const res = await authenticateAllowingActing(makeReq(claims));
-    expect(res.ok && res.context.aggregatorId).toBe(ID);
+    expect(res.ok && res.context.userId).toBe(ID);
   });
 
   it('refuses a token whose user_id and aggregator_id differ', async () => {
@@ -75,7 +75,7 @@ describe('authenticateAllowingActing', () => {
 describe('authenticateAny', () => {
   it.each(SHAPES)('marks the $name as a user token', async ({ claims }) => {
     const res = await authenticateAny(makeReq(claims));
-    expect(res.ok && res.context).toMatchObject({ isUser: true, aggregatorId: ID });
+    expect(res.ok && res.context).toMatchObject({ isUser: true, userId: ID });
   });
 
   it('treats a token with neither claim as a non-user token', async () => {

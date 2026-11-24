@@ -94,7 +94,7 @@ function makeRow(overrides: Partial<BulkUploadRow> = {}): BulkUploadRow {
 
 function makeInput(overrides: Partial<CreateBulkUploadInput> = {}): CreateBulkUploadInput {
   return {
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     participantType: 'seeker',
     storageKey: 'uploads/upload-1.csv',
     schemaId: 'seeker_profile',

@@ -59,7 +59,7 @@ describe('approveCoordinator', () => {
   });
 
   const INVITER = 'invite:00000000-0000-4000-8000-0000000000a1';
-  const approve = () => approveCoordinator({ aggregatorId: ID, decidedBy: INVITER, log });
+  const approve = () => approveCoordinator({ userId: ID, decidedBy: INVITER, log });
 
   it('approves: enables the user and records who approved', async () => {
     expect(await approve()).toEqual({ kind: 'approved' });

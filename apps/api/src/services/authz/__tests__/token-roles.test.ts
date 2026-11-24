@@ -397,10 +397,10 @@ describe('syncTokenRoles for a coordinator outside a shared login', () => {
 });
 
 describe('the default dependencies', () => {
-  async function kcUser(idp: IdpAdminFake, aggregatorId?: string): Promise<string> {
+  async function kcUser(idp: IdpAdminFake, userId?: string): Promise<string> {
     const created = await idp.createUser({
-      email: `${aggregatorId ?? 'admin'}@example.org`,
-      attributes: aggregatorId ? { aggregator_id: aggregatorId } : {},
+      email: `${userId ?? 'admin'}@example.org`,
+      attributes: userId ? { aggregator_id: userId } : {},
     });
     if (!created.ok) throw new Error('fake createUser failed');
     return created.value.id;
@@ -433,10 +433,10 @@ describe('the default dependencies', () => {
   });
 
   /** A Keycloak user holding an admin and a coordinator account. */
-  async function twoAccountLogin(aggregatorId?: string) {
+  async function twoAccountLogin(userId?: string) {
     const idp = new IdpAdminFake();
     _setIdpAdmin(idp);
-    const subject = await kcUser(idp, aggregatorId);
+    const subject = await kcUser(idp, userId);
     const store = new IdentityStoreFake();
     store.seed([
       buildIdentity({ userId: 'a1', subject }),

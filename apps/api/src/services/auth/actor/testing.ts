@@ -31,8 +31,7 @@ export class ActorResolverFake extends ActorResolverBase {
   /** {@inheritDoc ActorResolverBase.resolve} */
   async resolve(/* NOSONAR typescript:S7503 */ input: ResolveActorInput): Promise<ActorResult> {
     if (this.failWith) return { ok: false, error: { code: 'UNAVAILABLE', message: this.failWith } };
-    const actor =
-      this.byKey.get(input.aggregatorId ?? input.actingAccountId ?? input.subject) ?? null;
+    const actor = this.byKey.get(input.userId ?? input.actingAccountId ?? input.subject) ?? null;
     return { ok: true, value: actor };
   }
 }

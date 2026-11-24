@@ -16,12 +16,12 @@ const C1 = '11111111-1111-4111-8111-111111111111';
 const C2 = '22222222-2222-4222-8222-222222222222';
 const C3 = '33333333-3333-4333-8333-333333333333';
 
-async function kcUser(idp: IdpAdminFake, n: number, aggregatorId: string): Promise<string> {
+async function kcUser(idp: IdpAdminFake, n: number, userId: string): Promise<string> {
   const r = await idp.createUser({
     email: `u${n}@x.test`,
     firstName: 'U',
     lastName: `${n}`,
-    attributes: { aggregator_id: aggregatorId },
+    attributes: { aggregator_id: userId },
   } as Parameters<IdpAdminFake['createUser']>[0]);
   if (!r.ok) throw new Error('seed failed');
   return r.value.id;

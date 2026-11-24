@@ -80,7 +80,7 @@ describe('approveCoordinator on a shared login', () => {
     _setSignalStackWriter(null);
   });
 
-  const approve = () => approveCoordinator({ aggregatorId: ID, decidedBy: ADMIN, log });
+  const approve = () => approveCoordinator({ userId: ID, decidedBy: ADMIN, log });
   const spyWrites = () => USER_WRITES.map((m) => vi.spyOn(idp, m));
 
   it('approves through the recorded login and writes nothing in Keycloak', async () => {

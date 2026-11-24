@@ -64,7 +64,7 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
     const now = new Date();
     const row: RegistrationLink = {
       id: `link-${this.idCounter}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       slug: input.slug,
       domain: input.domain,
       context: input.context,
@@ -244,7 +244,7 @@ describe('POST /v1/links/create — registration_mode', () => {
         payload: { domain: 'seeker' },
       });
       expect(r.statusCode).toBe(201);
-      expect(store.creates[0]!.aggregatorId).toBe(AGG_ID);
+      expect(store.creates[0]!.userId).toBe(AGG_ID);
     } finally {
       _setOrganisationStore(null);
     }
@@ -398,7 +398,7 @@ function buildLink(overrides: Partial<RegistrationLink> = {}): RegistrationLink 
   const now = new Date('2026-08-01T00:00:00.000Z');
   return {
     id: 'link-fixed',
-    aggregatorId: AGG_ID,
+    userId: AGG_ID,
     slug: 'my-slug',
     domain: 'seeker',
     context: {},
@@ -440,9 +440,9 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
     return e;
   }
 
-  private slugTaken(aggregatorId: string, slug: string, excludeId?: string): boolean {
+  private slugTaken(userId: string, slug: string, excludeId?: string): boolean {
     for (const r of this.rows.values()) {
-      if (r.aggregatorId === aggregatorId && r.slug === slug && r.id !== excludeId) return true;
+      if (r.userId === userId && r.slug === slug && r.id !== excludeId) return true;
     }
     return false;
   }
@@ -450,14 +450,14 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('create');
     if (fail) return { ok: false, error: fail };
-    if (this.slugTaken(input.aggregatorId, input.slug)) {
+    if (this.slugTaken(input.userId, input.slug)) {
       return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
     }
     this.seq += 1;
     const now = new Date('2026-08-01T00:00:00.000Z');
     const row: RegistrationLink = {
       id: `link-${this.seq}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       slug: input.slug,
       domain: input.domain,
       context: input.context,
@@ -474,11 +474,11 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
     return { ok: true, value: row };
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>> {
     const fail = this.take('findById');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
+    if (!row || row.userId !== userId) return { ok: true, value: null };
     return { ok: true, value: row };
   }
 
@@ -492,16 +492,16 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('updateDraft');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId || row.status !== 'draft') {
+    if (!row || row.userId !== userId || row.status !== 'draft') {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'not a draft' } };
     }
-    if (patch.slug !== undefined && this.slugTaken(aggregatorId, patch.slug, id)) {
+    if (patch.slug !== undefined && this.slugTaken(userId, patch.slug, id)) {
       return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
     }
     const updated: RegistrationLink = {
@@ -516,12 +516,12 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<{ rows: RegistrationLink[]; total: number }>> {
     const fail = this.take('list');
     if (fail) return { ok: false, error: fail };
-    let rows = [...this.rows.values()].filter((r) => r.aggregatorId === aggregatorId);
+    let rows = [...this.rows.values()].filter((r) => r.userId === userId);
     if (options.status) rows = rows.filter((r) => r.status === options.status);
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
@@ -535,13 +535,13 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('updateStatus');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
+    if (!row || row.userId !== userId) {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
     }
     const updated = { ...row, status: nextStatus, updatedAt: new Date() };
@@ -759,7 +759,7 @@ describe('POST /v1/links/create — full lifecycle', () => {
   });
 
   it('retries once on a slug collision and succeeds with a suffixed slug', async () => {
-    store.seed([buildLink({ id: 'existing', slug: 'taken-slug', aggregatorId: AGG_ID })]);
+    store.seed([buildLink({ id: 'existing', slug: 'taken-slug', userId: AGG_ID })]);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',

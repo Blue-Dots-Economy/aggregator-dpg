@@ -105,7 +105,7 @@ export function registerDashboardRoutes(base: FastifyInstance): void {
       const auth = await requireApprovedAuth(req);
       const log = req.log.child({
         operation: 'dashboard',
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
@@ -187,7 +187,7 @@ export function registerDashboardRoutes(base: FastifyInstance): void {
       const auth = await requireApprovedAuth(req);
       const log = req.log.child({
         operation: 'dashboard.export',
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
@@ -265,7 +265,7 @@ export function registerDashboardRoutes(base: FastifyInstance): void {
       const auth = await requireApprovedAuth(req);
       const log = req.log.child({
         operation: 'dashboard.export.profiles',
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
@@ -360,7 +360,7 @@ export function registerDashboardRoutes(base: FastifyInstance): void {
 async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log']): Promise<string> {
   let actingOrgId: string | null = auth.signalstackOrgId ?? null;
   if (!actingOrgId) {
-    const row = await getUserStore().findById(auth.aggregatorId);
+    const row = await getUserStore().findById(auth.userId);
     if (!row.ok) {
       log.error({
         status: 'failure',
@@ -376,7 +376,7 @@ async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log'])
   if (!actingOrgId) {
     log.warn({ status: 'failure', sub: 'signalstack.org_not_registered' });
     throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-      fields: { aggregator_id: auth.aggregatorId },
+      fields: { aggregator_id: auth.userId },
     });
   }
   return actingOrgId;

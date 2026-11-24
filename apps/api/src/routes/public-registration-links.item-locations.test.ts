@@ -168,7 +168,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
 
     const liveLink: RegistrationLink = {
       id: LINK_ID,
-      aggregatorId: AGG_ID,
+      userId: AGG_ID,
       slug: LINK_SLUG,
       domain: 'seeker',
       context: {},

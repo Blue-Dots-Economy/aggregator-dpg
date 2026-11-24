@@ -39,7 +39,7 @@ export type ApprovalOutcome =
 
 /** Inputs of {@link approveCoordinator}. */
 export interface CoordinatorApprovalInput {
-  aggregatorId: string;
+  userId: string;
   /** Written to `updated_by`: `invite:<inviter id>`, or the owner's admin id for a self-add. */
   decidedBy: string;
   requestId?: string;
@@ -51,25 +51,25 @@ export interface CoordinatorApprovalInput {
  * else the user carrying its `aggregator_id` (whose login is then recorded,
  * best effort).
  *
- * @param aggregatorId - Coordinator id.
+ * @param userId - Coordinator id.
  * @returns The row and the Keycloak user id, or why they are unavailable.
  */
 async function loadCoordinatorAndUser(
-  aggregatorId: string,
+  userId: string,
 ): Promise<
   | { ok: true; aggregator: Coordinator; kcUserId: string }
   | { ok: false; reason: 'not_found' | 'db' | 'idp' | 'idp_missing' }
 > {
-  const stored = await getUserStore().findById(aggregatorId);
+  const stored = await getUserStore().findById(userId);
   if (!stored.ok) return { ok: false, reason: 'db' };
   if (!stored.value) return { ok: false, reason: 'not_found' };
-  const linked = await getIdentityStore().subjectOf(aggregatorId, IDP_PROVIDER);
+  const linked = await getIdentityStore().subjectOf(userId, IDP_PROVIDER);
   if (!linked.ok) return { ok: false, reason: 'db' };
   if (linked.value) return { ok: true, aggregator: stored.value, kcUserId: linked.value };
-  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId);
+  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, userId);
   if (!kc.ok) return { ok: false, reason: 'idp' };
   if (!kc.value) return { ok: false, reason: 'idp_missing' };
-  await recordLoginIdentity(aggregatorId, kc.value.id, 'decisions.recordIdentity');
+  await recordLoginIdentity(userId, kc.value.id, 'decisions.recordIdentity');
   return { ok: true, aggregator: stored.value, kcUserId: kc.value.id };
 }
 
@@ -84,9 +84,9 @@ export async function approveCoordinator(
 ): Promise<ApprovalOutcome> {
   const log = input.log.child({
     operation: 'coordinator-approval',
-    aggregator_id: input.aggregatorId,
+    aggregator_id: input.userId,
   });
-  const lookup = await loadCoordinatorAndUser(input.aggregatorId);
+  const lookup = await loadCoordinatorAndUser(input.userId);
   if (!lookup.ok) {
     if (lookup.reason === 'not_found' || lookup.reason === 'idp_missing')
       return { kind: 'not_found' };
