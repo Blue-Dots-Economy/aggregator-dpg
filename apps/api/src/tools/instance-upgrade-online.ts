@@ -3,9 +3,9 @@
  *
  * `enrich` runs after the database commit and before scale-up. `enable-owners`
  * is a one-off step that lets existing org owners sign in. `backfill-user-id`
- * is a one-off step, run with the app up, that copies each coordinator's
- * `aggregator_id` into `user_id`. All three call Keycloak through the API's
- * adapter, so they need the API's full environment.
+ * is a one-off step, run once the release is deployed, that copies each
+ * coordinator's `aggregator_id` into `user_id`. All three call Keycloak through
+ * the API's adapter, so they need the API's full environment.
  * `instance-upgrade.ts` loads this module lazily so `check` and `run` do not
  * depend on it. Output carries counts and ids only.
  */
@@ -21,8 +21,6 @@ import type { IdpAdminAdapter } from '../services/idp-admin/interface.js';
 import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 import { getIdentityStore } from '../services/identity-store/index.js';
 import type { IdentityStoreBase } from '../services/identity-store/interface.js';
-import { withUserAttributesLock } from '../services/authz/token-roles.js';
-import { closeRedis } from '../services/redis/index.js';
 import {
   backfillOwnerContactNames,
   listOwnerNameCandidatesFromDb,
@@ -178,8 +176,6 @@ export interface UserIdClaimReport {
   conflicts: number;
   /** Keycloak errors, on the lookup or the write; a re-run retries them. */
   failed: number;
-  /** Coordinators skipped because another write held their lock; a re-run retries them. */
-  busy: number;
   /** Coordinator ids whose `user_id` holds a different value. */
   conflictIds: string[];
 }
@@ -189,11 +185,6 @@ export interface UserIdClaimDeps {
   idp: IdpAdminAdapter;
   /** Every coordinator id. */
   listCandidates: () => Promise<string[]>;
-  /** Runs a read-and-write holding the coordinator's Keycloak-attribute lock. */
-  withLock<T>(
-    userId: string,
-    fn: () => Promise<T>,
-  ): Promise<{ acquired: true; value: T } | { acquired: false }>;
   /** Pause between Keycloak calls. */
   pause?: (ms: number) => Promise<void>;
 }
@@ -222,11 +213,12 @@ async function copyUserId(
  * Copies each coordinator's `aggregator_id` attribute into `user_id`, paced.
  *
  * Tokens carry both claims while clients move to `user_id`. Idempotent; a
- * `user_id` that holds another value is reported and never overwritten. Each
- * write holds the coordinator's lock, so it cannot overwrite a concurrent
- * token-roles write to the same Keycloak user.
+ * `user_id` that holds another value is reported and never overwritten.
+ * Each write rewrites the whole Keycloak user, so run it when nothing else
+ * writes users: after the release's API pods have started (their start-up
+ * roles reconcile rewrites every user), or with the API scaled down.
  *
- * @param deps - Keycloak, the candidate list and the per-user lock.
+ * @param deps - Keycloak and the candidate list.
  * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
  * @returns Per-outcome counts.
  * @throws {RangeError} When `ratePerSecond` is not a positive number.
@@ -246,22 +238,14 @@ export async function backfillUserIdClaim(
     notInKeycloak: 0,
     conflicts: 0,
     failed: 0,
-    busy: 0,
     conflictIds: [],
   };
   const pause = deps.pause ?? sleep;
   const gapMs = Math.ceil(1000 / opts.ratePerSecond);
   for (const id of ids) {
-    // Sequential: paced against Keycloak. A dry run writes nothing, so it takes no lock.
-    let outcome: UserIdOutcome | null;
-    if (opts.dryRun) {
-      outcome = await copyUserId(deps.idp, id, true); // NOSONAR typescript:S9382
-    } else {
-      const locked = await deps.withLock(id, () => copyUserId(deps.idp, id, false)); // NOSONAR typescript:S9382
-      outcome = locked.acquired ? locked.value : null;
-    }
-    if (outcome === null) report.busy += 1;
-    else if (outcome === 'copied') report.copied += 1;
+    // Sequential: paced against Keycloak.
+    const outcome = await copyUserId(deps.idp, id, opts.dryRun); // NOSONAR typescript:S9382
+    if (outcome === 'copied') report.copied += 1;
     else if (outcome === 'already') report.already += 1;
     else if (outcome === 'notInKeycloak') report.notInKeycloak += 1;
     else if (outcome === 'failed') report.failed += 1;
@@ -286,31 +270,26 @@ async function allCoordinators(): Promise<string[]> {
 /**
  * Runs `backfill-user-id`: copies every coordinator's `aggregator_id` into `user_id`.
  *
- * One-off, run with the app up; not part of `run-all`. Coordinators absent from
- * Keycloak do not fail it.
+ * One-off, run once the release is deployed; not part of `run-all`.
+ * Coordinators absent from Keycloak do not fail it.
  *
  * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
  * @param out - Line printer.
- * @returns Exit code: 1 when a lookup or write failed, a lock stayed busy (re-run
- *   to resume) or a `user_id` holds another value (listed by coordinator id), else 0.
+ * @returns Exit code: 1 when a lookup or write failed (re-run to resume) or a
+ *   `user_id` holds another value (listed by coordinator id), else 0.
  */
 export async function backfillUserId(
   opts: { dryRun: boolean; ratePerSecond: number },
   out: Out,
 ): Promise<number> {
-  try {
-    const report = await backfillUserIdClaim(
-      { idp: getIdpAdmin(), listCandidates: allCoordinators, withLock: withUserAttributesLock },
-      opts,
-    );
-    const { conflictIds, ...counts } = report;
-    out(`backfill-user-id ${JSON.stringify(counts)}${opts.dryRun ? ' (dry run)' : ''}`);
-    for (const id of conflictIds) out(`  user_id differs: coordinator ${id}`);
-    return report.failed + report.busy + report.conflicts > 0 ? 1 : 0;
-  } finally {
-    // The lock opens a Redis connection, and an open one keeps the process alive.
-    await closeRedis();
-  }
+  const report = await backfillUserIdClaim(
+    { idp: getIdpAdmin(), listCandidates: allCoordinators },
+    opts,
+  );
+  const { conflictIds, ...counts } = report;
+  out(`backfill-user-id ${JSON.stringify(counts)}${opts.dryRun ? ' (dry run)' : ''}`);
+  for (const id of conflictIds) out(`  user_id differs: coordinator ${id}`);
+  return report.failed + report.conflicts > 0 ? 1 : 0;
 }
 
 /** Counts of `enable-owners`; ids name the orgs to follow up. */

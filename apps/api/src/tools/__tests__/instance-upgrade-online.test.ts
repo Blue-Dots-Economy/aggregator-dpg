@@ -115,18 +115,9 @@ class WriteFailingIdp extends IdpAdminFake {
 describe('backfillUserIdClaim', () => {
   let idp: IdpAdminFake;
   const pauses: number[] = [];
-  const locked: string[] = [];
-  const deps = (ids: string[], lockBusy = false) => ({
+  const deps = (ids: string[]) => ({
     idp,
     listCandidates: () => Promise.resolve(ids),
-    async withLock<T>(
-      userId: string,
-      fn: () => Promise<T>,
-    ): Promise<{ acquired: true; value: T } | { acquired: false }> {
-      locked.push(userId);
-      if (lockBusy) return { acquired: false };
-      return { acquired: true, value: await fn() };
-    },
     pause: (ms: number) => {
       pauses.push(ms);
       return Promise.resolve();
@@ -140,10 +131,9 @@ describe('backfillUserIdClaim', () => {
   beforeEach(() => {
     idp = new IdpAdminFake();
     pauses.length = 0;
-    locked.length = 0;
   });
 
-  it('copies aggregator_id into user_id under each coordinator lock, skips the done ones and reports conflicts', async () => {
+  it('copies aggregator_id into user_id, skips the done ones and reports conflicts', async () => {
     const sub1 = await kcUser(idp, 1, C1);
     const sub2 = await kcUser(idp, 2, C2);
     await idp.setAttributes(sub2, { user_id: C2 });
@@ -160,12 +150,10 @@ describe('backfillUserIdClaim', () => {
       notInKeycloak: 1,
       conflicts: 1,
       failed: 0,
-      busy: 0,
       conflictIds: [C3],
     });
     expect(await userIdOf(sub1)).toEqual([C1]);
     expect(await userIdOf(sub3)).toEqual(['someone-else']);
-    expect(locked).toEqual([C1, C2, C3, 'absent']);
     expect(pauses).toEqual([250, 250, 250, 250]);
   });
 
@@ -176,21 +164,10 @@ describe('backfillUserIdClaim', () => {
     expect(again).toMatchObject({ copied: 0, already: 1 });
   });
 
-  it('writes nothing and takes no lock on a dry run', async () => {
+  it('writes nothing on a dry run', async () => {
     const sub1 = await kcUser(idp, 1, C1);
     const report = await backfillUserIdClaim(deps([C1]), { dryRun: true, ratePerSecond: 1000 });
     expect(report.copied).toBe(1);
-    expect(await userIdOf(sub1)).toBeUndefined();
-    expect(locked).toEqual([]);
-  });
-
-  it('counts a busy lock, writes nothing for it and carries on', async () => {
-    const sub1 = await kcUser(idp, 1, C1);
-    const report = await backfillUserIdClaim(deps([C1], true), {
-      dryRun: false,
-      ratePerSecond: 1000,
-    });
-    expect(report).toMatchObject({ candidates: 1, busy: 1, copied: 0, failed: 0 });
     expect(await userIdOf(sub1)).toBeUndefined();
   });
 
