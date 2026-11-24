@@ -537,6 +537,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       try {
         await enqueueBulkFileProcess({
           uploadId: marked.value.id,
+          userId: auth.userId,
           aggregatorId: auth.userId,
           s3Key: marked.value.storageKey,
           participantType: marked.value.participantType,

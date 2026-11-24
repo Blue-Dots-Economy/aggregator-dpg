@@ -1107,6 +1107,7 @@ describe('bulk-uploads routes', () => {
       expect(enqueueBulkFileProcessMock).toHaveBeenCalledWith(
         expect.objectContaining({
           uploadId: 'upload-1',
+          userId: AGG_A,
           aggregatorId: AGG_A,
           s3Key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
         }),
