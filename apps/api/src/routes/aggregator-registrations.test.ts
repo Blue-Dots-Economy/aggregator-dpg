@@ -207,8 +207,8 @@ describe('POST /v1/user/invite/accept', () => {
         contact: { ...validBody.contact, phone: typed },
       });
       expect(res.statusCode).toBe(201);
-      const { aggregator_id } = res.json() as { aggregator_id: string };
-      const stored = await userStore.findById(aggregator_id);
+      const { user_id } = res.json() as { user_id: string };
+      const stored = await userStore.findById(user_id);
       expect(stored.ok && stored.value?.contactPhone).toBe('+919876543210');
       const kcUser = await idp.findByEmail(validBody.contact.email);
       expect(kcUser.ok && kcUser.value?.attributes?.phoneNumber?.[0]).toBe('+919876543210');
