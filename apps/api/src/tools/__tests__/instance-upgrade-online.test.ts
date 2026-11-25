@@ -7,6 +7,7 @@ import {
   enableOwnersStep,
   enrichExitCode,
   enrichIdentities,
+  removeAggregatorIdAttribute,
 } from '../instance-upgrade-online.js';
 import { buildOrganisation, buildDefaultOrg } from '../../services/organisation-store/index.js';
 import type { Organisation } from '../../services/organisation-store/index.js';
@@ -191,6 +192,104 @@ describe('backfillUserIdClaim', () => {
   it('refuses a rate that would disable the pacing', async () => {
     await expect(
       backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 0 }),
+    ).rejects.toThrow(RangeError);
+  });
+});
+
+describe('removeAggregatorIdAttribute', () => {
+  let idp: IdpAdminFake;
+  const pauses: number[] = [];
+  const deps = (ids: string[]) => ({
+    idp,
+    listCandidates: () => Promise.resolve(ids),
+    pause: (ms: number) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+  });
+  const attrsOf = async (sub: string) => {
+    const r = await idp.findById(sub);
+    return r.ok ? r.value?.attributes : undefined;
+  };
+  const backfilled = async (n: number, id: string) => {
+    const sub = await kcUser(idp, n, id);
+    await idp.setAttributes(sub, { user_id: id });
+    return sub;
+  };
+
+  beforeEach(() => {
+    idp = new IdpAdminFake();
+    pauses.length = 0;
+  });
+
+  it('removes aggregator_id from backfilled users and keeps it where user_id is missing or different', async () => {
+    const sub1 = await backfilled(1, C1);
+    const sub2 = await kcUser(idp, 2, C2);
+    const sub3 = await kcUser(idp, 3, C3);
+    await idp.setAttributes(sub3, { user_id: 'someone-else' });
+    const report = await removeAggregatorIdAttribute(deps([C1, C2, C3, 'absent']), {
+      dryRun: false,
+      ratePerSecond: 4,
+    });
+    expect(report).toEqual({
+      candidates: 4,
+      removed: 1,
+      absent: 1,
+      notBackfilled: 2,
+      failed: 0,
+      notBackfilledIds: [C2, C3],
+    });
+    expect(await attrsOf(sub1)).toEqual({ user_id: [C1] });
+    expect((await attrsOf(sub2))?.aggregator_id).toEqual([C2]);
+    expect((await attrsOf(sub3))?.aggregator_id).toEqual([C3]);
+    expect(pauses).toEqual([250, 250, 250, 250]);
+  });
+
+  it('is a no-op on a second run', async () => {
+    await backfilled(1, C1);
+    await removeAggregatorIdAttribute(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    const again = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(again).toMatchObject({ removed: 0, absent: 1 });
+  });
+
+  it('writes nothing on a dry run', async () => {
+    const sub1 = await backfilled(1, C1);
+    const report = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: true,
+      ratePerSecond: 1000,
+    });
+    expect(report.removed).toBe(1);
+    expect((await attrsOf(sub1))?.aggregator_id).toEqual([C1]);
+  });
+
+  it('counts a failed write', async () => {
+    idp = new WriteFailingIdp();
+    const sub = await kcUser(idp, 1, C1);
+    // WriteFailingIdp refuses every write, so seed user_id through the base class.
+    await IdpAdminFake.prototype.setAttributes.call(idp, sub, { user_id: C1 });
+    const report = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 1, failed: 1, removed: 0 });
+  });
+
+  it('counts a failed lookup and carries on', async () => {
+    await backfilled(2, C2);
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const report = await removeAggregatorIdAttribute(deps([C1, C2]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 2, failed: 1, removed: 1 });
+  });
+
+  it('refuses a rate that would disable the pacing', async () => {
+    await expect(
+      removeAggregatorIdAttribute(deps([C1]), { dryRun: false, ratePerSecond: 0 }),
     ).rejects.toThrow(RangeError);
   });
 });

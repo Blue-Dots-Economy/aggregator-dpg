@@ -9,15 +9,16 @@
  *   node dist/tools/instance-upgrade.js enrich [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js enable-owners [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js backfill-user-id [--dry-run] [--rate <n per second>]
+ *   node dist/tools/instance-upgrade.js remove-aggregator-id [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js run-all --snapshot-taken <id>
  *
  * `check` is read-only, except for fixes. `run` migrates a database from 0022 to
  * the latest migration in one transaction, runs every verify gate, and commits
  * only when all pass. `check` and `run` need only `DATABASE_URL` and
  * `AGGREGATOR_NETWORK` (`AGGREGATOR_BRAND` is optional). `enrich`,
- * `enable-owners` and `backfill-user-id` need the full API environment.
- * `backfill-user-id` is a one-off, run once the release is deployed, and is not part of
- * `run-all`. Output is counts, check ids, error codes and
+ * `enable-owners`, `backfill-user-id` and `remove-aggregator-id` need the full API
+ * environment. `backfill-user-id` and then `remove-aggregator-id` are one-offs, run
+ * once the release is deployed, and are not part of `run-all`. Output is counts, check ids, error codes and
  * database ids, never row data. Exit codes: 0 ok, 1 refused or failed, 2 usage.
  */
 
@@ -688,7 +689,12 @@ async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<numb
       out,
     );
   }
-  if (command === 'enrich' || command === 'enable-owners' || command === 'backfill-user-id') {
+  if (
+    command === 'enrich' ||
+    command === 'enable-owners' ||
+    command === 'backfill-user-id' ||
+    command === 'remove-aggregator-id'
+  ) {
     const pool = openPool();
     try {
       const level = await levelOf(pool);
@@ -706,7 +712,8 @@ async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<numb
     const online = await import('./instance-upgrade-online.js');
     if (command === 'enrich') return online.enrich(opts, out);
     if (command === 'enable-owners') return online.enableOwners(opts, out);
-    return online.backfillUserId(opts, out);
+    if (command === 'backfill-user-id') return online.backfillUserId(opts, out);
+    return online.removeAggregatorId(opts, out);
   }
   if (command === 'data') {
     const pool = openPool();
@@ -726,7 +733,7 @@ async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<numb
   }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | data [--dry-run] | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n] | backfill-user-id [--dry-run] [--rate n] | run-all --snapshot-taken <id>',
+      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | data [--dry-run] | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n] | backfill-user-id [--dry-run] [--rate n] | remove-aggregator-id [--dry-run] [--rate n] | run-all --snapshot-taken <id>',
     );
     return 2;
   }
