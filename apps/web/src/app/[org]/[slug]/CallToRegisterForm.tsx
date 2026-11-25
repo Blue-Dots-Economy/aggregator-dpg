@@ -21,7 +21,7 @@ import { PhoneInput } from '@/components/forms/PhoneInput';
 import { SelectField } from '@/components/ui/SelectField';
 import { I } from '@/icons';
 import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
-import { formatPhoneForReading, isValidPhone, phoneValueMode } from '@/lib/phone';
+import { formatPhoneForReading, isAcceptedPhone, phoneValueMode } from '@/lib/phone';
 import { isMinorBirthYear, isValidBirthYear } from '@/lib/registration-gates';
 import type { LinkIdentity } from '@/lib/registration-link';
 
@@ -94,7 +94,7 @@ export function CallToRegisterForm(props: Readonly<CallToRegisterFormProps>): JS
   });
   const phoneError = ((): HandFieldError | null => {
     if (phone.trim().length === 0) return required(phoneLabel);
-    if (!isValidPhone(phone, phoneCountries))
+    if (!isAcceptedPhone(phone, phoneCountries))
       return { kind: 'invalid', message: copy.invalid(t('phone_invalid')) };
     return null;
   })();

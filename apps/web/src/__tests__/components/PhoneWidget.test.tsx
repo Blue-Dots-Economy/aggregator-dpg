@@ -10,7 +10,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { WidgetProps } from '@rjsf/utils';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
-import { PhoneWidget, localDigits } from '@/components/forms/custom-widgets/PhoneWidget';
+import { PhoneWidget } from '@/components/forms/custom-widgets/PhoneWidget';
 import { withPhoneWidget } from '@/lib/phone-ui-schema';
 import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
 
@@ -111,16 +111,6 @@ describe('<PhoneWidget /> with configured countries', () => {
     const { input, onChange } = renderIt('+44 7911 123456', 'IN:+91,GB:+44');
     expect(onChange).toHaveBeenCalledWith('+447911123456');
     expect(input).toHaveValue('7911123456');
-  });
-});
-
-describe('localDigits', () => {
-  it('reads the local part of stored values', () => {
-    expect(localDigits('+919')).toBe('9');
-    expect(localDigits('+919876543210')).toBe('9876543210');
-    expect(localDigits('919876543210')).toBe('9876543210');
-    expect(localDigits('9876543210')).toBe('9876543210');
-    expect(localDigits(undefined)).toBe('');
   });
 });
 

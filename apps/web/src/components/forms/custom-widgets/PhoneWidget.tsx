@@ -8,28 +8,14 @@
 
 import { useEffect } from 'react';
 import type { WidgetProps } from '@rjsf/utils';
-import { PHONE_COUNTRY_CODE, PHONE_LOCAL_DIGITS } from '@aggregator-dpg/shared-primitives/phone';
+import { PHONE_COUNTRY_CODE } from '@aggregator-dpg/shared-primitives/phone';
 import { PhoneInput } from '../PhoneInput';
 import { errorAria } from '../error-aria';
 import { joinPhone, phoneValueMode, splitPhone, type PhoneCountries } from '@/lib/phone';
 import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
 
+/** India's code; network schemas write their sample placeholders with it. */
 const PREFIX = `+${PHONE_COUNTRY_CODE}`;
-
-/** The local digits of a stored value (`+91…`, `91…` with all digits, or bare digits). */
-export function localDigits(value: unknown): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  const rest = text.startsWith(PREFIX) ? text.slice(PREFIX.length) : text;
-  let digits = rest.replace(/\D/g, '');
-  if (
-    !text.startsWith('+') &&
-    digits.length > PHONE_LOCAL_DIGITS &&
-    digits.startsWith(PHONE_COUNTRY_CODE)
-  ) {
-    digits = digits.slice(PHONE_COUNTRY_CODE.length);
-  }
-  return digits.slice(0, PHONE_LOCAL_DIGITS);
-}
 
 /** Characters a phone number is written with; other text is left as typed. */
 const PHONE_LAYOUT = /^[\d+\s\-().]+$/;
