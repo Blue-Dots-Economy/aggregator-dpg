@@ -179,7 +179,7 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
 function makeJob(overrides: Partial<BulkRowProcessJob> = {}): BulkRowProcessJob {
   return {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',

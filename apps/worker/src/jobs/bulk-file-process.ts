@@ -15,7 +15,7 @@
 import type { Readable } from 'node:stream';
 import { eq } from 'drizzle-orm';
 import { getObjectStorage } from '@aggregator-dpg/object-storage';
-import { jobUserId, type BulkFileProcessJob } from '@aggregator-dpg/queue';
+import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
@@ -54,7 +54,7 @@ function failureReason(reason: FileFailureReason, detail?: string): string {
 }
 
 export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessOutcome> {
-  const userId = jobUserId(job);
+  const { userId } = job;
   const log = logger.child({
     operation: 'bulkFileProcess',
     upload_id: job.uploadId,
@@ -171,8 +171,6 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     const payloads = slice.map((r) => ({
       uploadId: job.uploadId,
       userId,
-      // Still written so a worker of an older release can read the job.
-      aggregatorId: userId,
       rowIndex: r.rowIndex,
       schemaId: job.schemaId,
       schemaVersion: job.schemaVersion,

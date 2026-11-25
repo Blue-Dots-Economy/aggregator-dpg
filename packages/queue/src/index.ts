@@ -40,9 +40,7 @@ export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 export interface BulkFileProcessJob {
   uploadId: string;
   /** The coordinator's `users.id`. */
-  userId?: string;
-  /** The same id under its former name, written by the worker only. */
-  aggregatorId?: string;
+  userId: string;
   s3Key: string;
   participantType: string;
   schemaId: string;
@@ -52,9 +50,7 @@ export interface BulkFileProcessJob {
 export interface BulkRowProcessJob {
   uploadId: string;
   /** The coordinator's `users.id`. */
-  userId?: string;
-  /** The same id under its former name, written by the worker only. */
-  aggregatorId?: string;
+  userId: string;
   rowIndex: number;
   /** Pinned schema id, propagated from File Processor so Row Processor avoids a per-row DB read. */
   schemaId: string;
@@ -64,22 +60,6 @@ export interface BulkRowProcessJob {
   participantType: string;
   /** Parsed payload after CSV → object conversion. */
   payload: Record<string, unknown>;
-}
-
-/**
- * The coordinator's `users.id` carried by a bulk job: `userId`, else
- * `aggregatorId`.
- *
- * Read the id through this, never from either field.
- *
- * @param job - A bulk file or row job.
- * @returns The coordinator's id.
- * @throws {TypeError} If the job carries neither name.
- */
-export function jobUserId(job: Pick<BulkFileProcessJob, 'userId' | 'aggregatorId'>): string {
-  const id = job.userId ?? job.aggregatorId;
-  if (!id) throw new TypeError('bulk job carries no user id');
-  return id;
 }
 
 export interface BulkFinaliseJob {
