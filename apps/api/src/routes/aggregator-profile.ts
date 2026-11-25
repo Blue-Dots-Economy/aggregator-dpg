@@ -79,7 +79,7 @@ const ProfileIdentitySchema = z
 
 // PII sub-objects use the full entity schemas so undeclared keys are never serialized.
 const ProfileCommonResponseShape = {
-  aggregator_id: z.string(),
+  user_id: z.string(),
   org_slug: z.string(),
   actor_type: z.string(),
   type: z.string().nullable(),
@@ -152,7 +152,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       );
 
       return reply.send({
-        aggregator_id: auth.userId,
+        user_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
         // Falls back to the slug only when the name is empty.
         org_name: aggregator.value.name || aggregator.value.orgSlug,
@@ -290,7 +290,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       }
 
       return reply.send({
-        aggregator_id: auth.userId,
+        user_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
         name: aggregator.value.name,
         actor_type: aggregator.value.actorType,

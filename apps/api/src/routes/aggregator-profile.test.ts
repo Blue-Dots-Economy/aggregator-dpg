@@ -97,7 +97,7 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(body.aggregator_id).toBe(userId);
+    expect(body.user_id).toBe(userId);
     // The removed `aggregator_profile` keys must not reappear in the response.
     for (const k of [
       'contact_name',
@@ -713,11 +713,11 @@ describe('aggregator profile routes, owner acting as its coordinator account', (
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
-      aggregator_id: string;
+      user_id: string;
       serves: string[];
       identity: Record<string, unknown>;
     };
-    expect(body.aggregator_id).toBe(COORD);
+    expect(body.user_id).toBe(COORD);
     expect(body.serves).toEqual(['seeker', 'provider']);
     expect(body.identity).toEqual({
       first_name: 'Asha Rao',

@@ -250,14 +250,14 @@ describe('submitRegistration', () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+        new Response(JSON.stringify({ user_id: 'agg-1' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
     ) as unknown as typeof fetch;
 
     const result = await submitRegistration('/api/aggregator/register', { name: 'Acme' });
-    expect(result).toEqual({ ok: true, body: { aggregator_id: 'agg-1' } });
+    expect(result).toEqual({ ok: true, body: { user_id: 'agg-1' } });
   });
 
   it('returns an empty body when a 2xx body is not a JSON object', async () => {

@@ -331,7 +331,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -351,7 +351,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "status",
                     "message",
@@ -2017,7 +2017,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -2230,7 +2230,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "actor_type",
                     "type",
@@ -2619,7 +2619,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -2789,7 +2789,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "actor_type",
                     "type",
@@ -21082,7 +21082,7 @@
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
                     },
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "from": {
@@ -21099,7 +21099,7 @@
                     "passed",
                     "failed",
                     "skipped",
-                    "aggregator_id",
+                    "user_id",
                     "from",
                     "to"
                   ],
@@ -21316,7 +21316,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "from": {
@@ -21368,7 +21368,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "from",
                     "to",
                     "by_source"

@@ -36,7 +36,7 @@ const BecknLocationSchema = z
 
 /** Response of `GET /v1/aggregators/profile/me`, plus the Keycloak `identity` fragment. */
 export const ProfileApiResponseSchema = z.object({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   org_slug: z.string(),
   org_name: z.string(),
   actor_type: ActorTypeSchema,
@@ -114,7 +114,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   };
   return {
-    id: api.aggregator_id,
+    id: api.user_id,
     org: api.org_name || '',
     registered: fmtDate(api.created_at),
     coordinator,

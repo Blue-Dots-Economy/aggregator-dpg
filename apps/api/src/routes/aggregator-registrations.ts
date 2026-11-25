@@ -54,7 +54,7 @@ const CoordinatorInviteAcceptBodySchema = RegistrationPayloadSchema.extend({
 
 /** `201` of an invite accept: the account is pending until the email code is entered. */
 const InviteAcceptedResponseSchema = z.object({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   org_slug: z.string(),
   status: z.literal('pending'),
   message: z.string(),
@@ -263,7 +263,7 @@ async function acceptCoordinatorInvite(
       'invited coordinator registered; awaiting email verification',
     );
     return reply.status(201).send({
-      aggregator_id: userId,
+      user_id: userId,
       org_slug: orgSlug,
       status: 'pending',
       message: 'Registration received. Sign in with the code we email you to finish.',

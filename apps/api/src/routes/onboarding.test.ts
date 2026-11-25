@@ -176,7 +176,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as Record<string, unknown>;
       expect(body).toMatchObject({
-        aggregator_id: AGG_A,
+        user_id: AGG_A,
         from: null,
         to: null,
         total: 0,
@@ -275,10 +275,10 @@ describe('onboarding routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as {
-        aggregator_id: string;
+        user_id: string;
         by_source: Array<{ source: string; total: number }>;
       };
-      expect(body.aggregator_id).toBe(AGG_A);
+      expect(body.user_id).toBe(AGG_A);
       expect(body.by_source).toHaveLength(2);
       expect(body.by_source.find((r) => r.source === 'bulk')?.total).toBe(10);
       expect(body.by_source.find((r) => r.source === 'link')?.total).toBe(5);
@@ -391,7 +391,7 @@ describe('onboarding routes', () => {
         headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: OWN },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ aggregator_id: OWN, total: 5 });
+      expect(res.json()).toMatchObject({ user_id: OWN, total: 5 });
       if (!is(lastWhereCondition, SQL)) throw new Error('no query ran');
       const where = new PgDialect().sqlToQuery(lastWhereCondition);
       expect(where.params).toContain(OWN);

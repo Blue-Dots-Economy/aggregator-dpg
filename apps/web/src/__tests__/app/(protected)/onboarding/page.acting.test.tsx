@@ -54,7 +54,7 @@ const ACCOUNT_ID = '7d0f2c1e-4b8a-4c3d-9e2f-1a2b3c4d5e6f';
 
 /** The API's profile read for the acting owner's coordinator account. */
 const profile = {
-  aggregator_id: ACCOUNT_ID,
+  user_id: ACCOUNT_ID,
   org_slug: 'acme-owner',
   org_name: 'Acme Jobs',
   actor_type: 'aggregator',
