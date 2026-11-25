@@ -55,6 +55,9 @@ export type PhoneParseResult = PhoneParseOk | PhoneParseError;
  */
 export const STORED_PHONE_REGEX = /^\+\d{10,15}$/;
 
+/** Characters a typed phone may hold; the library would otherwise drop letters ("ext 5") silently. */
+export const PHONE_INPUT_SHAPE = /^\+?[\d\s\-().]+$/;
+
 /** Number types a mobile field accepts; some countries (US, CA) do not tell mobiles from landlines. */
 const MOBILE_TYPES: ReadonlySet<PhoneNumberType> = new Set<PhoneNumberType>([
   'MOBILE',
@@ -77,6 +80,9 @@ function refuse(reason: PhoneParseReason, message: string): PhoneParseError {
  */
 export function parsePhone(raw: string, rules: PhoneRules): PhoneParseResult {
   if (!raw?.trim()) return refuse('empty', 'phone is empty');
+  if (!PHONE_INPUT_SHAPE.test(raw.trim())) {
+    return refuse('not_a_number', 'phone is not a phone number');
+  }
   const phone = parsePhoneNumberFromString(raw, rules.countries[0]);
   if (!phone) return refuse('not_a_number', 'phone is not a phone number');
 

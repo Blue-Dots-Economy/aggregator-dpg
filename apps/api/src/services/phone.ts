@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import {
   ALL_PHONE_COUNTRIES,
+  PHONE_INPUT_SHAPE,
   parsePhone,
   phoneForSchema,
   type PhoneParseResult,
@@ -68,9 +69,6 @@ export function phoneForField(
 
 /** Longest typed phone accepted: 15 digits plus room for spacing and punctuation. */
 const PHONE_INPUT_MAX_LENGTH = 32;
-
-/** Characters a typed phone may hold; the parser would otherwise drop letters silently. */
-const PHONE_INPUT_SHAPE = /^\+?[\d\s\-().]+$/;
 
 /** A request field holding a callback phone (landlines allowed); parses to E.164. */
 export const ContactPhoneField = z
