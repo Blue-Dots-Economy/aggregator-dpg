@@ -276,6 +276,37 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     expect(result.reasons[0]).toContain('schema_load_failed: SCHEMA_NOT_FOUND');
   });
 
+  it('fails when only the schema fails to load, rather than guessing the phone form', async () => {
+    schemaResultVal = { success: false, error: { code: 'SCHEMA_NOT_FOUND' } };
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('system_error');
+    expect(result.reasons[0]).toContain('schema_load_failed: SCHEMA_NOT_FOUND');
+  });
+
+  it('passes a landline-range number on to Signals, which knows whether the person exists', async () => {
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+918020123456' } }),
+    );
+    expect(result.outcome).toBe('passed');
+  });
+
+  it("gives Signals' reason for an out-of-country number in errors.csv", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_PHONE: phone numbers starting +44 are not accepted',
+        'phone numbers starting +44 are not accepted',
+        { code: 'INVALID_PHONE' },
+      ),
+    );
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+447400123456' } }),
+    );
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['phone numbers starting +44 are not accepted']);
+  });
+
   it('fails a row with a blocking (non-required) schema validation error', async () => {
     validatorResult = {
       success: true,

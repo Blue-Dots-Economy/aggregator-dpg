@@ -6,6 +6,7 @@
  */
 
 import {
+  ALL_PHONE_COUNTRIES,
   parsePhone,
   phoneForSchema as sharedPhoneForSchema,
   type PhoneParseResult,
@@ -20,6 +21,20 @@ import { config } from '../config.js';
  */
 export function parseMobilePhone(raw: string): PhoneParseResult {
   return parsePhone(raw, { countries: config.PHONE_COUNTRIES, kind: 'mobile' });
+}
+
+/**
+ * Reads a row's phone: any valid number in any country, so a person stored under
+ * older, wider rules is still found. Signals refuses a non-mobile for a new person.
+ *
+ * @param raw - The phone as written in the CSV row.
+ * @returns The E.164 phone, or the reason it was refused.
+ */
+export function parseKnownPhone(raw: string): PhoneParseResult {
+  return parsePhone(raw, {
+    countries: [config.PHONE_COUNTRIES[0], ...ALL_PHONE_COUNTRIES],
+    kind: 'any',
+  });
 }
 
 /**

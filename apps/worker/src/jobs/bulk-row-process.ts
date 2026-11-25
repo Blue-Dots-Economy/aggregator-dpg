@@ -35,7 +35,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
-import { parseMobilePhone, phoneForSchema } from '../services/phone.js';
+import { parseKnownPhone, phoneForSchema } from '../services/phone.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -143,22 +143,31 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       log,
     );
   }
+  // The schema is needed too: the phone is written back in the form its pattern takes.
+  if (!schemaResult.success) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`schema_load_failed: ${schemaResult.error.code}`],
+      },
+      log,
+    );
+  }
   // 1a, continued. A spaced or dashed phone would fail the pattern, and networks that
   // store bare digits need the number without its code.
   if (phoneNormalised) {
     job.payload[phoneSourceKey] = phoneForSchema(
       phoneNormalised,
-      schemaResult.success ? schemaResult.value : null,
+      schemaResult.value,
       phoneSourceKey,
     );
   }
   // 1b. Remove the well-known geo column before Ajv runs. It is not a schema
   // property, so it would fail `additionalProperties: false` and would leak
   // into `item_state`. If the schema declares the column itself, leave it.
-  const schemaOwnsGeo = schemaOwnsColumn(
-    schemaResult.success ? schemaResult.value : null,
-    GEO_LOCATION_COLUMN,
-  );
+  const schemaOwnsGeo = schemaOwnsColumn(schemaResult.value, GEO_LOCATION_COLUMN);
   const geoRaw = schemaOwnsGeo ? undefined : job.payload[GEO_LOCATION_COLUMN];
   if (!schemaOwnsGeo) delete job.payload[GEO_LOCATION_COLUMN];
   const geo = parseGeoLocation(geoRaw);
@@ -173,24 +182,21 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     });
   }
 
-  if (schemaResult.success) {
-    const cfg = await getNetworkConfig();
-    preprocessArrayCells(
-      job.payload,
-      schemaResult.value,
-      cfg.aggregator.network.csv_array_delimiter,
-    );
-    // Drop empty cells so Ajv does not fail type/enum/length checks on
-    // fields the operator left blank. Signals accepts partial item_state.
-    stripAllEmptyCells(job.payload);
-  }
+  preprocessArrayCells(
+    job.payload,
+    schemaResult.value,
+    networkCfg.aggregator.network.csv_array_delimiter,
+  );
+  // Drop empty cells so Ajv does not fail type/enum/length checks on
+  // fields the operator left blank. Signals accepts partial item_state.
+  stripAllEmptyCells(job.payload);
 
   // Missing required fields do not fail the row; Signals stores it as a
   // draft. Type, format, pattern and enum errors do fail the row, since
   // Signals would reject them too.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
-    const rowSchema = schemaResult.success ? schemaResult.value : undefined;
+    const rowSchema = schemaResult.value;
     const issues = blockingIssues(validate.errors ?? []);
     if (issues.length > 0) {
       const delimiter = (await getNetworkConfig()).aggregator.network.csv_array_delimiter;
@@ -363,6 +369,8 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   // through the portal, so the operator removes the row.
   U18_NOT_ALLOWED: 'validation',
   LOCATION_OUTSIDE_COUNTRY: 'validation',
+  // A new person's phone that is not a mobile in PHONE_COUNTRIES.
+  INVALID_PHONE: 'validation',
   // The person already exists in another domain or with a clashing identity.
   DOMAIN_LOCKED: 'duplicate',
   USER_ALREADY_EXISTS: 'duplicate',
@@ -748,7 +756,7 @@ function checkRowPhone(
 ): { phone: string | null; failure: RowOutcome | null } {
   const raw = stringCell(payload, key)?.trim();
   if (!raw) return { phone: null, failure: null };
-  const phone = parseMobilePhone(raw);
+  const phone = parseKnownPhone(raw);
   if (phone.ok) return { phone: phone.value, failure: null };
   return {
     phone: null,
