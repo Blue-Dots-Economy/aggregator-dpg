@@ -501,23 +501,17 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const body = req.body;
 
       const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-      if (found.value.status !== 'draft') {
+      const link = await findOwnLink(linkId, auth.userId);
+      if (link.status !== 'draft') {
         throw httpError('CONFLICT', {
           detail: 'Only draft links can be edited. Retire this link and create a new one.',
-          fields: { link_status: found.value.status },
+          fields: { link_status: link.status },
         });
       }
 
       // Same slug retry as create. Without a requested slug, keep the current one.
       let updated;
-      let slug = found.value.slug;
+      let slug = link.slug;
       if (body.slug !== undefined) {
         for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
           slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
@@ -604,16 +598,9 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       // Validated by the route schema.
       const { id: linkId } = req.params;
 
-      const result = await getRegistrationLinksStore().findById(linkId, auth.userId);
-      if (!result.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-      }
-      if (!result.value) {
-        // 403 so other aggregators' links cannot be enumerated.
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
+      const link = await findOwnLink(linkId, auth.userId);
       const orgSlug = await resolveOrgSlug(auth.userId);
-      return reply.send(await buildResponse(result.value, orgSlug));
+      return reply.send(await buildResponse(link, orgSlug));
     },
   );
 
@@ -646,25 +633,19 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const start = Date.now();
 
       const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
+      const link = await findOwnLink(linkId, auth.userId);
 
       const orgSlug = await resolveOrgSlug(auth.userId);
-      if (found.value.status === 'live') {
+      if (link.status === 'live') {
         log.info({ status: 'skipped', reason: 'already_live', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
+        return reply.send(await buildResponse(link, orgSlug));
       }
-      if (found.value.status === 'retired') {
+      if (link.status === 'retired') {
         throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
       }
 
       // The slug is now fixed, so the public URL is final. The QR is generated client-side.
-      const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
+      const publicUrl = buildPublicUrl(orgSlug, link.slug);
 
       const updated = await store.updateStatus(linkId, auth.userId, 'live');
       if (!updated.ok) {
@@ -674,7 +655,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        previous_status: found.value.status,
+        previous_status: link.status,
       });
 
       return reply.send(await buildResponse(updated.value, orgSlug, { publicUrl }));
@@ -710,18 +691,12 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const start = Date.now();
 
       const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
+      const link = await findOwnLink(linkId, auth.userId);
 
       const orgSlug = await resolveOrgSlug(auth.userId);
-      if (found.value.status === 'retired') {
+      if (link.status === 'retired') {
         log.info({ status: 'skipped', reason: 'already_retired', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
+        return reply.send(await buildResponse(link, orgSlug));
       }
 
       const updated = await store.updateStatus(linkId, auth.userId, 'retired');
@@ -732,12 +707,32 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        previous_status: found.value.status,
+        previous_status: link.status,
       });
 
       return reply.send(await buildResponse(updated.value, orgSlug));
     },
   );
+}
+
+/**
+ * Reads one of the caller's own registration links.
+ *
+ * @param linkId - The link id from the path.
+ * @param userId - The caller's `users.id`; the store returns only that user's links.
+ * @returns The link.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws FORBIDDEN if no link of the caller has this id, so other coordinators' links cannot be enumerated.
+ */
+async function findOwnLink(linkId: string, userId: string): Promise<RegistrationLink> {
+  const found = await getRegistrationLinksStore().findById(linkId, userId);
+  if (!found.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+  }
+  if (!found.value) {
+    throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+  }
+  return found.value;
 }
 
 /**

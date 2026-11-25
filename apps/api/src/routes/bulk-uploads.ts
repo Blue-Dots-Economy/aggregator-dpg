@@ -21,7 +21,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
-import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
+import { getBulkUploadsStore, type BulkUpload } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
@@ -443,16 +443,8 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       const start = Date.now();
 
       const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
-      const upload = found.value;
       // Already past 'uploaded': return the current state.
       if (upload.status !== 'pending' && upload.status !== 'uploaded') {
         log.warn({
@@ -624,17 +616,10 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
 
-      const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
-      const counts = await loadCounts(found.value.id, found.value.status);
-      return reply.send(toResponse(found.value, counts));
+      const counts = await loadCounts(upload.id, upload.status);
+      return reply.send(toResponse(upload, counts));
     },
   );
 
@@ -667,16 +652,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       });
       const start = Date.now();
 
-      const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.userId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
-      const upload = found.value;
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
       if (upload.status !== 'completed') {
         log.info({
@@ -916,6 +892,26 @@ async function loadCountsBatch(
     out.set(u.id, await loadCountsFromRedis(u.id));
   }
   return out;
+}
+
+/**
+ * Reads one of the caller's own uploads.
+ *
+ * @param uploadId - The upload id from the path.
+ * @param userId - The caller's `users.id`; the store returns only that user's uploads.
+ * @returns The upload.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws FORBIDDEN if no upload of the caller has this id, so other coordinators' uploads cannot be enumerated.
+ */
+async function findOwnUpload(uploadId: string, userId: string): Promise<BulkUpload> {
+  const found = await getBulkUploadsStore().findById(uploadId, userId);
+  if (!found.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+  }
+  if (!found.value) {
+    throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
+  }
+  return found.value;
 }
 
 /**
