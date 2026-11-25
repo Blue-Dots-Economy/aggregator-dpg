@@ -208,7 +208,7 @@ function actingInvalid(message: string): AuthResult {
  * Builds an {@link AuthContext} from a verified token's optional claims.
  *
  * @param subject - The token `sub`.
- * @param userId - The resolved `aggregator_id`.
+ * @param userId - The user's `users.id`, from the `user_id` claim, else `aggregator_id`.
  * @param payload - The verified JWT payload.
  * @returns The auth context; optional fields set only when present.
  */

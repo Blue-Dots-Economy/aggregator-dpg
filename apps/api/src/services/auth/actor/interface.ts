@@ -49,7 +49,7 @@ export interface Actor {
 
 /** Input of {@link ActorResolverBase.resolve}: verified token claims. */
 export interface ResolveActorInput {
-  /** The `aggregator_id` claim, when the token carries one. */
+  /** The user's `users.id`, from the `user_id` claim, else `aggregator_id`, when the token carries one. */
   userId?: string;
   /** The token's `sub` (the IdP login). */
   subject: string;
