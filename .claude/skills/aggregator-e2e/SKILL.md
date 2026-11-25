@@ -173,8 +173,8 @@ when something fails.
 - **An already-used invite still renders the whole form.** Enforcement is at
   submit, not on the landing. Expected today — the user fills the form before
   being told. Worth flagging as UX, not as a test failure.
-- **`403 MISSING_AGGREGATOR_ID` on `/profile` is a setup gap, not a code bug.**
-  The `aggregator_id` + `phone_number` protocol mappers must be added by hand
+- **`403 MISSING_USER_ID` on `/profile` is a setup gap, not a code bug.**
+  The `user_id` + `phone_number` protocol mappers must be added by hand
   after a fresh realm import (`SETUP.md` §5). Report it as a SKIP with that
   pointer.
 - **Login bouncing after the OTP** means the Keycloak client's valid redirect

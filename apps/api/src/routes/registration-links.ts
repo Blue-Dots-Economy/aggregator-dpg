@@ -8,20 +8,22 @@
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
  * All endpoints need an authenticated aggregator JWT and are scoped by the
- * `aggregator_id` claim.
+ * `user_id` claim.
  */
 
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
-import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import type {
+  RegistrationLink,
+  RegistrationLinkStatus,
+} from '../services/registration-links-store/index.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { config, enabledRegistrationModes } from '../config.js';
@@ -29,7 +31,6 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import {
   botsForDomain,
   modeOffersVoice,
@@ -37,6 +38,7 @@ import {
   resolveVoiceBot,
 } from '../services/voice-bots/index.js';
 import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 type LinkMetrics = {
   total: number;
@@ -52,7 +54,7 @@ const ZERO_METRICS: LinkMetrics = { total: 0, passed: 0, failed: 0, skipped: 0 }
  * aggregator. Returns a Map keyed by link_id; a missing key means no submissions yet.
  */
 async function fetchLinkMetrics(
-  aggregatorId: string,
+  userId: string,
   linkIds: string[],
 ): Promise<Map<string, LinkMetrics>> {
   const out = new Map<string, LinkMetrics>();
@@ -68,7 +70,7 @@ async function fetchLinkMetrics(
     .from(onboarding)
     .where(
       and(
-        eq(onboarding.userId, aggregatorId),
+        eq(onboarding.userId, userId),
         eq(onboarding.source, 'link'),
         inArray(onboarding.linkId, linkIds),
       ),
@@ -234,11 +236,11 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.create',
-        actor: auth.userId,
-        aggregator_id: auth.aggregatorId,
+        actor: auth.subject,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
@@ -285,7 +287,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           slug = generateSlug();
         }
         const result = await store.create({
-          aggregatorId: auth.aggregatorId,
+          userId: auth.userId,
           slug,
           domain: body.domain,
           context: body.context,
@@ -293,7 +295,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           registrationMode: modeKey,
           voiceBotKey,
           expiresAt: body.expires_at,
-          createdBy: auth.userId,
+          createdBy: auth.subject,
         });
         if (result.ok) {
           created = result.value;
@@ -323,7 +325,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
 
       // Coordinator org_slug for the URL path.
       const userStore = getUserStore();
-      const aggLookup = await userStore.findById(auth.aggregatorId);
+      const aggLookup = await userStore.findById(auth.userId);
       if (!aggLookup.ok || !aggLookup.value) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(
@@ -380,11 +382,11 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.voiceBots',
-        actor: auth.userId,
-        aggregator_id: auth.aggregatorId,
+        actor: auth.subject,
+        aggregator_id: auth.userId,
       });
       const { domain } = req.query;
       const networkCfg = await getNetworkConfig();
@@ -422,19 +424,19 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.list',
-        actor: auth.userId,
-        aggregator_id: auth.aggregatorId,
+        actor: auth.subject,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
       // Validated and defaulted by the route schema.
       const { status, limit, offset } = req.query;
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      const result = await getRegistrationLinksStore().list(auth.aggregatorId, {
+      const orgSlug = await resolveOrgSlug(auth.userId);
+      const result = await getRegistrationLinksStore().list(auth.userId, {
         ...(status ? { status } : {}),
         limit,
         offset,
@@ -445,7 +447,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
 
       // One grouped query for all link metrics, avoiding N+1.
       const metricsById = await fetchLinkMetrics(
-        auth.aggregatorId,
+        auth.userId,
         result.value.rows.map((r) => r.id),
       );
       const items = await Promise.all(
@@ -489,13 +491,13 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schemas; the `.strict()` schema rejects unknown keys
       // such as registration_mode.
       const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.update',
-        actor: auth.userId,
+        actor: auth.subject,
         link_id: linkId,
       });
       const start = Date.now();
@@ -503,27 +505,20 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       const body = req.body;
 
       const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-      if (found.value.status !== 'draft') {
+      const link = await findOwnLink(linkId, auth.userId);
+      if (link.status !== 'draft') {
         throw httpError('CONFLICT', {
           detail: 'Only draft links can be edited. Retire this link and create a new one.',
-          fields: { link_status: found.value.status },
+          fields: { link_status: link.status },
         });
       }
 
       // Same slug retry as create. Without a requested slug, keep the current one.
       let updated;
-      let slug = found.value.slug;
       if (body.slug !== undefined) {
         for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
-          slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
-          const result = await store.updateDraft(linkId, auth.aggregatorId, {
+          const slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
+          const result = await store.updateDraft(linkId, auth.userId, {
             slug,
             ...(body.context !== undefined ? { context: body.context } : {}),
             ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
@@ -559,7 +554,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
           });
         }
       } else {
-        const result = await store.updateDraft(linkId, auth.aggregatorId, {
+        const result = await store.updateDraft(linkId, auth.userId, {
           ...(body.context !== undefined ? { context: body.context } : {}),
           ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
         });
@@ -574,7 +569,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
         updated = result.value;
       }
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
+      const orgSlug = await resolveOrgSlug(auth.userId);
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
@@ -602,20 +597,13 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
       const { id: linkId } = req.params;
 
-      const result = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
-      if (!result.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-      }
-      if (!result.value) {
-        // 403 so other aggregators' links cannot be enumerated.
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      return reply.send(await buildResponse(result.value, orgSlug));
+      const link = await findOwnLink(linkId, auth.userId);
+      const orgSlug = await resolveOrgSlug(auth.userId);
+      return reply.send(await buildResponse(link, orgSlug));
     },
   );
 
@@ -637,49 +625,26 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params;
-      const log = req.log.child({
-        operation: 'registrationLinks.activate',
-        actor: auth.userId,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      const change = await beginLinkStatusChange(req, req.params.id, 'registrationLinks.activate');
+      const { link, orgSlug } = change;
+      if (link.status === 'live') {
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_live',
+          latency_ms: Date.now() - change.start,
+        });
+        return reply.send(await buildResponse(link, orgSlug));
       }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      if (found.value.status === 'live') {
-        log.info({ status: 'skipped', reason: 'already_live', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
-      }
-      if (found.value.status === 'retired') {
+      if (link.status === 'retired') {
         throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
       }
 
       // The slug is now fixed, so the public URL is final. The QR is generated client-side.
-      const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
+      const publicUrl = buildPublicUrl(orgSlug, link.slug);
 
-      const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: found.value.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug, { publicUrl }));
+      const updated = await commitLinkStatus(change, 'live');
+      return reply.send(await buildResponse(updated, orgSlug, { publicUrl }));
     },
   );
 
@@ -701,52 +666,114 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params;
-      const log = req.log.child({
-        operation: 'registrationLinks.deactivate',
-        actor: auth.userId,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+      const change = await beginLinkStatusChange(
+        req,
+        req.params.id,
+        'registrationLinks.deactivate',
+      );
+      const { link, orgSlug } = change;
+      if (link.status === 'retired') {
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_retired',
+          latency_ms: Date.now() - change.start,
+        });
+        return reply.send(await buildResponse(link, orgSlug));
       }
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      if (found.value.status === 'retired') {
-        log.info({ status: 'skipped', reason: 'already_retired', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
-      }
-
-      const updated = await store.updateStatus(linkId, auth.aggregatorId, 'retired');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: found.value.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug));
+      const updated = await commitLinkStatus(change, 'retired');
+      return reply.send(await buildResponse(updated, orgSlug));
     },
   );
+}
+
+/** A status change on one of the caller's own links, started by {@link beginLinkStatusChange}. */
+interface LinkStatusChange {
+  auth: AuthContext;
+  linkId: string;
+  log: FastifyBaseLogger;
+  /** When the request started, for `latency_ms`. */
+  start: number;
+  link: RegistrationLink;
+  orgSlug: string;
+}
+
+/**
+ * Starts a status change: verifies the coordinator, then reads its link and its org slug.
+ *
+ * @param req - The incoming request.
+ * @param linkId - The link id from the path.
+ * @param operation - The log operation name.
+ * @returns The verified caller, the link and the request logger.
+ * @throws The sign-in and link-read errors of {@link requireCoordinatorAuth} and {@link findOwnLink}.
+ */
+async function beginLinkStatusChange(
+  req: FastifyRequest,
+  linkId: string,
+  operation: string,
+): Promise<LinkStatusChange> {
+  const auth = await requireCoordinatorAuth(req);
+  const log = req.log.child({ operation, actor: auth.subject, link_id: linkId });
+  const start = Date.now();
+  const link = await findOwnLink(linkId, auth.userId);
+  const orgSlug = await resolveOrgSlug(auth.userId);
+  return { auth, linkId, log, start, link, orgSlug };
+}
+
+/**
+ * Writes the link's new status and logs the change.
+ *
+ * @param change - The started change.
+ * @param nextStatus - The status to set.
+ * @returns The updated link.
+ * @throws DB_UNAVAILABLE if the store write fails.
+ */
+async function commitLinkStatus(
+  change: LinkStatusChange,
+  nextStatus: RegistrationLinkStatus,
+): Promise<RegistrationLink> {
+  const updated = await getRegistrationLinksStore().updateStatus(
+    change.linkId,
+    change.auth.userId,
+    nextStatus,
+  );
+  if (!updated.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
+  }
+  change.log.info({
+    status: 'success',
+    latency_ms: Date.now() - change.start,
+    previous_status: change.link.status,
+  });
+  return updated.value;
+}
+
+/**
+ * Reads one of the caller's own registration links.
+ *
+ * @param linkId - The link id from the path.
+ * @param userId - The caller's `users.id`; the store returns only that user's links.
+ * @returns The link.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws FORBIDDEN if no link of the caller has this id, so other coordinators' links cannot be enumerated.
+ */
+async function findOwnLink(linkId: string, userId: string): Promise<RegistrationLink> {
+  const found = await getRegistrationLinksStore().findById(linkId, userId);
+  if (!found.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+  }
+  if (!found.value) {
+    throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+  }
+  return found.value;
 }
 
 /**
  * Resolves the caller's org_slug, used as a path segment in the public URL.
  */
-async function resolveOrgSlug(aggregatorId: string): Promise<string> {
-  const result = await getUserStore().findById(aggregatorId);
+async function resolveOrgSlug(userId: string): Promise<string> {
+  const result = await getUserStore().findById(userId);
   if (!result.ok || !result.value) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(result.ok ? 'aggregator row missing for caller' : result.error.message),
@@ -782,9 +809,7 @@ async function buildResponse(
   const qrExpiresAt: string | null = null;
   // List calls pass `metrics` from one grouped query; single reads look them up.
   const metrics =
-    overrides.metrics ??
-    (await fetchLinkMetrics(row.aggregatorId, [row.id])).get(row.id) ??
-    ZERO_METRICS;
+    overrides.metrics ?? (await fetchLinkMetrics(row.userId, [row.id])).get(row.id) ?? ZERO_METRICS;
   // Only modes that offer voice carry a bot; old `form`/`voice` links never show one.
   const cfg = await getNetworkConfig();
   const bot = modeOffersVoice(row.registrationMode, cfg) ? resolveVoiceBot(row, cfg).bot : null;
@@ -890,20 +915,4 @@ function generateSlug(): string {
 function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
   return `${base}/${orgSlug}/${slug}`;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
 }

@@ -18,7 +18,7 @@ export type BulkUploadStatus =
 
 export interface BulkUpload {
   id: string;
-  aggregatorId: string;
+  userId: string;
   participantType: string;
   storageKey: string;
   contentFingerprint: string | null;
@@ -35,7 +35,7 @@ export interface BulkUpload {
 }
 
 export interface CreateBulkUploadInput {
-  aggregatorId: string;
+  userId: string;
   participantType: string;
   storageKey: string;
   schemaId: string;
@@ -63,8 +63,8 @@ export interface ListBulkUploadsResult {
 export abstract class BulkUploadsStoreBase {
   /** Create a new upload row in `pending` status. */
   abstract create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>>;
-  /** Find by id; cross-aggregator access blocked at the API layer (caller passes aggregatorId). */
-  abstract findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>>;
+  /** Find by id; cross-aggregator access blocked at the API layer (caller passes userId). */
+  abstract findById(id: string, userId: string): Promise<StoreResult<BulkUpload | null>>;
   /**
    * Paginated list scoped to one aggregator. Most-recent first.
    *
@@ -72,7 +72,7 @@ export abstract class BulkUploadsStoreBase {
    * worker's watchdog failed as `upload_abandoned`.
    */
   abstract list(
-    aggregatorId: string,
+    userId: string,
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>>;
   /**
@@ -84,9 +84,9 @@ export abstract class BulkUploadsStoreBase {
    */
   abstract markUploaded(
     id: string,
-    aggregatorId: string,
+    userId: string,
     contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>>;
   /** Delete a row that is still `pending`. */
-  abstract deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>>;
+  abstract deletePending(id: string, userId: string): Promise<StoreResult<void>>;
 }

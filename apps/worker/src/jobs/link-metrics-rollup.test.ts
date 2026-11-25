@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 interface SelectRow {
   id: string;
   linkId: string;
-  aggregatorId: string;
+  userId: string;
   orgSlug: string;
   outcome: 'passed' | 'failed' | 'skipped';
   createdAt: Date;
@@ -119,7 +119,7 @@ function row(overrides: Partial<SelectRow>): SelectRow {
   return {
     id: 'sub-default',
     linkId: 'link-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     orgSlug: 'org-1',
     outcome: 'passed',
     createdAt: new Date('2024-01-01T10:00:00Z'),

@@ -4,7 +4,7 @@
  * `ProtectedLayout` is an `async function` Server Component — it is invoked
  * directly (not through RTL's `render`) so its body executes exactly like the
  * real Next.js runtime would, and the resolved JSX tree is then handed to
- * `render()`. `getSession`, `tokenAggregatorId`, and `callApi` (which backs
+ * `render()`. `getSession`, `tokenUserId`, and `callApi` (which backs
  * the private `fetchSupportEnabled`) are mocked as black boxes; `Sidebar` is
  * stubbed since its own rendering is out of scope here.
  */
@@ -16,7 +16,7 @@ import type { SessionData } from '@/lib/session';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/jwt', () => ({
-  tokenAggregatorId: vi.fn(),
+  tokenUserId: vi.fn(),
   classifyNonCoordinator: vi.fn(),
   PORTAL_GATE_REASON: {
     signals_participant: 'signals_account_no_portal',
@@ -50,7 +50,7 @@ vi.mock('next/headers', () => ({
 
 import ProtectedLayout from '@/app/(protected)/layout';
 import { getSession } from '@/lib/server-session';
-import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
+import { classifyNonCoordinator, tokenUserId } from '@/lib/jwt';
 import { callApi } from '@/lib/upstream-client';
 import { getConsoleActor } from '@/lib/console-actor';
 import { redirect } from 'next/navigation';
@@ -101,7 +101,7 @@ describe('<ProtectedLayout />', () => {
 
   it('renders children through AuthProvider with the session user + supportEnabled=true', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(
       new Response(JSON.stringify({ enabled: true }), {
         status: 200,
@@ -120,7 +120,7 @@ describe('<ProtectedLayout />', () => {
 
   it('passes the caller capabilities from read/me into AuthProvider', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
     vi.mocked(getConsoleActor).mockResolvedValueOnce({
       ok: true,
@@ -141,7 +141,7 @@ describe('<ProtectedLayout />', () => {
 
   it('hides nothing when the actor cannot be read', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
 
     await renderLayout();
@@ -154,7 +154,7 @@ describe('<ProtectedLayout />', () => {
     vi.mocked(getSession).mockResolvedValue(
       baseSession({ name: undefined, email: undefined, phone: '9990001111', sub: 'user-9' }),
     );
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
 
     await renderLayout();
@@ -168,7 +168,7 @@ describe('<ProtectedLayout />', () => {
   // mis-parses a URL containing `%2F`/`&` in this Vitest version).
   it('sends an org owner to the console instead of signing them out (Phase 5)', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue(null);
+    vi.mocked(tokenUserId).mockReturnValue(null);
     vi.mocked(classifyNonCoordinator).mockReturnValue('org_owner');
 
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
@@ -185,7 +185,7 @@ describe('<ProtectedLayout />', () => {
     // reason told a Signals participant to hunt for approval emails that do
     // not exist for them (#753).
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue(null);
+    vi.mocked(tokenUserId).mockReturnValue(null);
     vi.mocked(classifyNonCoordinator).mockReturnValue(population);
 
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
@@ -199,7 +199,7 @@ describe('<ProtectedLayout />', () => {
 
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
     expect(redirect).toHaveBeenCalledWith('/api/auth/login?returnTo=%2Fdashboard');
-    expect(tokenAggregatorId).not.toHaveBeenCalled();
+    expect(tokenUserId).not.toHaveBeenCalled();
   });
 
   it('redirects to logout with reason=expired when the refresh token has already expired', async () => {
@@ -207,12 +207,12 @@ describe('<ProtectedLayout />', () => {
 
     await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
     expect(redirect).toHaveBeenCalledWith('/api/auth/logout?reason=expired&return=%2Fdashboard');
-    expect(tokenAggregatorId).not.toHaveBeenCalled();
+    expect(tokenUserId).not.toHaveBeenCalled();
   });
 
   it('fails safe to supportEnabled=false when the support-config call throws', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockRejectedValue(new Error('upstream unreachable'));
 
     await renderLayout();
@@ -222,7 +222,7 @@ describe('<ProtectedLayout />', () => {
 
   it('fails safe to supportEnabled=false when the support-config response is not ok', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 503 }) as never);
 
     await renderLayout();
@@ -232,7 +232,7 @@ describe('<ProtectedLayout />', () => {
 
   it('treats a non-boolean/absent `enabled` field as false', async () => {
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(
       new Response(JSON.stringify({}), {
         status: 200,
@@ -250,7 +250,7 @@ describe('<ProtectedLayout />', () => {
     ['the number 1', 1],
   ])('treats `enabled` given as %s as false', async (_label, enabled) => {
     vi.mocked(getSession).mockResolvedValue(baseSession());
-    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(tokenUserId).mockReturnValue('agg-1');
     vi.mocked(callApi).mockResolvedValue(
       new Response(JSON.stringify({ enabled }), {
         status: 200,
@@ -292,7 +292,7 @@ describe('<ProtectedLayout />', () => {
       vi.mocked(getSession).mockResolvedValue(
         baseSession({ name: 'Owner', actingAccountId: ACCOUNT_ID }),
       );
-      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(tokenUserId).mockReturnValue(null);
       vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
       vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: true, me: coordinatorMe });
 
@@ -311,7 +311,7 @@ describe('<ProtectedLayout />', () => {
       vi.mocked(getSession).mockResolvedValue(
         baseSession({ name: 'Owner', actingAccountId: ACCOUNT_ID }),
       );
-      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(tokenUserId).mockReturnValue(null);
       vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
       vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: false, reason: 'unavailable' });
 
@@ -325,7 +325,7 @@ describe('<ProtectedLayout />', () => {
 
     it('ends acting mode and lands on the console notice when the account is no longer valid', async () => {
       vi.mocked(getSession).mockResolvedValue(baseSession({ actingAccountId: ACCOUNT_ID }));
-      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(tokenUserId).mockReturnValue(null);
       vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
       vi.mocked(getConsoleActor).mockResolvedValueOnce({ ok: false, reason: 'acting_invalid' });
 
@@ -337,7 +337,7 @@ describe('<ProtectedLayout />', () => {
 
     it('ends acting mode when /me answers with an admin, not the coordinator account', async () => {
       vi.mocked(getSession).mockResolvedValue(baseSession({ actingAccountId: ACCOUNT_ID }));
-      vi.mocked(tokenAggregatorId).mockReturnValue(null);
+      vi.mocked(tokenUserId).mockReturnValue(null);
       vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
       vi.mocked(getConsoleActor).mockResolvedValueOnce({
         ok: true,
@@ -352,7 +352,7 @@ describe('<ProtectedLayout />', () => {
 
     it('is not acting for a plain coordinator', async () => {
       vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
-      vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+      vi.mocked(tokenUserId).mockReturnValue('agg-1');
       vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
 
       await renderLayout();

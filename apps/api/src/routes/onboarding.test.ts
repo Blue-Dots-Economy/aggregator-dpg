@@ -3,7 +3,7 @@
  * (`GET /v1/onboarding/summary`, `GET /v1/onboarding/by-source`).
  *
  * Both routes are thin aggregation reads over the `onboarding` rollup table,
- * scoped to the caller's `aggregator_id` and optionally date-bounded by
+ * scoped to the caller's `user_id` and optionally date-bounded by
  * `?from=&to=`. Covers the auth wrapper, the date-range query validation,
  * and both aggregation shapes.
  *
@@ -78,15 +78,15 @@ describe('onboarding routes', () => {
 
     _setAccessTokenVerifier(async (token) => {
       if (token === 'approved') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'approved' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'approved' };
       }
       if (token === 'pending') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'pending' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'pending' };
       }
       if (token === 'serves-both') {
         return {
           sub: 'kc-1',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: ['seeker', 'provider'],
         };
@@ -94,7 +94,7 @@ describe('onboarding routes', () => {
       if (token === 'serves-seeker') {
         return {
           sub: 'kc-1',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: ['seeker'],
         };
@@ -128,7 +128,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/onboarding/summary',
@@ -224,7 +224,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/onboarding/by-source',

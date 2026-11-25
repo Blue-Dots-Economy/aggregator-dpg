@@ -47,18 +47,18 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       if (token === 'good-token') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-9',
+          user_id: 'agg-9',
           email: 'asha@example.com',
           preferred_username: 'Asha K',
           phone_number: '+919000000000',
         };
       }
-      // An organisation owner signed in to the console: no `aggregator_id`.
+      // An organisation owner signed in to the console: no `user_id`.
       if (token === 'owner-token') {
         return { sub: 'owner-sub', email: 'owner@org.com', preferred_username: 'owner@org.com' };
       }
       if (token === 'pending-token') {
-        return { sub: 'p1', aggregator_id: 'agg-pending', email: 'p@org.com' };
+        return { sub: 'p1', user_id: 'agg-pending', email: 'p@org.com' };
       }
       if (token === 'stranger-token') {
         return { sub: 'stranger-sub', email: 'x@org.com', preferred_username: 'x@org.com' };
@@ -124,7 +124,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(mailer.outbox).toHaveLength(0);
   });
 
-  it('refuses a token with no aggregator_id that belongs to no account', async () => {
+  it('refuses a token with no user_id that belongs to no account', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/support',

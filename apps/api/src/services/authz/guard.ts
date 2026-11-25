@@ -61,8 +61,8 @@ export interface CheckOptions {
 
 /** Who the token says the caller is. */
 export interface TokenIdentity {
-  /** `aggregator_id` claim, when present. */
-  aggregatorId?: string | undefined;
+  /** The user's `users.id`, from the `user_id` claim, when present. */
+  userId?: string | undefined;
   /** Keycloak `sub`. */
   subject: string;
 }

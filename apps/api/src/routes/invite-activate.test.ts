@@ -35,7 +35,7 @@ describe('POST /v1/user/activate', () => {
   /** Creates the Keycloak login an invite accept leaves behind and returns its id. */
   async function login(
     email: string,
-    opts: { verified: boolean; decision?: string; aggregatorId?: string },
+    opts: { verified: boolean; decision?: string; userId?: string },
   ): Promise<string> {
     const created = await idp.createUser({
       email,
@@ -43,7 +43,7 @@ describe('POST /v1/user/activate', () => {
       emailVerified: opts.verified,
       attributes: {
         [KC_ATTR.DECISION_MADE]: opts.decision ?? 'invited',
-        ...(opts.aggregatorId ? { [KC_ATTR.AGGREGATOR_ID]: opts.aggregatorId } : {}),
+        ...(opts.userId ? { [KC_ATTR.USER_ID]: opts.userId } : {}),
       },
     });
     if (!created.ok) throw new Error('seed');
@@ -85,12 +85,12 @@ describe('POST /v1/user/activate', () => {
       const sub = subjects[token];
       if (!sub) throw new Error('invalid token');
       // `<name>:<aggregator id>` stands for the refreshed token of an activated coordinator.
-      const [, aggregatorId] = token.split(':');
+      const [, userId] = token.split(':');
       return {
         sub,
         azp: 'aggregator-portal',
         preferred_username: token,
-        ...(aggregatorId ? { aggregator_id: aggregatorId } : {}),
+        ...(userId ? { user_id: userId } : {}),
       };
     });
     orgs.seedRoot(
@@ -142,7 +142,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('becomes active after an email sign-in, and the inviting owner is mailed', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       const res = await activate('coord');
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ status: 'active', account: 'coordinator', activated: true });
@@ -157,7 +157,7 @@ describe('POST /v1/user/activate', () => {
     it('lets the activated team member export and see personal details through the base role', async () => {
       _setRbacRuntime(await testRbacRuntime('enforce'));
       try {
-        subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+        subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
         expect((await activate('coord')).statusCode).toBe(200);
         subjects[`coord:${COORD}`] = subjects.coord;
 
@@ -176,7 +176,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('answers 200 with activated false when already active', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       await activate('coord');
       const again = await activate('coord');
       expect(again.statusCode).toBe(200);
@@ -185,7 +185,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('refuses an unverified email with 403 EMAIL_NOT_VERIFIED and stays pending', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: false, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: false, userId: COORD });
       const res = await activate('coord');
       expect(res.statusCode).toBe(403);
       expect(errorCode(res)).toBe('EMAIL_NOT_VERIFIED');
@@ -194,7 +194,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('still activates when the mail to the inviting owner fails', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'down' });
       const res = await activate('coord');
       expect(res.statusCode).toBe(200);
@@ -202,7 +202,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('answers TARGET_ORG_INACTIVE when the coordinator’s org is no longer active', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       await orgs.update(PARENT, { status: 'inactive' });
       const res = await activate('coord');
       expect(errorCode(res)).toBe('TARGET_ORG_INACTIVE');
@@ -220,7 +220,7 @@ describe('POST /v1/user/activate', () => {
           contact: { name: 'Asha', email: COORD_EMAIL, phone: '+919876543210' },
         }),
       ]);
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       expect(errorCode(await activate('coord'))).toBe('TARGET_ORG_INACTIVE');
     });
 
@@ -228,7 +228,7 @@ describe('POST /v1/user/activate', () => {
       const seeded = await users.findById(COORD);
       if (!seeded.ok || !seeded.value) throw new Error('seed missing');
       users.seed([{ ...seeded.value, serves: [] }]);
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       const res = await activate('coord');
       expect(res.statusCode).toBe(409);
       expect(errorCode(res)).toBe('NO_PROFILE_TYPES');
@@ -237,7 +237,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('answers 503 IDP_UNAVAILABLE when Keycloak cannot be read', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       idp.findById = async () => ({ ok: false, error: { code: 'BAD_REQUEST', message: 'x' } });
       const res = await activate('coord');
       expect(res.statusCode).toBe(503);
@@ -245,7 +245,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('answers 503 DB_UNAVAILABLE when the coordinator cannot be read', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       users.findById = async () => ({
         ok: false,
         error: { code: 'DB_UNAVAILABLE', message: 'x' },
@@ -256,7 +256,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('stays invited and pending when Signals fails, so the next sign-in activates it', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       class FailingWriter extends SignalStackWriterFake {
         override async upsertAggregator() {
           return err(new UpstreamError('down', { code: 'SIGNALSTACK_UNAVAILABLE' }));
@@ -278,7 +278,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('goes back to invited, still enabled, when the pending to active step fails', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       const approve = users.approveFromPending.bind(users);
       users.approveFromPending = async () => {
         users.approveFromPending = approve;
@@ -297,7 +297,7 @@ describe('POST /v1/user/activate', () => {
     });
 
     it('activates once when two sign-ins activate at the same time', async () => {
-      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      subjects.coord = await login(COORD_EMAIL, { verified: true, userId: COORD });
       const [a, b] = await Promise.all([activate('coord'), activate('coord')]);
       expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
       const activated = [a, b].map((r) => (r.json() as { activated: boolean }).activated);
@@ -311,7 +311,7 @@ describe('POST /v1/user/activate', () => {
       subjects.coord = await login(COORD_EMAIL, {
         verified: true,
         decision: 'pending',
-        aggregatorId: COORD,
+        userId: COORD,
       });
       const res = await activate('coord');
       expect(res.statusCode).toBe(403);

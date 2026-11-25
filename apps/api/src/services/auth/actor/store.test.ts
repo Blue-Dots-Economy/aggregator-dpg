@@ -60,7 +60,7 @@ describe('StoreActorResolver', () => {
     it('resolves to the coordinator when the recorded login is this subject', async () => {
       coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+      const r = await resolver.resolve({ userId: COORD_ID, subject: SUBJECT });
       expect(r).toEqual({
         ok: true,
         value: expect.objectContaining({ userId: COORD_ID, userType: 'coordinator', active: true }),
@@ -70,14 +70,14 @@ describe('StoreActorResolver', () => {
     it('resolves a coordinator with no parent org to an empty orgs list', async () => {
       coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active', parentOrgId: null })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+      const r = await resolver.resolve({ userId: COORD_ID, subject: SUBJECT });
       expect(r.ok && r.value?.orgs).toEqual([]);
     });
 
     it('resolves to null when the subject does not match the recorded login', async () => {
       coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: 'someone-else' }]);
-      expect(await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT })).toEqual({
+      expect(await resolver.resolve({ userId: COORD_ID, subject: SUBJECT })).toEqual({
         ok: true,
         value: null,
       });
@@ -88,7 +88,7 @@ describe('StoreActorResolver', () => {
         ok: false,
         error: { code: 'DB_UNAVAILABLE', message: 'down' },
       });
-      const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+      const r = await resolver.resolve({ userId: COORD_ID, subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
     });
@@ -99,14 +99,14 @@ describe('StoreActorResolver', () => {
         ok: false,
         error: { code: 'DB_UNAVAILABLE', message: 'down' },
       });
-      const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+      const r = await resolver.resolve({ userId: COORD_ID, subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
     });
 
     it('resolves to null when the claimed coordinator row is gone', async () => {
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      expect(await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT })).toEqual({
+      expect(await resolver.resolve({ userId: COORD_ID, subject: SUBJECT })).toEqual({
         ok: true,
         value: null,
       });
@@ -210,7 +210,7 @@ describe('StoreActorResolver', () => {
     const asCoordinator = async () => {
       coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      return resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+      return resolver.resolve({ userId: COORD_ID, subject: SUBJECT });
     };
     const rbacOn = async () =>
       _setRbacRuntime({
@@ -335,7 +335,7 @@ describe('StoreActorResolver', () => {
     it('ACTING_ACCOUNT_INVALID when a claim and a different header are both sent', async () => {
       seedShared();
       const r = await resolver.resolve({
-        aggregatorId: COORD_ID,
+        userId: COORD_ID,
         subject: SUBJECT,
         actingAccountId: OTHER_ID,
       });
@@ -345,7 +345,7 @@ describe('StoreActorResolver', () => {
     it('accepts a header equal to the claim in another case', async () => {
       seedShared(HEX_ID);
       const r = await resolver.resolve({
-        aggregatorId: HEX_ID,
+        userId: HEX_ID,
         subject: SUBJECT,
         actingAccountId: HEX_ID.toUpperCase(),
       });

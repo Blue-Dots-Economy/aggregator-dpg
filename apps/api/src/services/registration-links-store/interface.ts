@@ -17,7 +17,7 @@ export type RegistrationLinkRegistrationMode = string;
 
 export interface RegistrationLink {
   id: string;
-  aggregatorId: string;
+  userId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
@@ -37,7 +37,7 @@ export interface RegistrationLink {
 }
 
 export interface CreateRegistrationLinkInput {
-  aggregatorId: string;
+  userId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
@@ -91,10 +91,7 @@ export abstract class RegistrationLinksStoreBase {
    *
    * Scoping is enforced here so a route mistake cannot leak another aggregator's rows.
    */
-  abstract findById(
-    id: string,
-    aggregatorId: string,
-  ): Promise<StoreResult<RegistrationLink | null>>;
+  abstract findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>>;
   /**
    * Finds a link by its public slug, with no aggregator scoping.
    *
@@ -117,14 +114,14 @@ export abstract class RegistrationLinksStoreBase {
    */
   abstract updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>>;
   /**
    * Lists one aggregator's links, newest first, optionally filtered by status.
    */
   abstract list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<ListRegistrationLinksResult>>;
   /**
@@ -132,7 +129,7 @@ export abstract class RegistrationLinksStoreBase {
    */
   abstract updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>>;
 }

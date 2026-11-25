@@ -80,7 +80,7 @@ describe('approveCoordinator on a shared login', () => {
     _setSignalStackWriter(null);
   });
 
-  const approve = () => approveCoordinator({ aggregatorId: ID, decidedBy: ADMIN, log });
+  const approve = () => approveCoordinator({ userId: ID, decidedBy: ADMIN, log });
   const spyWrites = () => USER_WRITES.map((m) => vi.spyOn(idp, m));
 
   it('approves through the recorded login and writes nothing in Keycloak', async () => {
@@ -123,8 +123,8 @@ describe('approveCoordinator on a shared login', () => {
     },
   );
 
-  it('provisions Keycloak as before for a legacy login whose user carries aggregator_id', async () => {
-    await idp.setAttributes(SUB, { aggregator_id: ID });
+  it('provisions Keycloak as before for a legacy login whose user carries user_id', async () => {
+    await idp.setAttributes(SUB, { user_id: ID });
     const enable = vi.spyOn(idp, 'enableUser');
     const decision = vi.spyOn(idp, 'setUserDecision');
 

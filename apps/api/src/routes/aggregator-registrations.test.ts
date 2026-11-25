@@ -172,7 +172,7 @@ describe('POST /v1/user/invite/accept', () => {
     if (kcUser.ok && kcUser.value) {
       expect(kcUser.value.enabled).toBe(true);
       expect(kcUser.value.emailVerified).toBe(false);
-      expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.attributes?.aggregator_id).toBeUndefined();
       expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.aggregator_id);
       expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
@@ -313,7 +313,7 @@ describe('POST /v1/user/invite/accept', () => {
     await idp.createUser({
       email: 'someone-else@trrain.org',
       phone: '+919876543210',
-      attributes: { aggregator_id: 'other-agg' },
+      attributes: { user_id: 'other-agg' },
     });
     const res = await acceptInvite({
       ...validBody,
@@ -401,7 +401,7 @@ describe('POST /v1/user/invite/accept', () => {
       phone: '+919876543210',
       enabled: false,
       attributes: {
-        aggregator_id: id,
+        user_id: id,
         aggregator_type: 'seeker',
         phoneNumber: '+919876543210',
         decision_made: overrides?.status === 'inactive' ? 'rejected' : 'pending',

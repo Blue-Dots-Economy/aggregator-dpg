@@ -326,7 +326,7 @@ describe('syncTokenRoles on a shared login', () => {
     expect(locks).toEqual([COORD]);
   });
 
-  it('a legacy login holding both accounts (its Keycloak user carries aggregator_id) is not shared', async () => {
+  it('a legacy login holding both accounts (its Keycloak user carries user_id) is not shared', async () => {
     const { deps, writes, locks } = sharedDeps();
     deps.loginAccountsOf = async () => ({
       ok: true,
@@ -397,10 +397,10 @@ describe('syncTokenRoles for a coordinator outside a shared login', () => {
 });
 
 describe('the default dependencies', () => {
-  async function kcUser(idp: IdpAdminFake, aggregatorId?: string): Promise<string> {
+  async function kcUser(idp: IdpAdminFake, userId?: string): Promise<string> {
     const created = await idp.createUser({
-      email: `${aggregatorId ?? 'admin'}@example.org`,
-      attributes: aggregatorId ? { aggregator_id: aggregatorId } : {},
+      email: `${userId ?? 'admin'}@example.org`,
+      attributes: userId ? { user_id: userId } : {},
     });
     if (!created.ok) throw new Error('fake createUser failed');
     return created.value.id;
@@ -416,7 +416,7 @@ describe('the default dependencies', () => {
     expect(res).toEqual({ ok: true, value: 'kc-a1' });
   });
 
-  it('falls back to the aggregator_id attribute for an unlinked coordinator', async () => {
+  it('falls back to the user_id attribute for an unlinked coordinator', async () => {
     const idp = new IdpAdminFake();
     _setIdpAdmin(idp);
     _setIdentityStore(new IdentityStoreFake());
@@ -433,10 +433,10 @@ describe('the default dependencies', () => {
   });
 
   /** A Keycloak user holding an admin and a coordinator account. */
-  async function twoAccountLogin(aggregatorId?: string) {
+  async function twoAccountLogin(userId?: string) {
     const idp = new IdpAdminFake();
     _setIdpAdmin(idp);
-    const subject = await kcUser(idp, aggregatorId);
+    const subject = await kcUser(idp, userId);
     const store = new IdentityStoreFake();
     store.seed([
       buildIdentity({ userId: 'a1', subject }),
@@ -454,7 +454,7 @@ describe('the default dependencies', () => {
     expect(await deps.loginAccountsOf('a1')).toEqual(shared);
   });
 
-  it('does not list a login whose Keycloak user carries aggregator_id as shared', async () => {
+  it('does not list a login whose Keycloak user carries user_id as shared', async () => {
     const { subject } = await twoAccountLogin('c1');
     const deps = defaultTokenRolesDeps();
     const legacy = { ok: true, value: { admin: 'a1', coordinator: 'c1', shared: false } };

@@ -2,7 +2,7 @@
  * Branded nominal ID types for the aggregator-dpg platform.
  *
  * Branded types prevent accidental ID substitution at the type level —
- * an AggregatorId cannot be passed where a UserId is expected.
+ * an OrgId cannot be passed where a UserId is expected.
  *
  * @module @aggregator-dpg/shared-primitives/ids
  */
@@ -15,9 +15,6 @@ import { z } from 'zod';
  * produces the type without a cast.
  */
 export type Brand<T, B extends string> = T & z.BRAND<B>;
-
-/** Opaque string ID representing an aggregator tenant. */
-export type AggregatorId = Brand<string, 'AggregatorId'>;
 
 /** Opaque string ID representing a platform user. */
 export type UserId = Brand<string, 'UserId'>;
@@ -37,23 +34,11 @@ export type ExportId = Brand<string, 'ExportId'>;
 const nonEmptyString = z.string().min(1, 'ID must not be empty');
 
 /** Branded schemas, one per ID family. */
-const AggregatorIdSchema = nonEmptyString.brand<'AggregatorId'>();
 const UserIdSchema = nonEmptyString.brand<'UserId'>();
 const OrgIdSchema = nonEmptyString.brand<'OrgId'>();
 const LinkIdSchema = nonEmptyString.brand<'LinkId'>();
 const BatchIdSchema = nonEmptyString.brand<'BatchId'>();
 const ExportIdSchema = nonEmptyString.brand<'ExportId'>();
-
-/**
- * Validates that a raw string is non-empty and brands it as AggregatorId.
- *
- * @param raw - Untrusted string value.
- * @returns Branded AggregatorId.
- * @throws {z.ZodError} If raw is empty.
- */
-export function aggregatorId(raw: string): AggregatorId {
-  return AggregatorIdSchema.parse(raw);
-}
 
 /**
  * Validates that a raw string is non-empty and brands it as UserId.

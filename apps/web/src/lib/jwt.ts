@@ -28,16 +28,14 @@ export function decodeJwtClaims(token: string): Record<string, unknown> | null {
 }
 
 /**
- * Returns the coordinator's user id: the `user_id` claim, else `aggregator_id`.
+ * Returns the coordinator's user id: the `user_id` claim.
  *
- * Only coordinators have it; org owners and the network admin do not. A token
- * whose two claims differ is not trusted to name a coordinator, so it reads as
- * `null`, the same as an admin token; the API refuses such a token anyway.
+ * Only coordinators have it; org owners and the network admin do not.
  *
  * @param token - A Keycloak access token.
  * @returns The user id, or `null`.
  */
-export function tokenAggregatorId(token: string): string | null {
+export function tokenUserId(token: string): string | null {
   const claim = readUserIdClaim(decodeJwtClaims(token));
   return claim.kind === 'present' ? claim.userId : null;
 }
@@ -63,7 +61,7 @@ export function tokenRealmRoles(token: string): string[] {
  * The result only picks which login message to show; it grants no access.
  * The signature is not verified (see the module note).
  *
- * @param token - A Keycloak access token that lacks `aggregator_id`.
+ * @param token - A Keycloak access token that lacks `user_id`.
  * @param signalsRoles - Realm roles that identify a Signals participant.
  * @returns Which population the token belongs to.
  */

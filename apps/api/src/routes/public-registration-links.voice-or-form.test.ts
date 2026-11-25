@@ -94,7 +94,7 @@ class LinksStore extends RegistrationLinksStoreBase {
 }
 
 const baseLink = {
-  aggregatorId: AGG_ID,
+  userId: AGG_ID,
   domain: 'seeker' as const,
   context: {},
   voiceBotKey: null,

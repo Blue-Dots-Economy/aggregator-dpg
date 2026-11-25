@@ -27,7 +27,7 @@ import { runStoreConformance } from './conformance.js';
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = realUrl ? describe : describe.skip;
 
-let aggregatorId: string = randomUUID();
+let userId: string = randomUUID();
 
 suite('PostgresCampaignJobStore (integration)', () => {
   beforeAll(async () => {
@@ -55,19 +55,19 @@ suite('PostgresCampaignJobStore (integration)', () => {
         updatedBy: 'integration-test',
       })
       .returning({ id: users.id });
-    aggregatorId = rows[0]!.id;
+    userId = rows[0]!.id;
   });
 
   afterAll(async () => {
     // campaign_job_item cascades on the job delete; then remove the test aggregator.
-    await getDb().delete(campaignJob).where(eq(campaignJob.userId, aggregatorId));
-    await getDb().delete(users).where(eq(users.id, aggregatorId));
+    await getDb().delete(campaignJob).where(eq(campaignJob.userId, userId));
+    await getDb().delete(users).where(eq(users.id, userId));
     await closeDb();
   });
 
   runStoreConformance(() => new PostgresCampaignJobStore(), {
-    get aggregatorId() {
-      return aggregatorId;
+    get userId() {
+      return userId;
     },
-  } as { aggregatorId: string });
+  } as { userId: string });
 });

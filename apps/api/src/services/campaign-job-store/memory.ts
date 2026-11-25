@@ -31,7 +31,7 @@ import {
 interface JobRow {
   id: string;
   seq: number;
-  aggregatorId: string;
+  userId: string;
   signalstackOrgId: string;
   channel: JobRecord['channel'];
   status: CampaignJobStatus;
@@ -84,7 +84,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     const row: JobRow = {
       id,
       seq: ++this.seq,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       signalstackOrgId: input.signalstackOrgId,
       channel: input.channel,
       status: 'queued',

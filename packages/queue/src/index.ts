@@ -39,7 +39,8 @@ export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 
 export interface BulkFileProcessJob {
   uploadId: string;
-  aggregatorId: string;
+  /** The coordinator's `users.id`. */
+  userId: string;
   s3Key: string;
   participantType: string;
   schemaId: string;
@@ -48,7 +49,8 @@ export interface BulkFileProcessJob {
 
 export interface BulkRowProcessJob {
   uploadId: string;
-  aggregatorId: string;
+  /** The coordinator's `users.id`. */
+  userId: string;
   rowIndex: number;
   /** Pinned schema id, propagated from File Processor so Row Processor avoids a per-row DB read. */
   schemaId: string;

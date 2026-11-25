@@ -207,7 +207,7 @@ export function registerSupportRoutes(base: FastifyInstance): void {
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: auth.aggregatorId ?? null,
+        aggregator_id: auth.userId ?? null,
         caller_type: actor.userType,
         reference,
         attachment_count: checked.attachments.length,

@@ -133,7 +133,7 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     const now = new Date('2026-08-01T00:00:00.000Z');
     const row: BulkUpload = {
       id: `upload-${this.seq}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       participantType: input.participantType,
       storageKey: input.storageKey,
       contentFingerprint: null,
@@ -152,16 +152,16 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     return { ok: true, value: row };
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<BulkUpload | null>> {
     const fail = this.takeFailure('findById');
     if (fail) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
+    if (!row || row.userId !== userId) return { ok: true, value: null };
     return { ok: true, value: row };
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>> {
     const fail = this.takeFailure('list');
@@ -169,9 +169,7 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     const all = [...this.rows.values()]
       .filter(
         (r) =>
-          r.aggregatorId === aggregatorId &&
-          r.status !== 'pending' &&
-          r.statusReason !== 'upload_abandoned',
+          r.userId === userId && r.status !== 'pending' && r.statusReason !== 'upload_abandoned',
       )
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
@@ -185,13 +183,13 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
 
   async markUploaded(
     id: string,
-    aggregatorId: string,
+    userId: string,
     contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>> {
     const fail = this.takeFailure('markUploaded');
     if (fail) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
+    if (!row || row.userId !== userId) {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
     }
     if (row.status !== 'pending' && row.status !== 'uploaded') {
@@ -207,9 +205,9 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     return { ok: true, value: updated };
   }
 
-  async deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>> {
+  async deletePending(id: string, userId: string): Promise<StoreResult<void>> {
     const row = this.rows.get(id);
-    if (row && row.aggregatorId === aggregatorId && row.status === 'pending') {
+    if (row && row.userId === userId && row.status === 'pending') {
       this.rows.delete(id);
     }
     return { ok: true, value: undefined };
@@ -231,7 +229,7 @@ function buildUpload(overrides: Partial<BulkUpload> = {}): BulkUpload {
   const now = new Date('2026-08-01T00:00:00.000Z');
   return {
     id: 'upload-fixed',
-    aggregatorId: AGG_A,
+    userId: AGG_A,
     participantType: 'seeker',
     storageKey: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
     contentFingerprint: null,
@@ -328,12 +326,12 @@ describe('bulk-uploads routes', () => {
         return { sub: 'kc-noagg', decision_made: 'approved' };
       }
       if (token === 'pending') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'pending' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'pending' };
       }
       if (token === 'seeker-approved') {
         return {
           sub: 'kc-1',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           aggregator_type: 'seeker',
           decision_made: 'approved',
         };
@@ -341,29 +339,29 @@ describe('bulk-uploads routes', () => {
       if (token === 'provider-approved') {
         return {
           sub: 'kc-2',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           aggregator_type: 'provider',
           decision_made: 'approved',
         };
       }
       if (token === 'no-type-approved') {
-        return { sub: 'kc-3', aggregator_id: AGG_A, decision_made: 'approved' };
+        return { sub: 'kc-3', user_id: AGG_A, decision_made: 'approved' };
       }
       if (token === 'both-approved') {
         return {
           sub: 'kc-5',
-          aggregator_id: AGG_BOTH,
+          user_id: AGG_BOTH,
           aggregator_type: ['seeker', 'provider'],
           decision_made: 'approved',
         };
       }
       if (token === 'all-approved') {
-        return { sub: 'kc-6', aggregator_id: AGG_ALL, decision_made: 'approved' };
+        return { sub: 'kc-6', user_id: AGG_ALL, decision_made: 'approved' };
       }
       if (token === 'seeker-approved-b') {
         return {
           sub: 'kc-4',
-          aggregator_id: AGG_B,
+          user_id: AGG_B,
           aggregator_type: 'seeker',
           decision_made: 'approved',
         };
@@ -514,7 +512,7 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=seeker',
@@ -840,7 +838,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('403 FORBIDDEN when the upload belongs to another aggregator (no enumeration leak)', async () => {
-      store.seed([buildUpload({ id: 'upload-x', aggregatorId: AGG_B })]);
+      store.seed([buildUpload({ id: 'upload-x', userId: AGG_B })]);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-x/start',
@@ -862,7 +860,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('is idempotent (200, no storage/enqueue work) when already past pending/uploaded', async () => {
-      store.seed([buildUpload({ id: 'upload-done', aggregatorId: AGG_A, status: 'completed' })]);
+      store.seed([buildUpload({ id: 'upload-done', userId: AGG_A, status: 'completed' })]);
       storage.failNext('stat', new UpstreamError('must not be called'));
       const res = await app.inject({
         method: 'POST',
@@ -876,7 +874,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 CONSENT_REQUIRED when attestation is not true', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -888,7 +886,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 SCHEMA_VALIDATION when the stored object is missing', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -903,7 +901,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 SCHEMA_VALIDATION when the stored key is still the pending placeholder', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, storageKey: 'pending' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, storageKey: 'pending' })]);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -915,7 +913,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('500 INTERNAL and the row stays pending when the storage stat fails', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       storage.failNext('stat', new UpstreamError('storage down'));
       const res = await app.inject({
@@ -930,7 +928,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 SCHEMA_VALIDATION when the uploaded CSV is empty', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(0));
       const res = await app.inject({
         method: 'POST',
@@ -947,7 +945,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 SCHEMA_VALIDATION when the uploaded CSV exceeds the max size', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1));
       const res = await app.inject({
         method: 'POST',
@@ -973,7 +971,7 @@ describe('bulk-uploads routes', () => {
         logger.warn = warn as never;
         return logger;
       }) as never);
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1));
       storage.failNext('delete', new UpstreamError('delete failed'));
       const res = await app.inject({
@@ -996,7 +994,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('accepts a file of exactly the max size', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES));
       const res = await app.inject({
         method: 'POST',
@@ -1009,7 +1007,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('500 CONSENT_WRITE_FAILED when consent config fails to load (fail-closed)', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       loadConsentConfigMock.mockRejectedValueOnce(new Error('config disk error'));
       const res = await app.inject({
@@ -1026,7 +1024,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('500 CONSENT_WRITE_FAILED when the bulk_upload_attestation document is not configured', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       loadConsentConfigMock.mockResolvedValueOnce({
         audiences: {
@@ -1046,7 +1044,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('500 CONSENT_WRITE_FAILED when the ledger write itself fails', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       consentLedger.recordRegistrationConsent = async () => ({
         success: false as const,
@@ -1066,7 +1064,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('503 DB_UNAVAILABLE when markUploaded fails', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       store.failOnce('markUploaded', 'DB_UNAVAILABLE');
       const res = await app.inject({
@@ -1079,7 +1077,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('500 INTERNAL when enqueue fails after the row is already marked uploaded', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       enqueueBulkFileProcessMock.mockRejectedValueOnce(new Error('redis down'));
       const res = await app.inject({
@@ -1095,7 +1093,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('200s and enqueues the file-process job on success', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A })]);
       storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       const res = await app.inject({
         method: 'POST',
@@ -1109,10 +1107,11 @@ describe('bulk-uploads routes', () => {
       expect(enqueueBulkFileProcessMock).toHaveBeenCalledWith(
         expect.objectContaining({
           uploadId: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           s3Key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
         }),
       );
+      expect(enqueueBulkFileProcessMock.mock.calls[0]?.[0]).not.toHaveProperty('aggregatorId');
       const ledgerRows = consentLedger.list();
       expect(ledgerRows).toHaveLength(1);
       expect(ledgerRows[0]?.source).toBe('bulk_upload:upload-1:v1');
@@ -1157,9 +1156,9 @@ describe('bulk-uploads routes', () => {
 
     it('200s with per-row counters from the right source per status', async () => {
       store.seed([
-        buildUpload({ id: 'u-uploaded', aggregatorId: AGG_A, status: 'uploaded' }),
-        buildUpload({ id: 'u-live', aggregatorId: AGG_A, status: 'row_processing' }),
-        buildUpload({ id: 'u-done', aggregatorId: AGG_A, status: 'completed' }),
+        buildUpload({ id: 'u-uploaded', userId: AGG_A, status: 'uploaded' }),
+        buildUpload({ id: 'u-live', userId: AGG_A, status: 'row_processing' }),
+        buildUpload({ id: 'u-done', userId: AGG_A, status: 'completed' }),
       ]);
       onboardingRows = [{ batchId: 'u-done', total: 10, passed: 8, failed: 2, skipped: 0 }];
       redisHmget.mockResolvedValue(['3', '1', '0']);
@@ -1188,8 +1187,8 @@ describe('bulk-uploads routes', () => {
 
     it('only returns uploads scoped to the caller aggregator', async () => {
       store.seed([
-        buildUpload({ id: 'mine', aggregatorId: AGG_A, status: 'completed' }),
-        buildUpload({ id: 'theirs', aggregatorId: AGG_B, status: 'completed' }),
+        buildUpload({ id: 'mine', userId: AGG_A, status: 'completed' }),
+        buildUpload({ id: 'theirs', userId: AGG_B, status: 'completed' }),
       ]);
       const res = await app.inject({
         method: 'GET',
@@ -1221,8 +1220,8 @@ describe('bulk-uploads routes', () => {
       await getIdentityStore().link(ADMIN, 'keycloak', 'kc-noagg', 'admin');
       await getIdentityStore().link(AGG_B, 'keycloak', 'kc-noagg', 'coordinator');
       store.seed([
-        buildUpload({ id: 'mine', aggregatorId: AGG_A, status: 'completed' }),
-        buildUpload({ id: 'acting', aggregatorId: AGG_B, status: 'completed' }),
+        buildUpload({ id: 'mine', userId: AGG_A, status: 'completed' }),
+        buildUpload({ id: 'acting', userId: AGG_B, status: 'completed' }),
       ]);
       try {
         const res = await app.inject({
@@ -1240,14 +1239,14 @@ describe('bulk-uploads routes', () => {
 
     it('leaves out uploads that were never started', async () => {
       store.seed([
-        buildUpload({ id: 'never-started', aggregatorId: AGG_A, status: 'pending' }),
+        buildUpload({ id: 'never-started', userId: AGG_A, status: 'pending' }),
         buildUpload({
           id: 'abandoned',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'failed',
           statusReason: 'upload_abandoned',
         }),
-        buildUpload({ id: 'started', aggregatorId: AGG_A, status: 'uploaded' }),
+        buildUpload({ id: 'started', userId: AGG_A, status: 'uploaded' }),
       ]);
       const res = await app.inject({
         method: 'GET',
@@ -1279,7 +1278,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('403 FORBIDDEN for a cross-aggregator read (no enumeration leak)', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_B })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_B })]);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1',
@@ -1289,7 +1288,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('200s with ZERO_COUNTS for a pending upload', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'pending' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'pending' })]);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1',
@@ -1302,7 +1301,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('200s with onboarding-rollup counts for a completed upload', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'completed' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'completed' })]);
       onboardingRows = [{ batchId: 'upload-1', total: 20, passed: 18, failed: 2, skipped: 0 }];
       const res = await app.inject({
         method: 'GET',
@@ -1317,7 +1316,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('falls back to ZERO_COUNTS when the onboarding rollup row is missing for a completed upload', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'completed' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'completed' })]);
       onboardingRows = [];
       const res = await app.inject({
         method: 'GET',
@@ -1330,7 +1329,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('200s with Redis-backed live counters for an in-flight upload', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'row_processing' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'row_processing' })]);
       redisHmget.mockResolvedValue(['5', '2', '1']);
       redisHget.mockResolvedValue('20');
       const res = await app.inject({
@@ -1349,7 +1348,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('falls back to ZERO_COUNTS when Redis is unreachable', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'row_processing' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'row_processing' })]);
       redisHmget.mockRejectedValue(new Error('redis down'));
       const res = await app.inject({
         method: 'GET',
@@ -1382,7 +1381,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('403 FORBIDDEN for a cross-aggregator request', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_B })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_B })]);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1/errors.csv',
@@ -1392,7 +1391,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('410 BULK_UPLOAD_NOT_READY when the upload has not completed', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, status: 'row_processing' })]);
+      store.seed([buildUpload({ id: 'upload-1', userId: AGG_A, status: 'row_processing' })]);
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1/errors.csv',
@@ -1406,7 +1405,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: null,
         }),
@@ -1424,7 +1423,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: 'some/other/path.csv',
         }),
@@ -1442,7 +1441,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: `bulk-uploads/${AGG_B}/upload-1/errors.csv`,
         }),
@@ -1461,7 +1460,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: key,
         }),
@@ -1482,7 +1481,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
@@ -1504,7 +1503,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
@@ -1523,7 +1522,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
@@ -1543,7 +1542,7 @@ describe('bulk-uploads routes', () => {
       store.seed([
         buildUpload({
           id: 'upload-1',
-          aggregatorId: AGG_A,
+          userId: AGG_A,
           status: 'completed',
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
@@ -1572,7 +1571,7 @@ describe('bulk-uploads routes', () => {
   // the auth token used across the suite (guards against a copy-paste bug in
   // the fixtures above making every "cross-aggregator" test vacuously pass).
   it('sanity: seeker-approved-b resolves to AGG_B for future cross-agg tests', async () => {
-    store.seed([buildUpload({ id: 'cross-check', aggregatorId: AGG_B })]);
+    store.seed([buildUpload({ id: 'cross-check', userId: AGG_B })]);
     const res = await app.inject({
       method: 'GET',
       url: '/v1/bulk-uploads/cross-check',

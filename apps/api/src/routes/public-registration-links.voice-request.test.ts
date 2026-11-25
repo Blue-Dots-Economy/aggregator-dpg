@@ -123,7 +123,7 @@ function buildFakeDb(rows: StoredRow[]): unknown {
 }
 
 const baseLink = {
-  aggregatorId: AGG_ID,
+  userId: AGG_ID,
   domain: 'seeker' as const,
   context: {},
   qrObjectKey: null,

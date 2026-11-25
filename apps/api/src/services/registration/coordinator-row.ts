@@ -62,12 +62,12 @@ export async function aggregatorConsentWriter({
     return null;
   }
 
-  return async (executor, aggregatorId) => {
+  return async (executor, userId) => {
     const result = await getConsentLedger()
       .withExecutor(executor)
       .recordRegistrationConsent({
         subjectType: 'user',
-        subjectId: aggregatorId,
+        subjectId: userId,
         network,
         brand: brand ?? null,
         termsVersion,
@@ -81,7 +81,7 @@ export async function aggregatorConsentWriter({
           status: 'failure',
           error: result.error.message,
           error_type: result.error.name,
-          aggregator_id: aggregatorId,
+          aggregator_id: userId,
           network,
           brand: brand ?? null,
           terms_version: termsVersion,

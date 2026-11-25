@@ -512,7 +512,7 @@ describe('provisionRootIdp', () => {
     const coord = await idp.createUser({
       email: 'ops@example.org',
       enabled: false,
-      attributes: { [KC_ATTR.AGGREGATOR_ID]: 'agg-1', [KC_ATTR.DECISION_MADE]: 'approved' },
+      attributes: { [KC_ATTR.USER_ID]: 'agg-1', [KC_ATTR.DECISION_MADE]: 'approved' },
     });
     if (!coord.ok) throw new Error('seed');
     const warn = vi.spyOn(logger, 'warn');

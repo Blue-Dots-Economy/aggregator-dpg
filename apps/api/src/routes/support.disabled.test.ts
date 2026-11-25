@@ -33,7 +33,7 @@ describe('support routes (SUPPORT_EMAIL unset)', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good-token') {
-        return { sub: 'u1', aggregator_id: 'agg-9', email: 'asha@example.com' };
+        return { sub: 'u1', user_id: 'agg-9', email: 'asha@example.com' };
       }
       throw new Error('invalid token');
     });

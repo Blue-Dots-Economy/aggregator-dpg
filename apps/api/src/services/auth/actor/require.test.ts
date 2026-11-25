@@ -112,12 +112,12 @@ describe('requireActor', () => {
     expect(caller.actor.userType).toBe('admin');
   });
 
-  it('passes an aggregator_id claim through to the resolver', async () => {
+  it('passes an user_id claim through to the resolver', async () => {
     const actor = { userId: 'c1', userType: 'coordinator' as const, active: true, orgs: [] };
     resolver.seed('agg-99', actor);
     const req = reqWithClaims({
       sub: SUBJECT,
-      aggregator_id: 'agg-99',
+      user_id: 'agg-99',
       preferred_username: 'asha',
     });
     const caller = await requireActor(req, { allowCoordinator: true });

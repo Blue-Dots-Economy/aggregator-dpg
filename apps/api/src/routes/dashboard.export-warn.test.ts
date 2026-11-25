@@ -83,7 +83,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
     await idp.createUser({
       email: 'kc-1@x.com',
       enabled: true,
-      attributes: { aggregator_id: AGG_A, decision_made: 'approved' },
+      attributes: { user_id: AGG_A, decision_made: 'approved' },
     });
     _setIdpAdmin(idp);
 
@@ -107,7 +107,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: ['seeker', 'provider'],
           signalstack_org_id: ORG_A,

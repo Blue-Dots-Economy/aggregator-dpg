@@ -15,7 +15,7 @@
  *     `consent` is read-only after registration; a body that sends it is
  *     refused as `SCHEMA_VALIDATION`. `org_slug` cannot be changed.
  *
- * Requires a Keycloak Bearer token carrying the `aggregator_id` claim. The GET
+ * Requires a Keycloak Bearer token carrying the `user_id` claim. The GET
  * also accepts an org owner acting as its own coordinator account
  * (`x-acting-account`); the PATCH does not, because it writes the login's
  * Keycloak contact attributes.
@@ -130,12 +130,12 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
     },
     async (req, reply) => {
       const auth = await requireAuth(req, { allowActing: true });
-      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
+      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.subject });
       const start = Date.now();
 
       const userStore = getUserStore();
 
-      const aggregator = await userStore.findById(auth.aggregatorId);
+      const aggregator = await userStore.findById(auth.userId);
       if (!aggregator.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(aggregator.error.message) });
       }
@@ -147,12 +147,12 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       const kcUser = auth.acting ? null : await fetchKcUserSafe(auth, log);
 
       log.info(
-        { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.aggregatorId },
+        { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.userId },
         'profile read',
       );
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
         // Falls back to the slug only when the name is empty.
         org_name: aggregator.value.name || aggregator.value.orgSlug,
@@ -205,7 +205,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
+      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.subject });
       const start = Date.now();
 
       // Already validated and parsed by the route schema.
@@ -214,7 +214,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       const userStore = getUserStore();
 
       // A change to org details is refused before any write.
-      await assertOrgDetailsUnchanged(userStore, auth.aggregatorId, body.aggregator);
+      await assertOrgDetailsUnchanged(userStore, auth.userId, body.aggregator);
 
       // ─── 1. Write the phone to Keycloak first. ─────────────────────────────
       // A Keycloak failure aborts before the database write.
@@ -223,7 +223,7 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
-        const phoneR = await checkedPhone(userStore, auth.aggregatorId, raw.phone);
+        const phoneR = await checkedPhone(userStore, auth.userId, raw.phone);
         if (!phoneR.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneR.error.message,
@@ -234,13 +234,13 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
         normalisedContact = { ...raw, phone: phoneR.value };
 
         // One phone and one email per person. Checked before the Keycloak write.
-        previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
+        previousPhone = await assertContactChangeAllowed(auth.userId, {
           email: raw.email,
           phone: phoneR.value,
         });
 
         const idp = getIdpAdmin();
-        const kcWrite = await idp.setAttributes(auth.userId, {
+        const kcWrite = await idp.setAttributes(auth.subject, {
           [KC_ATTR.PHONE_NUMBER]: phoneR.value,
         });
         if (!kcWrite.ok) {
@@ -259,14 +259,14 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
 
       // ─── 2. Coordinator-table updates ──────────────────────────────────────
       const patch: Parameters<typeof userStore.update>[1] = {
-        updatedBy: auth.userId,
+        updatedBy: auth.subject,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
 
-      const result = await userStore.update(auth.aggregatorId, patch);
+      const result = await userStore.update(auth.userId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
-        await restoreKcPhone(auth.userId, previousPhone, log);
+        await restoreKcPhone(auth.subject, previousPhone, log);
       }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
@@ -278,19 +278,19 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
         {
           status: 'success',
           latency_ms: Date.now() - start,
-          aggregator_id: auth.aggregatorId,
+          aggregator_id: auth.userId,
         },
         'profile updated',
       );
 
       // Return the updated row.
-      const aggregator = await userStore.findById(auth.aggregatorId);
+      const aggregator = await userStore.findById(auth.userId);
       if (!aggregator.ok || !aggregator.value) {
         throw httpError('INTERNAL', { detail: 'Post-write read failed.' });
       }
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
         name: aggregator.value.name,
         actor_type: aggregator.value.actorType,
@@ -312,13 +312,13 @@ export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
  * organisation. Sending back the current values is not a change.
  *
  * @param userStore - The coordinator store.
- * @param aggregatorId - The caller's coordinator id.
+ * @param userId - The caller's coordinator id.
  * @param patch - The validated `aggregator` patch.
  * @throws 409 ORG_DETAILS_READ_ONLY when a sent org detail differs from the stored one.
  */
 async function assertOrgDetailsUnchanged(
   userStore: ReturnType<typeof getUserStore>,
-  aggregatorId: string,
+  userId: string,
   patch: z.infer<typeof AggregatorPatchSchema>,
 ): Promise<void> {
   const sentOrgDetails =
@@ -327,7 +327,7 @@ async function assertOrgDetailsUnchanged(
     patch.contact?.company !== undefined ||
     patch.contact?.gstNumber !== undefined;
   if (!sentOrgDetails) return;
-  const current = await userStore.findById(aggregatorId);
+  const current = await userStore.findById(userId);
   if (!current.ok) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(current.error.message),
@@ -384,7 +384,7 @@ async function restoreKcPhone(
 
 async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promise<IdpUser | null> {
   try {
-    const result = await getIdpAdmin().findById(auth.userId);
+    const result = await getIdpAdmin().findById(auth.subject);
     if (result.ok) return result.value ?? null;
     log.warn(
       { sub_operation: 'fetchKcUser', code: result.error.code, hint: result.error.message },
@@ -451,7 +451,7 @@ async function requireAuth(
     return result.context;
   }
   throwIfActingError(result.error);
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+  const code = result.error.code === 'MISSING_USER_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,
     fields: { reason: result.error.code },

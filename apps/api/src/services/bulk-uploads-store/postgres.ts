@@ -26,7 +26,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       const rows = await getDb()
         .insert(bulkUploads)
         .values({
-          userId: input.aggregatorId,
+          userId: input.userId,
           participantType: input.participantType,
           storageKey: input.storageKey,
           schemaId: input.schemaId,
@@ -59,12 +59,12 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     }
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<BulkUpload | null>> {
     try {
       const rows = await getDb()
         .select()
         .from(bulkUploads)
-        .where(and(eq(bulkUploads.id, id), eq(bulkUploads.userId, aggregatorId)))
+        .where(and(eq(bulkUploads.id, id), eq(bulkUploads.userId, userId)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -79,12 +79,12 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>> {
     try {
       const where = and(
-        eq(bulkUploads.userId, aggregatorId),
+        eq(bulkUploads.userId, userId),
         ne(bulkUploads.status, 'pending'),
         or(isNull(bulkUploads.statusReason), ne(bulkUploads.statusReason, 'upload_abandoned')),
       );
@@ -113,14 +113,14 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     }
   }
 
-  async deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>> {
+  async deletePending(id: string, userId: string): Promise<StoreResult<void>> {
     try {
       await getDb()
         .delete(bulkUploads)
         .where(
           and(
             eq(bulkUploads.id, id),
-            eq(bulkUploads.userId, aggregatorId),
+            eq(bulkUploads.userId, userId),
             eq(bulkUploads.status, 'pending'),
           ),
         );
@@ -137,12 +137,12 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
 
   async markUploaded(
     id: string,
-    aggregatorId: string,
+    userId: string,
     contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>> {
     const start = Date.now();
     // Read the current state, then write with a status guard.
-    const existing = await this.findById(id, aggregatorId);
+    const existing = await this.findById(id, userId);
     if (!existing.ok) return existing;
     if (!existing.value) {
       return { ok: false, error: { code: 'NOT_FOUND', message: `upload not found: ${id}` } };
@@ -168,7 +168,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .where(
           and(
             eq(bulkUploads.id, id),
-            eq(bulkUploads.userId, aggregatorId),
+            eq(bulkUploads.userId, userId),
             inArray(bulkUploads.status, ['pending', 'uploaded']),
           ),
         )
@@ -206,7 +206,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
 function toDomain(row: BulkUploadRow): BulkUpload {
   return {
     id: row.id,
-    aggregatorId: row.userId,
+    userId: row.userId,
     participantType: row.participantType,
     storageKey: row.storageKey,
     contentFingerprint: row.contentFingerprint,

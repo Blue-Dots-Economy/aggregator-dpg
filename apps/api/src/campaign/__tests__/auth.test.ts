@@ -8,7 +8,7 @@
  * must hold — a coordinator token cannot reach the dump, and a system token
  * cannot reach the org-scoped PII routes. Each 403 case pins its
  * `fields.reason` too, not just the status: several fixtures are 403 for
- * different reasons (wrong azp vs. wrong username vs. no aggregator_id), and
+ * different reasons (wrong azp vs. wrong username vs. no user_id), and
  * asserting status alone can't tell those apart or prove which gate fired.
  *
  * @module apps/api/campaign/__tests__/auth.test
@@ -42,7 +42,7 @@ const COORDINATOR_CLAIMS = {
   sub: 'human-uuid',
   azp: 'campaign-manager',
   preferred_username: 'coordinator@org.example',
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   signalstack_org_id: 'org_5d3b7fa4',
   email: 'coordinator@org.example',
 };
@@ -50,12 +50,12 @@ const COORDINATOR_CLAIMS = {
 /**
  * A service account that has been misprovisioned with org attributes — the
  * state the local realm was found in. It must still be rejected by the
- * org-scoped gate, which is exactly what the absence of `aggregator_id`
+ * org-scoped gate, which is exactly what the absence of `user_id`
  * cannot guarantee.
  */
 const MISPROVISIONED_SYSTEM_CLAIMS = {
   ...SYSTEM_CLAIMS,
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   signalstack_org_id: 'org_5d3b7fa4',
 };
 
@@ -183,18 +183,18 @@ describe('campaign auth', () => {
   describe('requireCampaignAuth — reverse direction', () => {
     it('accepts a coordinator token', async () => {
       const ctx = await requireCampaignAuth(req('coordinator'));
-      expect(ctx.aggregatorId).toBe('agg-1');
+      expect(ctx.userId).toBe('agg-1');
       expect(ctx.signalstackOrgId).toBe('org_5d3b7fa4');
     });
 
-    it('rejects a token without aggregator_id with 403', async () => {
+    it('rejects a token without user_id with 403', async () => {
       await expect(requireCampaignAuth(req('no-aggregator'))).rejects.toMatchObject({
         status: 403,
-        fields: { reason: 'MISSING_AGGREGATOR_ID' },
+        fields: { reason: 'MISSING_USER_ID' },
       });
     });
 
-    it('rejects the system token with 403 (no aggregator_id)', async () => {
+    it('rejects the system token with 403 (no user_id)', async () => {
       await expect(requireCampaignAuth(req('system'))).rejects.toMatchObject({ status: 403 });
     });
 
