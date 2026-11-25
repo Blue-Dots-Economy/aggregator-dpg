@@ -45,14 +45,14 @@ const OnboardingCountersSchema = z.object({
 });
 
 const OnboardingSummaryResponseSchema = OnboardingCountersSchema.extend({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
 }).loose();
 
 const OnboardingBySourceResponseSchema = z
   .object({
-    aggregator_id: z.string(),
+    user_id: z.string(),
     from: z.string().nullable(),
     to: z.string().nullable(),
     by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).loose()),
@@ -94,7 +94,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
 
       const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
       return reply.send({
-        aggregator_id: auth.userId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         ...r,
@@ -136,7 +136,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
         .groupBy(onboarding.source);
 
       return reply.send({
-        aggregator_id: auth.userId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         by_source: rows,

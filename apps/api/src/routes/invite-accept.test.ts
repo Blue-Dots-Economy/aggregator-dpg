@@ -236,9 +236,9 @@ describe('invite read and accept routes', () => {
       const token = await inviteToken('coordinator');
       const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
       expect(res.statusCode).toBe(201);
-      const body = res.json() as { aggregator_id: string; status: string; login_hint: string };
+      const body = res.json() as { user_id: string; status: string; login_hint: string };
       expect(body).toMatchObject({ status: 'pending', login_hint: COORD_EMAIL });
-      const stored = await userStore.findById(body.aggregator_id);
+      const stored = await userStore.findById(body.user_id);
       expect(stored.ok && stored.value?.status).toBe('pending');
       expect(stored.ok && stored.value?.parentOrgId).toBe(PARENT);
       const kc = await idp.findByEmail(COORD_EMAIL);
@@ -259,8 +259,8 @@ describe('invite read and accept routes', () => {
         invite: token,
       });
       expect(res.statusCode).toBe(201);
-      const { aggregator_id } = res.json() as { aggregator_id: string };
-      const stored = await userStore.findById(aggregator_id);
+      const { user_id } = res.json() as { user_id: string };
+      const stored = await userStore.findById(user_id);
       expect(stored.ok && stored.value?.serves).toEqual(['seeker', 'provider']);
       const kc = await idp.findByEmail(COORD_EMAIL);
       expect(kc.ok && kc.value?.attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual([
@@ -370,7 +370,7 @@ describe('invite read and accept routes', () => {
       };
 
       const storedLocations = async (res: { json: () => unknown }) => {
-        const id = (res.json() as { aggregator_id: string }).aggregator_id;
+        const id = (res.json() as { user_id: string }).user_id;
         const row = await userStore.findById(id);
         return row.ok ? row.value?.locations : undefined;
       };

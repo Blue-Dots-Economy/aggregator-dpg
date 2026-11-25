@@ -156,15 +156,15 @@ describe('POST /v1/user/invite/accept', () => {
     const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
     const body = res.json() as {
-      aggregator_id: string;
+      user_id: string;
       org_slug: string;
       message: string;
     };
-    expect(body.aggregator_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.user_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.org_slug).toMatch(/^trrain-[0-9a-f]{4}$/);
     expect(body.message).toContain('Registration received');
 
-    const stored = await userStore.findById(body.aggregator_id);
+    const stored = await userStore.findById(body.user_id);
     if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
 
     const kcUser = await idp.findByEmail(validBody.contact.email);
@@ -173,7 +173,7 @@ describe('POST /v1/user/invite/accept', () => {
       expect(kcUser.value.enabled).toBe(true);
       expect(kcUser.value.emailVerified).toBe(false);
       expect(kcUser.value.attributes?.aggregator_id).toBeUndefined();
-      expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.user_id);
       expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
       expect(kcUser.value.attributes?.decision_made?.[0]).toBe('invited');
@@ -189,7 +189,7 @@ describe('POST /v1/user/invite/accept', () => {
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
     expect(consentRow?.subjectType).toBe('user');
-    expect(consentRow?.subjectId).toBe(body.aggregator_id);
+    expect(consentRow?.subjectId).toBe(body.user_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.source).toBe('registration');
@@ -213,12 +213,12 @@ describe('POST /v1/user/invite/accept', () => {
   it('records aggregator consent in the ledger on successful registration', async () => {
     const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const { user_id } = res.json() as { user_id: string };
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     expect(ledgerRows[0]?.subjectType).toBe('user');
-    expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
+    expect(ledgerRows[0]?.subjectId).toBe(user_id);
   });
 
   it('records the resolved AGGREGATOR_NETWORK and AGGREGATOR_BRAND in the consent ledger', async () => {
@@ -535,8 +535,8 @@ describe('POST /v1/user/invite/accept', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
-    const stored = await userStore.findById(aggregator_id);
+    const { user_id } = res.json() as { user_id: string };
+    const stored = await userStore.findById(user_id);
     if (stored.ok && stored.value) {
       const validTill = new Date(stored.value.consent?.valid_till ?? 0).getTime();
       const now = Date.now();
@@ -546,7 +546,7 @@ describe('POST /v1/user/invite/accept', () => {
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
     // What the ledger row itself stores (0029: the only home of consent).
-    const row = consentLedger.list().find((r) => r.subjectId === aggregator_id);
+    const row = consentLedger.list().find((r) => r.subjectId === user_id);
     const ledgerTill = row?.validTill?.getTime() ?? 0;
     const fiveYears = 5 * 365 * 24 * 60 * 60 * 1000;
     expect(ledgerTill).toBeGreaterThan(Date.now() + fiveYears - 60_000);
