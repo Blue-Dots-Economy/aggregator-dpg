@@ -1,7 +1,7 @@
 /**
  * Filesystem loader for the Signals participant realm roles.
  *
- * One Keycloak realm serves both DPGs, so a token without `aggregator_id` may
+ * One Keycloak realm serves both DPGs, so a token without `user_id` may
  * still be a valid Signals identity. The login screen uses these roles to show
  * which account the visitor is signed in as.
  *

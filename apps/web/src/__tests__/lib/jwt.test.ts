@@ -9,8 +9,8 @@ function makeToken(payload: Record<string, unknown>): string {
 
 describe('decodeJwtClaims', () => {
   it('decodes a well-formed token payload', () => {
-    const token = makeToken({ sub: 'user-1', aggregator_id: 'agg-1' });
-    expect(decodeJwtClaims(token)).toEqual({ sub: 'user-1', aggregator_id: 'agg-1' });
+    const token = makeToken({ sub: 'user-1', user_id: 'agg-1' });
+    expect(decodeJwtClaims(token)).toEqual({ sub: 'user-1', user_id: 'agg-1' });
   });
 
   it('returns null when the token has fewer than 2 parts', () => {
@@ -29,7 +29,7 @@ describe('decodeJwtClaims with a payload that is not an object', () => {
   }
 
   it.each([
-    ['an array', ['aggregator_id']],
+    ['an array', ['user_id']],
     ['a string', 'agg-1'],
     ['null', null],
   ])('returns null for %s', (_label, payload) => {
@@ -38,40 +38,32 @@ describe('decodeJwtClaims with a payload that is not an object', () => {
 });
 
 describe('tokenUserId', () => {
-  it('returns the aggregator_id claim when present and non-empty', () => {
-    const token = makeToken({ aggregator_id: 'agg-42' });
-    expect(tokenUserId(token)).toBe('agg-42');
+  it('returns the user_id claim when present and non-empty', () => {
+    expect(tokenUserId(makeToken({ user_id: 'agg-42' }))).toBe('agg-42');
   });
 
-  it('returns null when aggregator_id is absent', () => {
-    const token = makeToken({ sub: 'user-1' });
-    expect(tokenUserId(token)).toBeNull();
+  it('returns null when user_id is absent', () => {
+    expect(tokenUserId(makeToken({ sub: 'user-1' }))).toBeNull();
   });
 
-  it('returns null when aggregator_id is an empty string', () => {
-    const token = makeToken({ aggregator_id: '' });
-    expect(tokenUserId(token)).toBeNull();
+  it('returns null when user_id is an empty string', () => {
+    expect(tokenUserId(makeToken({ user_id: '' }))).toBeNull();
   });
 
-  it('returns null when aggregator_id is not a string', () => {
-    const token = makeToken({ aggregator_id: 123 });
-    expect(tokenUserId(token)).toBeNull();
+  it('returns null when user_id is not a string', () => {
+    expect(tokenUserId(makeToken({ user_id: 123 }))).toBeNull();
   });
 
   it('returns null for a malformed token', () => {
     expect(tokenUserId('garbage')).toBeNull();
   });
 
-  it('returns the user_id claim of a new token that has no aggregator_id', () => {
-    expect(tokenUserId(makeToken({ user_id: 'agg-42' }))).toBe('agg-42');
+  it('returns null for a token that carries only aggregator_id', () => {
+    expect(tokenUserId(makeToken({ aggregator_id: 'agg-42' }))).toBeNull();
   });
 
-  it('returns the id when user_id and aggregator_id are equal', () => {
-    expect(tokenUserId(makeToken({ user_id: 'agg-42', aggregator_id: 'agg-42' }))).toBe('agg-42');
-  });
-
-  it('returns null when user_id and aggregator_id differ, so the token is not treated as a coordinator', () => {
-    expect(tokenUserId(makeToken({ user_id: 'agg-42', aggregator_id: 'agg-7' }))).toBeNull();
+  it('reads user_id and ignores aggregator_id', () => {
+    expect(tokenUserId(makeToken({ user_id: 'agg-42', aggregator_id: 'agg-7' }))).toBe('agg-42');
   });
 });
 

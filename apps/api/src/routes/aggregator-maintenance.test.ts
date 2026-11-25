@@ -78,11 +78,11 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
     userStore.seed([fresh, stale]);
-    // KC user is keyed by the stored aggregator_id attribute (not email).
+    // KC user is keyed by the stored user_id attribute (not email).
     await idp.createUser({
       email: 'stale@x.org',
       enabled: false,
-      attributes: { aggregator_id: stale.id },
+      attributes: { user_id: stale.id },
     });
 
     const res = await app.inject({
@@ -143,7 +143,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const USER_BEARER = 'user-token';
     _setAccessTokenVerifier(async (token) => {
       if (token === USER_BEARER) {
-        return { sub: '9c1e2f00-user-uuid', aggregator_id: 'agg-1' };
+        return { sub: '9c1e2f00-user-uuid', user_id: 'agg-1' };
       }
       if (token === SERVICE_BEARER) {
         return {
@@ -174,7 +174,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
     userStore.seed([stale]);
-    // Prune resolves the KC user by the stored aggregator_id attribute; patch
+    // Prune resolves the KC user by the stored user_id attribute; patch
     // findByAttribute to error, simulating Keycloak unreachable during lookup.
     const originalFindByAttribute = idp.findByAttribute.bind(idp);
     idp.findByAttribute = async (name: string, value: string) => {
@@ -220,7 +220,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     await idp.createUser({
       email: 'delete-fail@x.org',
       enabled: false,
-      attributes: { aggregator_id: stale.id },
+      attributes: { user_id: stale.id },
     });
     idp.deleteUser = async () => ({
       ok: false,
@@ -281,7 +281,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const user = await idp.createUser({
       email: 'raced@x.org',
       enabled: false,
-      attributes: { aggregator_id: stale.id },
+      attributes: { user_id: stale.id },
     });
     if (!user.ok) throw new Error('seed failed');
     // An approval lands between the page read and the delete.

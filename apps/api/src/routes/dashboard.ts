@@ -5,7 +5,7 @@
  *     Proxies signalstack's dashboard payload (rollup, paginated participants,
  *     cursor, metadata) for the caller's signalstack org.
  *
- * Authorisation: Bearer access token with the `aggregator_id` claim.
+ * Authorisation: Bearer access token with the `user_id` claim.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -385,7 +385,7 @@ async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log'])
 /**
  * Authenticates an approved coordinator and checks route access.
  *
- * A missing `aggregator_id` claim is 403 FORBIDDEN; a coordinator not yet
+ * A missing `user_id` claim is 403 FORBIDDEN; a coordinator not yet
  * approved is 403 NOT_APPROVED.
  */
 async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
@@ -395,7 +395,7 @@ async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
     return result.context;
   }
   throwIfActingError(result.error);
-  if (result.error.code === 'MISSING_AGGREGATOR_ID') {
+  if (result.error.code === 'MISSING_USER_ID') {
     throw httpError('FORBIDDEN', {
       detail: result.error.message,
       fields: { reason: result.error.code },

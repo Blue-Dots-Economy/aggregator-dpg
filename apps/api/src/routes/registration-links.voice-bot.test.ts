@@ -111,7 +111,7 @@ async function bootApp(
     return {
       sub: USER_ID,
       email: 'a@x.com',
-      aggregator_id: AGG_ID,
+      user_id: AGG_ID,
       aggregator_type: 'seeker',
       decision_made: 'approved',
     };

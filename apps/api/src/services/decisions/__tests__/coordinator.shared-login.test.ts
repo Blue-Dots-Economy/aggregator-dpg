@@ -123,8 +123,8 @@ describe('approveCoordinator on a shared login', () => {
     },
   );
 
-  it('provisions Keycloak as before for a legacy login whose user carries aggregator_id', async () => {
-    await idp.setAttributes(SUB, { aggregator_id: ID });
+  it('provisions Keycloak as before for a legacy login whose user carries user_id', async () => {
+    await idp.setAttributes(SUB, { user_id: ID });
     const enable = vi.spyOn(idp, 'enableUser');
     const decision = vi.spyOn(idp, 'setUserDecision');
 

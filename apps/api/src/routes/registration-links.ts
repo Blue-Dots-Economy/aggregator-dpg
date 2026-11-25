@@ -8,7 +8,7 @@
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
  * All endpoints need an authenticated aggregator JWT and are scoped by the
- * `aggregator_id` claim.
+ * `user_id` claim.
  */
 
 import { randomBytes } from 'node:crypto';

@@ -39,7 +39,7 @@ describe('aggregator profile routes', () => {
       firstName: 'Asha',
       lastName: 'Rao',
       phone: '+919876543210',
-      attributes: { aggregator_id: userId, association: 'TRRAIN' },
+      attributes: { user_id: userId, association: 'TRRAIN' },
     });
     _setIdpAdmin(idp);
     // sub claim is populated lazily — use the KC user id created above so
@@ -55,7 +55,7 @@ describe('aggregator profile routes', () => {
           given_name: 'Asha',
           family_name: 'Rao',
           phone_number: '+919876543210',
-          aggregator_id: userId,
+          user_id: userId,
         };
       }
       if (token === 'no-attribute') {
@@ -80,7 +80,7 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('GET returns 403 when token has no aggregator_id', async () => {
+  it('GET returns 403 when token has no user_id', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -682,7 +682,7 @@ describe('aggregator profile routes, owner acting as its coordinator account', (
     _setOrganisationStore(orgs);
     idp = new IdpAdminFake();
     _setIdpAdmin(idp);
-    // Owner token: no aggregator_id.
+    // Owner token: no user_id.
     _setAccessTokenVerifier(async () => ({
       sub: SUB,
       email: 'owner@example.org',

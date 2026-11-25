@@ -106,7 +106,7 @@ function dbDown(subOperation: string, message: string): never {
  * @throws IDP_UNAVAILABLE if Keycloak fails or has no user for the coordinator.
  */
 async function findCoordinatorLogin(userId: string, log: FastifyBaseLogger): Promise<string> {
-  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, userId);
+  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.USER_ID, userId);
   if (!kc.ok || !kc.value) {
     log.error({
       status: 'failure',
@@ -121,8 +121,8 @@ async function findCoordinatorLogin(userId: string, log: FastifyBaseLogger): Pro
 /**
  * The Keycloak user id of a coordinator's login for a write, or `null` when
  * its recorded login is an owner's shared login (an admin account and no
- * `aggregator_id`), which coordinator paths never write in Keycloak.
- * Any other login is found by its `aggregator_id`.
+ * `user_id`), which coordinator paths never write in Keycloak.
+ * Any other login is found by its `user_id`.
  *
  * @param userId - The coordinator's `users.id`.
  * @param log - Request logger.

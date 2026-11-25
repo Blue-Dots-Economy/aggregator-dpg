@@ -12,16 +12,16 @@ import {
   type ResolveActorInput,
 } from './interface.js';
 
-/** In-memory resolver keyed by `aggregator_id` claim, acting account or subject. */
+/** In-memory resolver keyed by `user_id` claim, acting account or subject. */
 export class ActorResolverFake extends ActorResolverBase {
   private readonly byKey = new Map<string, Actor>();
   /** When set, every resolve fails with `UNAVAILABLE`. */
   failWith: string | null = null;
 
   /**
-   * Seeds an actor for a subject, an `aggregator_id` claim or an acting account.
+   * Seeds an actor for a subject, a `user_id` claim or an acting account.
    *
-   * @param key - The subject, the `aggregator_id` claim or the `x-acting-account` id.
+   * @param key - The subject, the `user_id` claim or the `x-acting-account` id.
    * @param actor - The actor it resolves to.
    */
   seed(key: string, actor: Actor): void {

@@ -79,10 +79,10 @@ const TOKENS: Record<string, Record<string, unknown>> = {
   a: { sub: 'sub-a', preferred_username: 'a@a.org' },
   b: { sub: 'sub-b', preferred_username: 'b@b.org' },
   p: { sub: 'sub-p', preferred_username: 'p@p.org' },
-  coord: { sub: 'sub-c3', preferred_username: 'c3@x.org', aggregator_id: C3 },
+  coord: { sub: 'sub-c3', preferred_username: 'c3@x.org', user_id: C3 },
   unlinked: { sub: 'sub-nobody', preferred_username: 'nobody@x.org' },
-  // A login whose aggregator_id claim names a coordinator whose recorded login it is not.
-  forged: { sub: 'sub-nobody', preferred_username: 'nobody@x.org', aggregator_id: C3 },
+  // A login whose user_id claim names a coordinator whose recorded login it is not.
+  forged: { sub: 'sub-nobody', preferred_username: 'nobody@x.org', user_id: C3 },
   svc: { sub: 'sub-svc', preferred_username: 'service-account-aggregator-bff' },
 };
 
@@ -95,9 +95,9 @@ describe('console routes /v1/user, /v1/org', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
-  /** The coordinator's Keycloak user, found by its `aggregator_id`. */
+  /** The coordinator's Keycloak user, found by its `user_id`. */
   async function kcUserOf(id: string) {
-    const found = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, id);
+    const found = await idp.findByAttribute(KC_ATTR.USER_ID, id);
     if (!found.ok || !found.value) throw new Error('kc seed missing');
     return found.value;
   }
@@ -225,7 +225,7 @@ describe('console routes /v1/user, /v1/org', () => {
       await idp.createUser({
         email: `c${n}@x.org`,
         enabled: false,
-        attributes: { [KC_ATTR.AGGREGATOR_ID]: id },
+        attributes: { [KC_ATTR.USER_ID]: id },
       });
     }
 
@@ -301,7 +301,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('refuses a pending coordinator with NOT_APPROVED', async () => {
-      TOKENS.c1 = { sub: 'sub-c1', aggregator_id: C1 };
+      TOKENS.c1 = { sub: 'sub-c1', user_id: C1 };
       const res = await get('/v1/user/read/me', 'c1' as keyof typeof TOKENS);
       expect(res.statusCode).toBe(403);
       expect((res.json() as { error: { code: string } }).error.code).toBe('NOT_APPROVED');
@@ -780,12 +780,12 @@ describe('console routes /v1/user, /v1/org', () => {
       );
     });
 
-    it("writes Keycloak for a legacy coordinator on the owner's login whose user carries aggregator_id", async () => {
+    it("writes Keycloak for a legacy coordinator on the owner's login whose user carries user_id", async () => {
       const C4 = '00000000-0000-4000-8000-0000000000c4';
       coordinators.seed([{ ...coordinator(C4, ORG_A, 'active', 4), serves: ['provider'] }]);
       const kc = await idp.createUser({
         email: 'legacy@x.org',
-        attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 },
+        attributes: { [KC_ATTR.USER_ID]: C4 },
       });
       if (!kc.ok) throw new Error('seed');
       await getIdentityStore().link(C4, 'keycloak', 'sub-a', 'coordinator');
@@ -2058,7 +2058,7 @@ describe('console routes /v1/user, /v1/org', () => {
         },
       ]);
       await getIdentityStore().link(C4, 'keycloak', 'sub-c4');
-      TOKENS.coord4 = { sub: 'sub-c4', preferred_username: 'c4@x.org', aggregator_id: C4 };
+      TOKENS.coord4 = { sub: 'sub-c4', preferred_username: 'c4@x.org', user_id: C4 };
       const res = await get('/v1/user/read/me', 'coord4' as keyof typeof TOKENS);
       expect(res.statusCode).toBe(200);
       expect(
@@ -2184,7 +2184,7 @@ describe('console routes /v1/user, /v1/org', () => {
       await idp.createUser({
         email: 'c5@x.org',
         enabled: false,
-        attributes: { [KC_ATTR.AGGREGATOR_ID]: C5, [KC_ATTR.AGGREGATOR_TYPE]: ['provider'] },
+        attributes: { [KC_ATTR.USER_ID]: C5, [KC_ATTR.AGGREGATOR_TYPE]: ['provider'] },
       });
       const ss = new SignalStackWriterFake();
       const upsert = vi.spyOn(ss, 'upsertAggregator');
@@ -2216,7 +2216,7 @@ describe('console routes /v1/user, /v1/org', () => {
       await idp.createUser({
         email: 'c5@x.org',
         enabled: false,
-        attributes: { [KC_ATTR.AGGREGATOR_ID]: C5 },
+        attributes: { [KC_ATTR.USER_ID]: C5 },
       });
       const ss = new SignalStackWriterFake();
       ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
@@ -2497,7 +2497,7 @@ describe('console routes /v1/user, /v1/org', () => {
         const C4 = '00000000-0000-4000-8000-0000000000c4';
         /** The `roles` attribute on C4's Keycloak user. */
         const kcRolesOfC4 = async () => {
-          const kc = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, C4);
+          const kc = await idp.findByAttribute(KC_ATTR.USER_ID, C4);
           const user = kc.ok
             ? (kc.value as { attributes?: Record<string, string[]> } | null)
             : null;
@@ -2510,9 +2510,9 @@ describe('console routes /v1/user, /v1/org', () => {
           // The sync's per-user lock; no Redis in unit tests.
           _setRedis({ set: async () => 'OK', eval: async () => 1, sadd: async () => 1 } as never);
           // An active coordinator with a Keycloak user but no recorded login,
-          // found through its aggregator_id attribute.
+          // found through its user_id attribute.
           coordinators.seed([coordinator(C4, ORG_A, 'active', 4)]);
-          await idp.createUser({ email: 'c4@x.org', attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 } });
+          await idp.createUser({ email: 'c4@x.org', attributes: { [KC_ATTR.USER_ID]: C4 } });
         });
         afterEach(() => {
           _setRedis(null);

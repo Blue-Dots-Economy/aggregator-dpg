@@ -49,7 +49,7 @@ export interface Actor {
 
 /** Input of {@link ActorResolverBase.resolve}: verified token claims. */
 export interface ResolveActorInput {
-  /** The user's `users.id`, from the `user_id` claim, else `aggregator_id`, when the token carries one. */
+  /** The user's `users.id`, from the `user_id` claim, when the token carries one. */
   userId?: string;
   /** The token's `sub` (the IdP login). */
   subject: string;
@@ -76,9 +76,9 @@ export abstract class ActorResolverBase {
   /**
    * Resolves the caller's account and organisations.
    *
-   * A token with `aggregator_id` resolves to that coordinator; one without
+   * A token with `user_id` resolves to that coordinator; one without
    * resolves through the recorded IdP login (`user_identities`), never by email.
-   * With `actingAccountId` and no `aggregator_id`, it resolves to that
+   * With `actingAccountId` and no `user_id`, it resolves to that
    * coordinator when the login may act as it.
    *
    * @param input - Verified claims.

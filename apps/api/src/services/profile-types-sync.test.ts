@@ -32,7 +32,7 @@ async function kcUser(idp: IdpAdminFake, userId: string, types?: string[]): Prom
   const created = await idp.createUser({
     email: `${userId}@x.org`,
     attributes: {
-      [KC_ATTR.AGGREGATOR_ID]: userId,
+      [KC_ATTR.USER_ID]: userId,
       ...(types ? { [KC_ATTR.AGGREGATOR_TYPE]: types } : {}),
     },
   });

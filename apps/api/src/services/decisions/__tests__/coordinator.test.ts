@@ -39,7 +39,7 @@ describe('approveCoordinator', () => {
     const user = await idp.createUser({
       email: 'c@x.test',
       enabled: false,
-      attributes: { [KC_ATTR.AGGREGATOR_ID]: ID },
+      attributes: { [KC_ATTR.USER_ID]: ID },
     });
     if (!user.ok) throw new Error('seed failed');
     kcId = user.value.id;

@@ -33,7 +33,7 @@ const COORD = '00000000-0000-4000-8000-0000000000c1';
 const OTHER = '00000000-0000-4000-8000-0000000000c2';
 const ORG = '00000000-0000-4000-8000-0000000000b1';
 
-/** Owner token: no `aggregator_id`, owner-only claims that must not leak into the context. */
+/** Owner token: no `user_id`, owner-only claims that must not leak into the context. */
 const OWNER_CLAIMS = {
   sub: SUB,
   email: 'owner@example.org',
@@ -200,7 +200,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
     seed();
     const claims = {
       sub: SUB,
-      aggregator_id: COORD,
+      user_id: COORD,
       decision_made: 'approved',
       signalstack_org_id: 'org_x',
     };
@@ -212,7 +212,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
     seed();
     const claims = {
       sub: SUB,
-      aggregator_id: COORD,
+      user_id: COORD,
       decision_made: 'approved',
       signalstack_org_id: 'org_x',
     };
@@ -228,7 +228,7 @@ describe('requireApproved acting as an owner coordinator account', () => {
     seed();
     const claims = {
       sub: SUB,
-      aggregator_id: COORD,
+      user_id: COORD,
       decision_made: 'approved',
       signalstack_org_id: 'org_x',
     };
@@ -236,15 +236,15 @@ describe('requireApproved acting as an owner coordinator account', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('(e) MISSING_AGGREGATOR_ID with no claim and no header', async () => {
+  it('(e) MISSING_USER_ID with no claim and no header', async () => {
     seed();
     const r = await requireApproved(makeReq(OWNER_CLAIMS));
-    expect(r).toMatchObject({ ok: false, error: { code: 'MISSING_AGGREGATOR_ID' } });
+    expect(r).toMatchObject({ ok: false, error: { code: 'MISSING_USER_ID' } });
   });
 
   it('(i) authenticate alone does not accept acting', async () => {
     seed();
     const r = await authenticate(makeReq(OWNER_CLAIMS, COORD));
-    expect(r).toMatchObject({ ok: false, error: { code: 'MISSING_AGGREGATOR_ID' } });
+    expect(r).toMatchObject({ ok: false, error: { code: 'MISSING_USER_ID' } });
   });
 });

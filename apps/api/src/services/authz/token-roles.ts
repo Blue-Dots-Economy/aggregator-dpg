@@ -10,13 +10,13 @@
  * by the next one (a later change, the sweep, or the reconcile).
  *
  * A shared login (an org owner whose own coordinator account uses the same
- * Keycloak user, which carries no `aggregator_id`) has one attribute for two
+ * Keycloak user, which carries no `user_id`) has one attribute for two
  * accounts. The admin account owns
  * it: a sync of either account writes the admin's role keys plus the
  * coordinator's as `acting:<coordinatorId>:<roleKey>` entries, under the
  * admin account's lock. Any other coordinator sync whose Keycloak user turns
  * out to be such a login is skipped (logged), so a coordinator's untagged keys
- * never reach an owner's login. A Keycloak user that carries `aggregator_id`
+ * never reach an owner's login. A Keycloak user that carries `user_id`
  * is a coordinator's own login even when an admin account is linked to it.
  *
  * Runs only with `RBAC_MODE` other than `off`. Never throws and never
@@ -61,7 +61,7 @@ interface DepFailure {
 /**
  * The accounts on one Keycloak login. `shared` is set only for an owner's
  * shared login (`services/auth/shared-login.ts`): an admin account and no
- * `aggregator_id` on the Keycloak user.
+ * `user_id` on the Keycloak user.
  */
 export interface TokenLoginAccounts extends LoginAccounts {
   shared: boolean;
@@ -166,7 +166,7 @@ export function defaultTokenRolesDeps(): TokenRolesDeps {
       if (linked.value) return { ok: true, value: linked.value };
       // Coordinator logins are recorded lazily; find the user by its pointer.
       if (actor.userType !== 'coordinator') return { ok: true, value: null };
-      const found = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, userId);
+      const found = await getIdpAdmin().findByAttribute(KC_ATTR.USER_ID, userId);
       if (!found.ok) return { ok: false, error: found.error };
       return { ok: true, value: found.value?.id ?? null };
     },

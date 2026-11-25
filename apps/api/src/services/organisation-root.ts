@@ -15,7 +15,7 @@
  * owns another org, is refused: logged, and the current owner kept. A login
  * may hold one admin and one coordinator account, but the root and Default
  * owners never hold a coordinator account.
- * In the IdP, an existing user that carries an `aggregator_id` (a coordinator
+ * In the IdP, an existing user that carries a `user_id` (a coordinator
  * login) is not granted owner access: logged, and nothing linked or enabled.
  *
  * Then, best-effort, it mirrors both orgs and their owners into the IdP (a
@@ -537,7 +537,7 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
     return null;
   }
   if (existing.value) {
-    const userId = existing.value.attributes?.[KC_ATTR.AGGREGATOR_ID] ?? [];
+    const userId = existing.value.attributes?.[KC_ATTR.USER_ID] ?? [];
     if (userId.some((v) => v !== '')) {
       logger.warn(
         {

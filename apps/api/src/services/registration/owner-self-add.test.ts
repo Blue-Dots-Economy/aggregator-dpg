@@ -269,7 +269,7 @@ describe('ownerSelfAdd', () => {
     await idp.createUser({
       email: 'legacy@x.test',
       enabled: false,
-      attributes: { [KC_ATTR.AGGREGATOR_ID]: first.value.id },
+      attributes: { [KC_ATTR.USER_ID]: first.value.id },
     });
 
     expect(await errorCode(input())).toBe('ALREADY_COORDINATOR');

@@ -66,7 +66,7 @@ describe('POST /v1/campaign/email', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'campaign-manager',
           email: 'user@sanketika.in',
@@ -288,7 +288,7 @@ describe('POST /v1/campaign/email', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'aggregator-portal',
         };
@@ -312,7 +312,7 @@ describe('POST /v1/campaign/email', () => {
 
   it('returns 403 when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
+      if (token === 'good') return { sub: 'u1', user_id: 'agg-1', azp: 'campaign-manager' };
       throw new Error('invalid');
     });
     const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
@@ -390,7 +390,7 @@ describe('GET /v1/campaign/email/{job_id}', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'campaign-manager',
         };

@@ -15,7 +15,7 @@
  *     `consent` is read-only after registration; a body that sends it is
  *     refused as `SCHEMA_VALIDATION`. `org_slug` cannot be changed.
  *
- * Requires a Keycloak Bearer token carrying the `aggregator_id` claim. The GET
+ * Requires a Keycloak Bearer token carrying the `user_id` claim. The GET
  * also accepts an org owner acting as its own coordinator account
  * (`x-acting-account`); the PATCH does not, because it writes the login's
  * Keycloak contact attributes.
@@ -451,7 +451,7 @@ async function requireAuth(
     return result.context;
   }
   throwIfActingError(result.error);
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+  const code = result.error.code === 'MISSING_USER_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,
     fields: { reason: result.error.code },

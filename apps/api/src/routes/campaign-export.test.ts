@@ -56,7 +56,7 @@ describe('POST /v1/campaign/export', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'campaign-manager',
         };
@@ -105,7 +105,7 @@ describe('POST /v1/campaign/export', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'campaign-manager',
           email: 'user@sanketika.in',
@@ -178,7 +178,7 @@ describe('POST /v1/campaign/export', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'aggregator-portal',
         };
@@ -223,7 +223,7 @@ describe('POST /v1/campaign/export', () => {
 
   it('returns 403 when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
+      if (token === 'good') return { sub: 'u1', user_id: 'agg-1', azp: 'campaign-manager' };
       throw new Error('invalid');
     });
     const res = await post({ item_ids: [VALID_UUID] });
@@ -270,7 +270,7 @@ describe('POST /v1/campaign/export', () => {
   // SYSTEM token shares this client's azp, so nothing but the guard stops it
   // reaching participant PII here. Two shapes, because they fail on different
   // checks and a refactor could plausibly break one and not the other.
-  it('rejects the campaign-manager system token (correctly provisioned: no aggregator_id)', async () => {
+  it('rejects the campaign-manager system token (correctly provisioned: no user_id)', async () => {
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good') {
         return {
@@ -283,7 +283,7 @@ describe('POST /v1/campaign/export', () => {
     });
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(403);
-    expect(res.json().error.fields.reason).toBe('MISSING_AGGREGATOR_ID');
+    expect(res.json().error.fields.reason).toBe('MISSING_USER_ID');
   });
 
   it('rejects a MISPROVISIONED system token that does carry org claims', async () => {
@@ -295,7 +295,7 @@ describe('POST /v1/campaign/export', () => {
           sub: 'sa-uuid',
           azp: 'campaign-manager',
           preferred_username: 'service-account-campaign-manager',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
         };
       }

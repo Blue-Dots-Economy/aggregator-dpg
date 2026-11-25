@@ -469,7 +469,6 @@ async function createCoordinatorLogin(
     firstName,
     lastName,
     attributes: {
-      [KC_ATTR.AGGREGATOR_ID]: user.userId,
       [KC_ATTR.USER_ID]: user.userId,
       [KC_ATTR.AGGREGATOR_TYPE]: user.types,
       [KC_ATTR.PHONE_NUMBER]: user.contact.phone,

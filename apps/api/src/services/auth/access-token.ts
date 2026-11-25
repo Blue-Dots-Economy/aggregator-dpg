@@ -29,7 +29,7 @@ let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 export interface AuthContext {
   /** Keycloak `sub` claim: the login's stable id (not `users.id`). */
   subject: string;
-  /** The `user_id` claim, else the `aggregator_id` claim: the user's `users.id`. */
+  /** The `user_id` claim: the user's `users.id`. */
   userId: string;
   /**
    * The profile types the coordinator serves, from the multivalued
@@ -72,7 +72,7 @@ export interface AuthContext {
 export type AuthError =
   | { code: 'MISSING_TOKEN'; message: string }
   | { code: 'INVALID_TOKEN'; message: string }
-  | { code: 'MISSING_AGGREGATOR_ID'; message: string }
+  | { code: 'MISSING_USER_ID'; message: string }
   | { code: 'NOT_APPROVED'; message: string }
   /** `x-acting-account` names an account this login may not act as (403). */
   | { code: 'ACTING_ACCOUNT_INVALID'; message: string }
@@ -95,7 +95,7 @@ export interface AnyAuthContext {
    * `azp` and `sub` cannot.
    */
   preferredUsername?: string;
-  /** Whether this token is bound to an end user (has `user_id` or `aggregator_id`). */
+  /** Whether this token is bound to an end user (has `user_id`). */
   isUser: boolean;
   userId?: string;
   email?: string;
@@ -123,8 +123,7 @@ export async function authenticate(
   if (!verified.ok) return verified;
   const { sub, payload } = verified;
   const claim = readUserIdClaim(payload);
-  if (claim.kind === 'mismatch') return claimMismatch(sub);
-  if (claim.kind === 'absent') return missingAggregatorId();
+  if (claim.kind === 'absent') return missingUserId();
   return { ok: true, context: hydrateContext(sub, claim.userId, payload) };
 }
 
@@ -171,32 +170,10 @@ async function verifyRequest(
   return { ok: true, sub: payload.sub, payload };
 }
 
-function missingAggregatorId(): AuthResult {
+function missingUserId(): AuthResult {
   return {
     ok: false,
-    error: { code: 'MISSING_AGGREGATOR_ID', message: 'token has no aggregator_id claim' },
-  };
-}
-
-/**
- * Rejects a token whose `user_id` and `aggregator_id` claims differ: it cannot
- * be trusted to name one user, so it is treated as an invalid token (401).
- *
- * @param sub - The token subject, logged so the account can be found.
- */
-function claimMismatch(sub: string): {
-  ok: false;
-  error: { code: 'INVALID_TOKEN'; message: string };
-} {
-  logger.warn({
-    operation: 'auth.user_id_claim',
-    status: 'failure',
-    error: 'CLAIM_MISMATCH',
-    sub,
-  });
-  return {
-    ok: false,
-    error: { code: 'INVALID_TOKEN', message: 'token user_id and aggregator_id claims differ' },
+    error: { code: 'MISSING_USER_ID', message: 'token has no user_id claim' },
   };
 }
 
@@ -208,7 +185,7 @@ function actingInvalid(message: string): AuthResult {
  * Builds an {@link AuthContext} from a verified token's optional claims.
  *
  * @param subject - The token `sub`.
- * @param userId - The user's `users.id`, from the `user_id` claim, else `aggregator_id`.
+ * @param userId - The user's `users.id`, from the `user_id` claim.
  * @param payload - The verified JWT payload.
  * @returns The auth context; optional fields set only when present.
  */
@@ -334,15 +311,14 @@ export async function authenticateAllowingActing(req: FastifyRequest): Promise<A
     return actingInvalid('x-acting-account is not an account id');
   }
   const claim = readUserIdClaim(payload);
-  if (claim.kind === 'mismatch') return claimMismatch(sub);
   if (claim.kind === 'absent') {
-    if (acting.kind === 'absent') return missingAggregatorId();
+    if (acting.kind === 'absent') return missingUserId();
     return actingContext(sub, acting.id, payload);
   }
   const claimed = claim.userId;
   if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
     logActing('CLAIM_MISMATCH');
-    return actingInvalid('x-acting-account differs from the token aggregator_id');
+    return actingInvalid('x-acting-account differs from the token user_id');
   }
   return { ok: true, context: hydrateContext(sub, claimed, payload) };
 }
@@ -358,7 +334,7 @@ export async function authenticateAllowingActing(req: FastifyRequest): Promise<A
  * logged and do not block the request.
  *
  * An org owner may act as its own coordinator account by sending
- * `x-acting-account` with a token that has no `aggregator_id`. The account
+ * `x-acting-account` with a token that has no `user_id`. The account
  * must be the coordinator linked to this login, the login must also hold an
  * admin account, and the coordinator and its org must be active. The context
  * then comes from the coordinator row, and neither the backfill nor the
@@ -508,7 +484,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
 }
 
 /**
- * Verifies the Bearer token without requiring a `user_id` or `aggregator_id`
+ * Verifies the Bearer token without requiring a `user_id`
  * claim. A token whose two claims differ is still refused.
  *
  * Use on routes reached through the BFF, which attaches a service-account
@@ -551,7 +527,6 @@ export async function authenticateAny(
   }
   const claims = payload as Record<string, unknown>;
   const claim = readUserIdClaim(payload);
-  if (claim.kind === 'mismatch') return claimMismatch(payload.sub);
   const userId = claim.kind === 'present' ? claim.userId : undefined;
   const ctx: AnyAuthContext = {
     subject: payload.sub,

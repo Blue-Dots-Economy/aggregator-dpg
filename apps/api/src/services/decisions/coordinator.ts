@@ -7,7 +7,7 @@
  * disabled and stamped `rejected` again.
  *
  * A shared login (the coordinator's login also holds an admin account and its
- * Keycloak user has no `aggregator_id`, as the owner self-add leaves it) is
+ * Keycloak user has no `user_id`, as the owner self-add leaves it) is
  * never written in Keycloak here: the row's `status`
  * and `signalstack_org_id` are the only record of that account.
  */
@@ -48,7 +48,7 @@ export interface CoordinatorApprovalInput {
 
 /**
  * Loads a coordinator and its Keycloak user id: the recorded login first,
- * else the user carrying its `aggregator_id` (whose login is then recorded,
+ * else the user carrying its `user_id` (whose login is then recorded,
  * best effort).
  *
  * @param userId - Coordinator id.
@@ -66,7 +66,7 @@ async function loadCoordinatorAndUser(
   const linked = await getIdentityStore().subjectOf(userId, IDP_PROVIDER);
   if (!linked.ok) return { ok: false, reason: 'db' };
   if (linked.value) return { ok: true, aggregator: stored.value, kcUserId: linked.value };
-  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, userId);
+  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.USER_ID, userId);
   if (!kc.ok) return { ok: false, reason: 'idp' };
   if (!kc.value) return { ok: false, reason: 'idp_missing' };
   await recordLoginIdentity(userId, kc.value.id, 'decisions.recordIdentity');
@@ -107,7 +107,7 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
   const store = getUserStore();
   const idp = getIdpAdmin();
 
-  // An owner's shared login (an admin account, no `aggregator_id`): no
+  // An owner's shared login (an admin account, no `user_id`): no
   // Keycloak write below may touch it.
   const accounts = await getIdentityStore().accountsOf(IDP_PROVIDER, kcUserId);
   if (!accounts.ok) return { kind: 'unavailable', dependency: 'db' };

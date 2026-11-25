@@ -96,7 +96,7 @@ describe('POST /v1/campaign/voice', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'campaign-manager',
         };
@@ -177,7 +177,7 @@ describe('POST /v1/campaign/voice', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'aggregator-portal',
         };
@@ -192,7 +192,7 @@ describe('POST /v1/campaign/voice', () => {
 
   it('returns 403 when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
+      if (token === 'good') return { sub: 'u1', user_id: 'agg-1', azp: 'campaign-manager' };
       throw new Error('invalid');
     });
     const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });

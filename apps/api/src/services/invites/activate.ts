@@ -260,7 +260,7 @@ export async function activateInvitedAccount(
   }
   if (!kc.value) return refused(scoped, { kind: 'not_found' }, { reason: 'no_idp_user' });
 
-  const userId = kc.value.attributes?.[KC_ATTR.AGGREGATOR_ID]?.[0];
+  const userId = kc.value.attributes?.[KC_ATTR.USER_ID]?.[0];
   if (userId) {
     const row = await getUserStore().findById(userId);
     if (!row.ok) {

@@ -48,7 +48,7 @@ describe('campaign job status endpoints', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'campaign-manager',
         };
@@ -56,7 +56,7 @@ describe('campaign job status endpoints', () => {
       if (token === 'other-org') {
         return {
           sub: 'u2',
-          aggregator_id: 'agg-2',
+          user_id: 'agg-2',
           signalstack_org_id: 'org-other',
           azp: 'campaign-manager',
         };
@@ -205,7 +205,7 @@ describe('campaign job status endpoints', () => {
           sub: 'sa-uuid',
           azp: 'campaign-manager',
           preferred_username: 'service-account-campaign-manager',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
         };
       }
@@ -228,7 +228,7 @@ describe('campaign job status endpoints', () => {
           sub: 'sa-uuid',
           azp: 'campaign-manager',
           preferred_username: 'service-account-campaign-manager',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
         };
       }

@@ -59,9 +59,9 @@ describe('azp allow-list gate', () => {
     if (!result.ok) expect(result.error.code).toBe('AZP_NOT_ALLOWED');
   });
 
-  it('also gates the user path (authenticate): disallowed azp is rejected before aggregator_id is read', async () => {
+  it('also gates the user path (authenticate): disallowed azp is rejected before user_id is read', async () => {
     process.env.KEYCLOAK_ALLOWED_AZP = 'aggregator-portal';
-    const req = makeReq({ sub: 'user-1', aggregator_id: userId, azp: 'attacker-client' });
+    const req = makeReq({ sub: 'user-1', user_id: userId, azp: 'attacker-client' });
     const result = await authenticate(req);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('INVALID_TOKEN');
@@ -69,7 +69,7 @@ describe('azp allow-list gate', () => {
 
   it('allows the user path when azp is permitted', async () => {
     process.env.KEYCLOAK_ALLOWED_AZP = 'aggregator-portal';
-    const req = makeReq({ sub: 'user-1', aggregator_id: userId, azp: 'aggregator-portal' });
+    const req = makeReq({ sub: 'user-1', user_id: userId, azp: 'aggregator-portal' });
     const result = await authenticate(req);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.context.userId).toBe(userId);

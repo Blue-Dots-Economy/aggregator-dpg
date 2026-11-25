@@ -127,7 +127,7 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
     return {
       sub: USER_ID,
       email: 'a@x.com',
-      aggregator_id: AGG_ID,
+      user_id: AGG_ID,
       aggregator_type: 'seeker',
       decision_made: 'approved',
     };
@@ -591,7 +591,7 @@ async function bootFullApp(opts: {
     if (token === TOKEN_SEEKER_APPROVED) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'approved',
       };
@@ -599,7 +599,7 @@ async function bootFullApp(opts: {
     if (token === TOKEN_PROVIDER_APPROVED) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'provider',
         decision_made: 'approved',
       };
@@ -607,7 +607,7 @@ async function bootFullApp(opts: {
     if (token === TOKEN_PENDING) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'pending',
       };
@@ -615,13 +615,13 @@ async function bootFullApp(opts: {
     if (token === TOKEN_BOTH_APPROVED) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: ['seeker', 'provider'],
         decision_made: 'approved',
       };
     }
     if (token === TOKEN_NO_AGG_TYPE) {
-      return { sub: USER_ID, aggregator_id: AGG_ID, decision_made: 'approved' };
+      return { sub: USER_ID, user_id: AGG_ID, decision_made: 'approved' };
     }
     throw new Error('invalid token');
   });

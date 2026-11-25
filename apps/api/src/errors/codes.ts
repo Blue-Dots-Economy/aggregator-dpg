@@ -172,7 +172,7 @@ export const ERR = {
     status: 403,
     title: 'Access denied',
     detail: 'You do not have permission to perform this action.',
-    hint: 'JWT aggregator_id claim does not match path id, or role missing.',
+    hint: 'JWT user_id claim does not match path id, or role missing.',
   },
   NOT_APPROVED: {
     code: 'NOT_APPROVED',
@@ -187,7 +187,7 @@ export const ERR = {
     status: 403,
     title: 'Account not set up',
     detail: 'Your sign-in is not linked to an account here yet. Contact the network administrator.',
-    hint: 'No aggregator_id claim and no user_identities row for (IDP_PROVIDER, sub). The boot reconcile (root / Default owners) or org create links admins; nothing links by email.',
+    hint: 'No user_id claim and no user_identities row for (IDP_PROVIDER, sub). The boot reconcile (root / Default owners) or org create links admins; nothing links by email.',
   },
   NOT_ORG_ADMIN: {
     code: 'NOT_ORG_ADMIN',
@@ -201,7 +201,7 @@ export const ERR = {
     status: 403,
     title: 'Account not available',
     detail: 'You cannot act as this account. Switch back to your own account and try again.',
-    hint: 'x-acting-account is not a guid, differs from the aggregator_id claim, is not the coordinator linked to this login, the login holds no owner account, or the coordinator or its org is not active. See services/auth/acting.ts.',
+    hint: 'x-acting-account is not a guid, differs from the user_id claim, is not the coordinator linked to this login, the login holds no owner account, or the coordinator or its org is not active. See services/auth/acting.ts.',
   },
   NOT_ORG_OWNER: {
     code: 'NOT_ORG_OWNER',

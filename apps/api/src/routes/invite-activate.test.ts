@@ -43,7 +43,7 @@ describe('POST /v1/user/activate', () => {
       emailVerified: opts.verified,
       attributes: {
         [KC_ATTR.DECISION_MADE]: opts.decision ?? 'invited',
-        ...(opts.userId ? { [KC_ATTR.AGGREGATOR_ID]: opts.userId } : {}),
+        ...(opts.userId ? { [KC_ATTR.USER_ID]: opts.userId } : {}),
       },
     });
     if (!created.ok) throw new Error('seed');
@@ -90,7 +90,7 @@ describe('POST /v1/user/activate', () => {
         sub,
         azp: 'aggregator-portal',
         preferred_username: token,
-        ...(userId ? { aggregator_id: userId } : {}),
+        ...(userId ? { user_id: userId } : {}),
       };
     });
     orgs.seedRoot(

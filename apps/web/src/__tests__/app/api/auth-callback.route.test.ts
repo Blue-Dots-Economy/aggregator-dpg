@@ -94,7 +94,7 @@ describe('GET /api/auth/callback', () => {
       ok: true,
       value: {
         tokens: {
-          accessToken: fakeJwt({ aggregator_id: 'agg-1' }),
+          accessToken: fakeJwt({ user_id: 'agg-1' }),
           refreshToken: 'refresh-1',
           idToken: 'id-1',
           accessTokenExp: Date.now() + 60_000,

@@ -193,7 +193,7 @@ export function registerAggregatorMaintenanceRoutes(base: FastifyInstance): void
       const prunedIds = await pruneStale(
         {
           rows: page.value.rows,
-          resolveUser: (r) => idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, r.id),
+          resolveUser: (r) => idp.findByAttribute(KC_ATTR.USER_ID, r.id),
           idOf: (r) => r.id,
           deleteIfPending: (r, beforeCommit) => store.deleteIfPending(r.id, cutoff, beforeCommit),
           logIdField: 'aggregator_id',

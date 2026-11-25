@@ -30,7 +30,7 @@ export async function requireCoordinatorAuth(req: FastifyRequest): Promise<AuthC
     throw httpError('UNAUTHORIZED', { detail: result.error.message });
   }
   if (!result.context.userId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
+    throw httpError('UNAUTHORIZED', { detail: 'Token missing user_id claim.' });
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;

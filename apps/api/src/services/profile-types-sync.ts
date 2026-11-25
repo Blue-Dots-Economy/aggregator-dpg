@@ -127,10 +127,7 @@ async function syncOne(
 ): Promise<SyncOutcome> {
   const delayMs = deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const start = Date.now();
-  const found = await withRetry(
-    () => deps.idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, userId),
-    delayMs,
-  );
+  const found = await withRetry(() => deps.idp.findByAttribute(KC_ATTR.USER_ID, userId), delayMs);
   if (!found.ok) {
     logFailure('profileTypesSync.findUser', userId, found.error.code, start);
     return 'failed';

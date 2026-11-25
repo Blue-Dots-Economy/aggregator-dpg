@@ -59,7 +59,7 @@ describe('campaign submit — requested audit row (#617)', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'campaign-manager',
         };
