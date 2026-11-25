@@ -118,24 +118,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
 
   // 1a. Check the phone; it is written back in the schema's form once the schema loads.
   const phoneSourceKey = domainCfg.identity.phone;
-  const phoneRaw = stringCell(job.payload, phoneSourceKey)?.trim() ?? '';
-  let phoneNormalised: string | null = null;
-  if (phoneRaw) {
-    const phone = parseMobilePhone(phoneRaw);
-    if (!phone.ok) {
-      return await commit(
-        job,
-        {
-          outcome: 'failed',
-          category: 'normalisation',
-          reasons: [`phone: ${phone.error.message}`],
-          advice: [adviceForPhone(phoneSourceKey)],
-        },
-        log,
-      );
-    }
-    phoneNormalised = phone.value;
-  }
+  const { phone: phoneNormalised, failure: phoneFailure } = checkRowPhone(
+    job.payload,
+    phoneSourceKey,
+  );
+  if (phoneFailure) return await commit(job, phoneFailure, log);
 
   // 1. Schema validation. Load the schema too, so array cells can be split
   // before Ajv runs; Ajv does not split delimited strings.
@@ -748,6 +735,30 @@ async function bumpHeartbeat(uploadId: string): Promise<void> {
 function stringCell(payload: Record<string, unknown>, key: string): string | undefined {
   const value = payload[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Checks a row's phone cell.
+ *
+ * @returns The phone in E.164 form (null for a blank cell), or the failed outcome to commit.
+ */
+function checkRowPhone(
+  payload: Record<string, unknown>,
+  key: string,
+): { phone: string | null; failure: RowOutcome | null } {
+  const raw = stringCell(payload, key)?.trim();
+  if (!raw) return { phone: null, failure: null };
+  const phone = parseMobilePhone(raw);
+  if (phone.ok) return { phone: phone.value, failure: null };
+  return {
+    phone: null,
+    failure: {
+      outcome: 'failed',
+      category: 'normalisation',
+      reasons: [`phone: ${phone.error.message}`],
+      advice: [adviceForPhone(key)],
+    },
+  };
 }
 
 /** True for a plain JSON object (not null, not an array). */
