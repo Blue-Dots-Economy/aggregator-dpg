@@ -13,20 +13,18 @@
  * (`registration_links.domain`).
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { getDb } from '../db/client.js';
 import { bulkUploads, onboarding, registrationLinks } from '../db/schema.js';
-import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { servedDomains } from '../services/user-store/serves.js';
 import { resolveRequestedDomain } from './served-domains-shared.js';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 const RangeQuerySchema = z.object({
   from: z.iso.datetime({ offset: true }).optional(),
@@ -81,7 +79,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
@@ -122,7 +120,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
@@ -204,20 +202,4 @@ function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?
   if (query.from) out.from = new Date(query.from);
   if (query.to) out.to = new Date(query.to);
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.userId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
 }

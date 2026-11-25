@@ -21,8 +21,6 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
@@ -40,9 +38,9 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import { errorMessage, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { requireServedDomain } from './served-domains-shared.js';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 /**
  * Returns the valid participant types for the active network.
@@ -231,7 +229,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
 
       // Per-coordinator rate limit. Fails open on a Redis error.
       const templateRate = await checkBulkTemplateRate(auth.subject);
@@ -309,7 +307,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
 
       // Per-coordinator rate limit.
       const uploadRate = await checkBulkUploadRate(auth.subject);
@@ -433,7 +431,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
       const body = req.body;
@@ -584,7 +582,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { limit, offset } = req.query;
 
       const store = getBulkUploadsStore();
@@ -622,7 +620,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
 
@@ -659,7 +657,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
       const log = req.log.child({
@@ -918,22 +916,6 @@ async function loadCountsBatch(
     out.set(u.id, await loadCountsFromRedis(u.id));
   }
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.userId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
 }
 
 /**

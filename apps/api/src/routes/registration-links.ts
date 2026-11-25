@@ -12,12 +12,10 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -29,7 +27,6 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import {
   botsForDomain,
   modeOffersVoice,
@@ -37,6 +34,7 @@ import {
   resolveVoiceBot,
 } from '../services/voice-bots/index.js';
 import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 type LinkMetrics = {
   total: number;
@@ -234,7 +232,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.create',
         actor: auth.subject,
@@ -380,7 +378,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.voiceBots',
         actor: auth.subject,
@@ -422,7 +420,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.list',
         actor: auth.subject,
@@ -489,7 +487,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schemas; the `.strict()` schema rejects unknown keys
       // such as registration_mode.
       const { id: linkId } = req.params;
@@ -602,7 +600,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
       const { id: linkId } = req.params;
 
@@ -637,7 +635,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
       const { id: linkId } = req.params;
       const log = req.log.child({
@@ -701,7 +699,7 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
       const { id: linkId } = req.params;
       const log = req.log.child({
@@ -888,20 +886,4 @@ function generateSlug(): string {
 function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
   return `${base}/${orgSlug}/${slug}`;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.userId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
 }
