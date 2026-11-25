@@ -453,6 +453,43 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(error.fields['upstream_code']).toBe('INVALID_ITEM_STATE');
   });
 
+  it('passes a landline-range number on to Signals, which decides for a new person', async () => {
+    let pushed: string | undefined;
+    signalstack.onboard = async (input) => {
+      pushed = input.phoneNumber;
+      return err(new UpstreamError('stop here', { code: 'SIGNALSTACK_BAD_REQUEST' }));
+    };
+    await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...basePayload, phone: '+918020123456', email: 'landline@example.com' },
+    });
+    expect(pushed).toBe('+918020123456');
+  });
+
+  it("400s INVALID_PHONE when Signals refuses a new person's phone", async () => {
+    signalstack.onboard = async () =>
+      err(
+        new UpstreamError('signalstack onboard returned 400: INVALID_PHONE', {
+          code: 'SIGNALSTACK_BAD_REQUEST',
+          details: {
+            status: 400,
+            upstreamCode: 'INVALID_PHONE',
+            signalsMessage: 'phone must be a mobile number',
+          },
+        }),
+      );
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...basePayload, phone: '+918020123456', email: 'landline2@example.com' },
+    });
+    expect(r.statusCode).toBe(400);
+    const error = (r.json() as { error: { code: string; detail: string } }).error;
+    expect(error.code).toBe('INVALID_PHONE');
+    expect(error.detail).toBe('phone must be a mobile number');
+  });
+
   it('400s (U18_REGISTRATION_REDIRECT) when signalstack maps the push to U18_NOT_ALLOWED', async () => {
     // Defensive belt-and-braces mapping: the route's own U18 gate already
     // strips age/compliance for a derived-minor submit, so this exercises

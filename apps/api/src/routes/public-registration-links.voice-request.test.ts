@@ -335,6 +335,24 @@ describe('POST /public/v1/aggregators/:org/voice-requests/:slug', () => {
       expect(r.json().existing).toBe(true);
     });
 
+    it('finds an existing person stored with a landline-range number', async () => {
+      h.writer.seedOwnUser({ actingOrgId: ORG_ID, phoneNumber: '+918020123456' });
+      const onboard = vi.spyOn(h.writer, 'onboard');
+      const r = await request(h.app, { ...ADULT, phone: '+918020123456' });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().existing).toBe(true);
+      expect(onboard).not.toHaveBeenCalled();
+    });
+
+    it('refuses a new landline-range number with 400 INVALID_PHONE and writes nothing', async () => {
+      const onboard = vi.spyOn(h.writer, 'onboard');
+      const r = await request(h.app, { ...ADULT, phone: '+918020123456' });
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error.code).toBe('INVALID_PHONE');
+      expect(onboard).not.toHaveBeenCalled();
+      expect(h.rows).toEqual([]);
+    });
+
     it('answers 502 and writes nothing when the probe fails', async () => {
       vi.spyOn(h.writer, 'probeUser').mockResolvedValueOnce(
         err(new UpstreamError('signals down', { code: 'SIGNALSTACK_UNAVAILABLE' })),

@@ -6,6 +6,7 @@
  */
 
 import {
+  ALL_PHONE_COUNTRIES,
   parsePhone,
   phoneForSchema,
   type PhoneParseResult,
@@ -21,6 +22,20 @@ import { config } from '../config.js';
  */
 export function parseMobilePhone(raw: string): PhoneParseResult {
   return parsePhone(raw, { countries: config.PHONE_COUNTRIES, kind: 'mobile' });
+}
+
+/**
+ * Reads a phone that may identify someone already stored: any valid number in
+ * any country, since older rules accepted more than the mobile check does.
+ *
+ * @param raw - The phone as typed.
+ * @returns The E.164 phone, or the reason it was refused.
+ */
+export function parseKnownPhone(raw: string): PhoneParseResult {
+  return parsePhone(raw, {
+    countries: [config.PHONE_COUNTRIES[0], ...ALL_PHONE_COUNTRIES],
+    kind: 'any',
+  });
 }
 
 /**

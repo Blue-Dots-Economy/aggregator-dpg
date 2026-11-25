@@ -35,7 +35,7 @@ import {
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { modeOffers, modeOffersVoice, resolveVoiceBot } from '../services/voice-bots/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
-import { parseMobilePhone, phoneForField } from '../services/phone.js';
+import { parseKnownPhone, parseMobilePhone, phoneForField } from '../services/phone.js';
 import {
   LIFECYCLE_STATUSES,
   resolveLifecycle,
@@ -366,11 +366,12 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       }
       const phoneSourceKey = linkDomainCfg.identity.phone;
 
-      // 0. Clean the phone first, so the schema check below sees the stored form.
+      // 0. Clean the phone first, so the schema check below sees the stored form. Any
+      // valid number passes; Signals refuses a non-mobile only for a new person.
       const phoneRaw = readString(body, phoneSourceKey) ?? '';
       let phoneNormalised: string | null = null;
       if (phoneRaw && phoneSourceKey) {
-        const phone = parseMobilePhone(phoneRaw);
+        const phone = parseKnownPhone(phoneRaw);
         if (!phone.ok) {
           throw httpError('INVALID_PHONE', { detail: phone.error.message });
         }
@@ -674,7 +675,8 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         withItem: false,
       });
 
-      const phone = parseMobilePhone(readString(body, domainCfg.identity.phone) ?? '');
+      // Any valid number finds a stored person; a new one must be a mobile (checked below).
+      const phone = parseKnownPhone(readString(body, domainCfg.identity.phone) ?? '');
       if (!phone.ok) {
         throw httpError('INVALID_PHONE', { detail: phone.error.message });
       }
@@ -725,6 +727,10 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         });
       }
       const existing = probe.value.user_exists;
+      if (!existing) {
+        const mobile = parseMobilePhone(phoneNumber);
+        if (!mobile.ok) throw httpError('INVALID_PHONE', { detail: mobile.error.message });
+      }
 
       // The stored body keeps identity only; consent and birth year were stripped.
       const submission = {
