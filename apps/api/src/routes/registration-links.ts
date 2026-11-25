@@ -515,10 +515,9 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
 
       // Same slug retry as create. Without a requested slug, keep the current one.
       let updated;
-      let slug = link.slug;
       if (body.slug !== undefined) {
         for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
-          slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
+          const slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
           const result = await store.updateDraft(linkId, auth.userId, {
             slug,
             ...(body.context !== undefined ? { context: body.context } : {}),
