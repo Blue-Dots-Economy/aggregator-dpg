@@ -54,7 +54,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'bulk-uploads/agg-1/up-1/raw.csv',
       participantType: 'seeker',
       schemaId: 'profile',
@@ -69,7 +69,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',
@@ -77,7 +77,7 @@ describe('bulk-queue', () => {
     });
     await enqueueBulkFileProcess({
       uploadId: 'up-2',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k2',
       participantType: 'seeker',
       schemaId: 's',
@@ -94,7 +94,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',
@@ -112,7 +112,7 @@ describe('bulk-queue', () => {
     await expect(
       enqueueBulkFileProcess({
         uploadId: 'up-err',
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         s3Key: 'k',
         participantType: 'seeker',
         schemaId: 's',
@@ -127,7 +127,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess, closeBulkQueue } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',
@@ -140,7 +140,7 @@ describe('bulk-queue', () => {
     // A subsequent enqueue rebuilds fresh singletons — proves the reset happened.
     await enqueueBulkFileProcess({
       uploadId: 'up-2',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',
@@ -157,7 +157,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess, closeBulkQueue } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',
@@ -178,7 +178,7 @@ describe('bulk-queue', () => {
     const { enqueueBulkFileProcess, _resetBulkQueue } = await import('./index.js');
     await enqueueBulkFileProcess({
       uploadId: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       s3Key: 'k',
       participantType: 'seeker',
       schemaId: 's',

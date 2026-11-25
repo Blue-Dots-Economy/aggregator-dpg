@@ -39,10 +39,10 @@ export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 
 export interface BulkFileProcessJob {
   uploadId: string;
-  /** The coordinator's `users.id`. Absent on jobs queued by a release before it was added. */
+  /** The coordinator's `users.id`. */
   userId?: string;
-  /** The same id under its former name, still written so a worker of an older release can read the job. */
-  aggregatorId: string;
+  /** The same id under its former name, written by the worker only. */
+  aggregatorId?: string;
   s3Key: string;
   participantType: string;
   schemaId: string;
@@ -51,10 +51,10 @@ export interface BulkFileProcessJob {
 
 export interface BulkRowProcessJob {
   uploadId: string;
-  /** The coordinator's `users.id`. Absent on jobs queued by a release before it was added. */
+  /** The coordinator's `users.id`. */
   userId?: string;
-  /** The same id under its former name, still written so a worker of an older release can read the job. */
-  aggregatorId: string;
+  /** The same id under its former name, written by the worker only. */
+  aggregatorId?: string;
   rowIndex: number;
   /** Pinned schema id, propagated from File Processor so Row Processor avoids a per-row DB read. */
   schemaId: string;
@@ -70,14 +70,16 @@ export interface BulkRowProcessJob {
  * The coordinator's `users.id` carried by a bulk job: `userId`, else
  * `aggregatorId`.
  *
- * A job queued by a release before `userId` existed carries only
- * `aggregatorId`, so read the id through this, never from either field.
+ * Read the id through this, never from either field.
  *
  * @param job - A bulk file or row job.
  * @returns The coordinator's id.
+ * @throws {TypeError} If the job carries neither name.
  */
 export function jobUserId(job: Pick<BulkFileProcessJob, 'userId' | 'aggregatorId'>): string {
-  return job.userId ?? job.aggregatorId;
+  const id = job.userId ?? job.aggregatorId;
+  if (!id) throw new TypeError('bulk job carries no user id');
+  return id;
 }
 
 export interface BulkFinaliseJob {

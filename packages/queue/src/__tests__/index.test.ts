@@ -163,7 +163,15 @@ describe('jobUserId', () => {
     expect(jobUserId({ userId: 'u-1', aggregatorId: 'u-1' })).toBe('u-1');
   });
 
-  it('falls back to aggregatorId on a job queued before userId existed', () => {
+  it('falls back to aggregatorId on a job that carries only that name', () => {
     expect(jobUserId({ aggregatorId: 'u-1' })).toBe('u-1');
+  });
+
+  it('reads userId from a job that carries only userId', () => {
+    expect(jobUserId({ userId: 'u-1' })).toBe('u-1');
+  });
+
+  it('throws on a job that carries neither name', () => {
+    expect(() => jobUserId({})).toThrow(TypeError);
   });
 });

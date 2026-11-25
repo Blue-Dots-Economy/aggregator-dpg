@@ -12,7 +12,7 @@
  *   GET /v1/bulk-uploads/:id
  *     Status read for UI polling: status, counters and the errors.csv key.
  *
- * Every endpoint checks the token's `aggregator_id` owns the upload; another
+ * Every endpoint checks the token's `user_id` owns the upload; another
  * aggregator's upload answers 403. Belongs to `@aggregator-dpg/api`.
  */
 
@@ -528,7 +528,6 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         await enqueueBulkFileProcess({
           uploadId: marked.value.id,
           userId: auth.userId,
-          aggregatorId: auth.userId,
           s3Key: marked.value.storageKey,
           participantType: marked.value.participantType,
           schemaId: marked.value.schemaId,

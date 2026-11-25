@@ -326,12 +326,12 @@ describe('bulk-uploads routes', () => {
         return { sub: 'kc-noagg', decision_made: 'approved' };
       }
       if (token === 'pending') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'pending' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'pending' };
       }
       if (token === 'seeker-approved') {
         return {
           sub: 'kc-1',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           aggregator_type: 'seeker',
           decision_made: 'approved',
         };
@@ -339,29 +339,29 @@ describe('bulk-uploads routes', () => {
       if (token === 'provider-approved') {
         return {
           sub: 'kc-2',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           aggregator_type: 'provider',
           decision_made: 'approved',
         };
       }
       if (token === 'no-type-approved') {
-        return { sub: 'kc-3', aggregator_id: AGG_A, decision_made: 'approved' };
+        return { sub: 'kc-3', user_id: AGG_A, decision_made: 'approved' };
       }
       if (token === 'both-approved') {
         return {
           sub: 'kc-5',
-          aggregator_id: AGG_BOTH,
+          user_id: AGG_BOTH,
           aggregator_type: ['seeker', 'provider'],
           decision_made: 'approved',
         };
       }
       if (token === 'all-approved') {
-        return { sub: 'kc-6', aggregator_id: AGG_ALL, decision_made: 'approved' };
+        return { sub: 'kc-6', user_id: AGG_ALL, decision_made: 'approved' };
       }
       if (token === 'seeker-approved-b') {
         return {
           sub: 'kc-4',
-          aggregator_id: AGG_B,
+          user_id: AGG_B,
           aggregator_type: 'seeker',
           decision_made: 'approved',
         };
@@ -512,7 +512,7 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=seeker',
@@ -1108,10 +1108,10 @@ describe('bulk-uploads routes', () => {
         expect.objectContaining({
           uploadId: 'upload-1',
           userId: AGG_A,
-          aggregatorId: AGG_A,
           s3Key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
         }),
       );
+      expect(enqueueBulkFileProcessMock.mock.calls[0]?.[0]).not.toHaveProperty('aggregatorId');
       const ledgerRows = consentLedger.list();
       expect(ledgerRows).toHaveLength(1);
       expect(ledgerRows[0]?.source).toBe('bulk_upload:upload-1:v1');
