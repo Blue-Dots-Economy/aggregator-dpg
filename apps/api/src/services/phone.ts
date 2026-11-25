@@ -5,6 +5,7 @@
  * @module @aggregator-dpg/api
  */
 
+import { z } from 'zod';
 import {
   ALL_PHONE_COUNTRIES,
   parsePhone,
@@ -64,3 +65,22 @@ export function phoneForField(
 ): string {
   return phoneForSchema(e164, schema, field, config.PHONE_COUNTRIES[0]);
 }
+
+/** Longest typed phone accepted: 15 digits plus room for spacing and punctuation. */
+const PHONE_INPUT_MAX_LENGTH = 32;
+
+/** Characters a typed phone may hold; the parser would otherwise drop letters silently. */
+const PHONE_INPUT_SHAPE = /^\+?[\d\s\-().]+$/;
+
+/** A request field holding a callback phone (landlines allowed); parses to E.164. */
+export const ContactPhoneField = z
+  .string()
+  .trim()
+  .max(PHONE_INPUT_MAX_LENGTH)
+  .regex(PHONE_INPUT_SHAPE, 'phone may only contain digits, spaces and + - ( ) .')
+  .transform((raw, ctx) => {
+    const phone = parseContactPhone(raw);
+    if (phone.ok) return phone.value;
+    ctx.addIssue({ code: 'custom', message: phone.error.message });
+    return z.NEVER;
+  });

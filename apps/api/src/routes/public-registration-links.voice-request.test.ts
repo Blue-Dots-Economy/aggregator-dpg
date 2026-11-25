@@ -89,11 +89,12 @@ interface StoredRow {
 }
 
 /** Fake DB whose transaction records each inserted row and outcome update. */
-function buildFakeDb(rows: StoredRow[]): unknown {
+function buildFakeDb(rows: StoredRow[], bodies: Record<string, unknown>[]): unknown {
   const insert = () => ({
-    values(v: { outcome: unknown }) {
+    values(v: { outcome: unknown; submittedData?: Record<string, unknown> }) {
       const row: StoredRow = { outcome: v.outcome };
       rows.push(row);
+      if (v.submittedData) bodies.push(v.submittedData);
       return {
         async returning() {
           return [{ id: SUBMISSION_ID }];
@@ -185,6 +186,8 @@ interface Harness {
   app: FastifyInstance;
   writer: SignalStackWriterFake;
   rows: StoredRow[];
+  /** `submittedData` of every stored row, in order. */
+  bodies: Record<string, unknown>[];
 }
 
 async function bootApp(cfg: ResolvedNetworkConfig): Promise<Harness> {
@@ -211,8 +214,9 @@ async function bootApp(cfg: ResolvedNetworkConfig): Promise<Harness> {
   _setSignalStackWriter(writer);
   _setRegistrationLinksStore(new LinksStore(LINKS));
   const rows: StoredRow[] = [];
-  _setDbClients(null, buildFakeDb(rows) as never);
-  return { app: await buildApp(), writer, rows };
+  const bodies: Record<string, unknown>[] = [];
+  _setDbClients(null, buildFakeDb(rows, bodies) as never);
+  return { app: await buildApp(), writer, rows, bodies };
 }
 
 async function teardown(app: FastifyInstance | undefined): Promise<void> {
@@ -333,6 +337,12 @@ describe('POST /public/v1/aggregators/:org/voice-requests/:slug', () => {
       const r = await request(h.app, { ...ADULT, phone: '098765 43210' });
       expect(r.statusCode).toBe(200);
       expect(r.json().existing).toBe(true);
+    });
+
+    it('stores the submission with the cleaned phone, not the typed one', async () => {
+      const r = await request(h.app, { ...ADULT, phone: '098765 43210' });
+      expect(r.statusCode).toBe(200);
+      expect(h.bodies[0]?.['phone']).toBe('+919876543210');
     });
 
     it('finds an existing person stored with a landline-range number', async () => {

@@ -681,6 +681,12 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         throw httpError('INVALID_PHONE', { detail: phone.error.message });
       }
       const phoneNumber = phone.value;
+      // The stored submission keeps the cleaned number, as the form submit does.
+      body[domainCfg.identity.phone] = phoneForField(
+        phoneNumber,
+        domainCfg.schema,
+        domainCfg.identity.phone,
+      );
 
       const ss = getSignalStackWriter();
       if (!ss) {

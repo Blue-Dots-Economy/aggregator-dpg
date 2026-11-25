@@ -23439,7 +23439,8 @@
                   },
                   "phone": {
                     "type": "string",
-                    "maxLength": 20
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   },
                   "type": {
                     "type": "string",
