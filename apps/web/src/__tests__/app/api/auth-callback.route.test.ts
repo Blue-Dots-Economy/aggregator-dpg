@@ -166,7 +166,7 @@ describe('GET /api/auth/callback', () => {
 
   /**
    * One Keycloak realm serves this portal and the Signals app, so "no
-   * aggregator_id" covers three different populations. The reason code has to
+   * user_id" covers three different populations. The reason code has to
    * tell them apart or the login screen shows org-owner advice to a Signals
    * participant (#753).
    */

@@ -107,7 +107,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (typeof settled === 'string') return failure(req, settled);
   const tokens = settled;
 
-  // A coordinator (token has `user_id` or `aggregator_id`) lands in the portal. An org owner
+  // A coordinator (token has `user_id`) lands in the portal. An org owner
   // or the network admin (realm role `org_owner`) lands in the console.
   // Anyone else is refused.
   const isCoordinator = Boolean(tokenUserId(tokens.accessToken));
@@ -120,11 +120,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const reason = PORTAL_GATE_REASON[population];
     log.warn(
       {
-        code: 'NO_AGGREGATOR_ID',
+        code: 'NO_USER_ID',
         sub: claims.sub,
         population,
         reason,
-        hint: 'Authenticated KC user has no aggregator_id claim. Portal is coordinator-only; see reason for which account type.',
+        hint: 'Authenticated KC user has no user_id claim. Portal is coordinator-only; see reason for which account type.',
       },
       'blocking non-coordinator portal login',
     );
