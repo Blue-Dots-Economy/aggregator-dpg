@@ -12,14 +12,18 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getUserStore } from '../services/user-store/index.js';
 import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
-import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import type {
+  RegistrationLink,
+  RegistrationLinkStatus,
+} from '../services/registration-links-store/index.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { config, enabledRegistrationModes } from '../config.js';
@@ -622,22 +626,15 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params;
-      const log = req.log.child({
-        operation: 'registrationLinks.activate',
-        actor: auth.subject,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const link = await findOwnLink(linkId, auth.userId);
-
-      const orgSlug = await resolveOrgSlug(auth.userId);
+      const change = await beginLinkStatusChange(req, req.params.id, 'registrationLinks.activate');
+      const { link, orgSlug } = change;
       if (link.status === 'live') {
-        log.info({ status: 'skipped', reason: 'already_live', latency_ms: Date.now() - start });
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_live',
+          latency_ms: Date.now() - change.start,
+        });
         return reply.send(await buildResponse(link, orgSlug));
       }
       if (link.status === 'retired') {
@@ -647,18 +644,8 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       // The slug is now fixed, so the public URL is final. The QR is generated client-side.
       const publicUrl = buildPublicUrl(orgSlug, link.slug);
 
-      const updated = await store.updateStatus(linkId, auth.userId, 'live');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: link.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug, { publicUrl }));
+      const updated = await commitLinkStatus(change, 'live');
+      return reply.send(await buildResponse(updated, orgSlug, { publicUrl }));
     },
   );
 
@@ -680,39 +667,87 @@ export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireCoordinatorAuth(req);
       // Validated by the route schema.
-      const { id: linkId } = req.params;
-      const log = req.log.child({
-        operation: 'registrationLinks.deactivate',
-        actor: auth.subject,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const link = await findOwnLink(linkId, auth.userId);
-
-      const orgSlug = await resolveOrgSlug(auth.userId);
+      const change = await beginLinkStatusChange(
+        req,
+        req.params.id,
+        'registrationLinks.deactivate',
+      );
+      const { link, orgSlug } = change;
       if (link.status === 'retired') {
-        log.info({ status: 'skipped', reason: 'already_retired', latency_ms: Date.now() - start });
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_retired',
+          latency_ms: Date.now() - change.start,
+        });
         return reply.send(await buildResponse(link, orgSlug));
       }
 
-      const updated = await store.updateStatus(linkId, auth.userId, 'retired');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: link.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug));
+      const updated = await commitLinkStatus(change, 'retired');
+      return reply.send(await buildResponse(updated, orgSlug));
     },
   );
+}
+
+/** A status change on one of the caller's own links, started by {@link beginLinkStatusChange}. */
+interface LinkStatusChange {
+  auth: AuthContext;
+  linkId: string;
+  log: FastifyBaseLogger;
+  /** When the request started, for `latency_ms`. */
+  start: number;
+  link: RegistrationLink;
+  orgSlug: string;
+}
+
+/**
+ * Starts a status change: verifies the coordinator, then reads its link and its org slug.
+ *
+ * @param req - The incoming request.
+ * @param linkId - The link id from the path.
+ * @param operation - The log operation name.
+ * @returns The verified caller, the link and the request logger.
+ * @throws The sign-in and link-read errors of {@link requireCoordinatorAuth} and {@link findOwnLink}.
+ */
+async function beginLinkStatusChange(
+  req: FastifyRequest,
+  linkId: string,
+  operation: string,
+): Promise<LinkStatusChange> {
+  const auth = await requireCoordinatorAuth(req);
+  const log = req.log.child({ operation, actor: auth.subject, link_id: linkId });
+  const start = Date.now();
+  const link = await findOwnLink(linkId, auth.userId);
+  const orgSlug = await resolveOrgSlug(auth.userId);
+  return { auth, linkId, log, start, link, orgSlug };
+}
+
+/**
+ * Writes the link's new status and logs the change.
+ *
+ * @param change - The started change.
+ * @param nextStatus - The status to set.
+ * @returns The updated link.
+ * @throws DB_UNAVAILABLE if the store write fails.
+ */
+async function commitLinkStatus(
+  change: LinkStatusChange,
+  nextStatus: RegistrationLinkStatus,
+): Promise<RegistrationLink> {
+  const updated = await getRegistrationLinksStore().updateStatus(
+    change.linkId,
+    change.auth.userId,
+    nextStatus,
+  );
+  if (!updated.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
+  }
+  change.log.info({
+    status: 'success',
+    latency_ms: Date.now() - change.start,
+    previous_status: change.link.status,
+  });
+  return updated.value;
 }
 
 /**
