@@ -181,7 +181,7 @@ describe('onboardingService', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          aggregator_id: 'a1',
+          user_id: 'a1',
           from: '2026-01-01',
           to: '2026-02-01',
           by_source: [{ source: 'bulk', total: 5, passed: 4, failed: 1, skipped: 0 }],

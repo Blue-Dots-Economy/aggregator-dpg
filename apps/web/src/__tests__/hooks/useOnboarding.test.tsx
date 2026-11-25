@@ -99,7 +99,7 @@ describe('useOnboarding hooks', () => {
 
   it('useOnboardingSummary / useOnboardingBySource resolve', async () => {
     svc.summary!.mockResolvedValue({
-      aggregator_id: 'a1',
+      user_id: 'a1',
       from: null,
       to: null,
       total: 0,
@@ -107,7 +107,7 @@ describe('useOnboarding hooks', () => {
       failed: 0,
       skipped: 0,
     });
-    svc.bySource!.mockResolvedValue({ aggregator_id: 'a1', from: null, to: null, by_source: [] });
+    svc.bySource!.mockResolvedValue({ user_id: 'a1', from: null, to: null, by_source: [] });
     const { wrapper } = makeWrapper();
     const s1 = renderHook(() => useOnboardingSummary(), { wrapper });
     await waitFor(() => expect(s1.result.current.isSuccess).toBe(true));
@@ -119,7 +119,7 @@ describe('useOnboarding hooks', () => {
 
   it('reads the metrics of one profile type, cached per type', async () => {
     svc.summary!.mockResolvedValue({
-      aggregator_id: 'a1',
+      user_id: 'a1',
       from: null,
       to: null,
       total: 0,
@@ -127,7 +127,7 @@ describe('useOnboarding hooks', () => {
       failed: 0,
       skipped: 0,
     });
-    svc.bySource!.mockResolvedValue({ aggregator_id: 'a1', from: null, to: null, by_source: [] });
+    svc.bySource!.mockResolvedValue({ user_id: 'a1', from: null, to: null, by_source: [] });
     const { client, wrapper } = makeWrapper();
     const s = renderHook(() => useOnboardingSummary({ domain: 'provider' }), { wrapper });
     await waitFor(() => expect(s.result.current.isSuccess).toBe(true));
