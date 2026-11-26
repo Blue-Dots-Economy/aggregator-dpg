@@ -783,6 +783,40 @@ describe('schema validation failure branches (account_and_profile)', () => {
     expect(r.json().error.fields?.missing).toContain('name');
   });
 
+  it.each([
+    ['^\\+[1-9][0-9]{9,14}$', 'E.164'],
+    ['^[0-9]{10}$', 'bare digits'],
+  ])('cleans a spaced phone before the schema check (%s, %s)', async (pattern) => {
+    const cfg = buildBlueDotConfig();
+    _setNetworkConfig({
+      ...cfg,
+      domains: {
+        ...cfg.domains,
+        seeker: {
+          ...cfg.domains.seeker,
+          schema: {
+            type: 'object',
+            properties: { name: { type: 'string' }, phone: { type: 'string', pattern } },
+            required: ['name'],
+          },
+        },
+      },
+    } as ResolvedNetworkConfig);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+91 98765 43210',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.json().error?.code).not.toBe('SCHEMA_VALIDATION');
+  });
+
   it('400s (INVALID_PHONE) when the phone value fails E.164 normalisation', async () => {
     const r = await app.inject({
       method: 'POST',

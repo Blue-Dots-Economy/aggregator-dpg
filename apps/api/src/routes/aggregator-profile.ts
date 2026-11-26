@@ -39,7 +39,7 @@ import { getUserStore } from '../services/user-store/index.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
@@ -491,7 +491,7 @@ function mapAggregatorUpdateError(
 /**
  * The phone to save: a value equal to the stored one is kept as it is, so a
  * number saved before the current rule never blocks an unrelated edit; a new
- * value must pass {@link normalisePhone}.
+ * value must pass {@link parseMobilePhone}.
  *
  * @param store - The user store.
  * @param selfId - The caller's coordinator id.
@@ -502,7 +502,7 @@ async function checkedPhone(
   store: ReturnType<typeof getUserStore>,
   selfId: string,
   sent: string,
-): Promise<ReturnType<typeof normalisePhone>> {
+): Promise<ReturnType<typeof parseMobilePhone>> {
   const current = await store.findById(selfId);
   if (!current.ok) {
     throw httpError('DB_UNAVAILABLE', {
@@ -512,7 +512,7 @@ async function checkedPhone(
   }
   const stored = current.value?.contactPhone;
   if (stored && sent.replace(/[^\d+]/g, '') === stored) return { ok: true, value: stored };
-  return normalisePhone(sent);
+  return parseMobilePhone(sent);
 }
 
 /**

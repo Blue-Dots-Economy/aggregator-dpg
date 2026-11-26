@@ -166,7 +166,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       payload: validBody({
         name: 'Different Name',
         email: 'typed@example.com',
-        phone: '+911112223334',
+        phone: '+918012345678',
         type: 'support_request',
       }),
     });
@@ -175,7 +175,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(sent.subject).toContain('Support Request from Different Name');
     expect(sent.replyTo).toBe('typed@example.com');
     expect(sent.text).toContain('typed@example.com');
-    expect(sent.text).toContain('+911112223334');
+    expect(sent.text).toContain('+918012345678');
   });
 
   it('returns 400 when consent is not true and does not send anything', async () => {
@@ -213,6 +213,30 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       });
     expect((await send('+911123456789')).statusCode).toBe(201);
     expect((await send('+91935350600')).statusCode).toBe(400);
+  });
+
+  it('emails the phone in E.164 form, however it was typed', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer good-token' },
+      payload: validBody({ phone: '098765 43210' }),
+    });
+    expect(res.statusCode).toBe(201);
+    const sent = mailer.outbox[0]!;
+    expect(sent.text).toContain('+919876543210');
+    expect(sent.text).not.toContain('098765 43210');
+  });
+
+  it('refuses a phone with letters in it', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer good-token' },
+      payload: validBody({ phone: '9876543210abc' }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('accepts a submission with only a phone (no email) and adds no Reply-To', async () => {

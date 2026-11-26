@@ -176,7 +176,8 @@
                       },
                       "phone": {
                         "type": "string",
-                        "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                        "maxLength": 32,
+                        "pattern": "^\\+?[\\d\\s\\-().]+$"
                       },
                       "email": {
                         "type": "string",
@@ -2050,7 +2051,8 @@
                         },
                         "phone": {
                           "type": "string",
-                          "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                          "maxLength": 32,
+                          "pattern": "^\\+?[\\d\\s\\-().]+$"
                         },
                         "email": {
                           "type": "string",
@@ -2493,7 +2495,8 @@
                           },
                           "phone": {
                             "type": "string",
-                            "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                            "maxLength": 32,
+                            "pattern": "^\\+?[\\d\\s\\-().]+$"
                           },
                           "email": {
                             "type": "string",
@@ -2652,7 +2655,8 @@
                         },
                         "phone": {
                           "type": "string",
-                          "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                          "maxLength": 32,
+                          "pattern": "^\\+?[\\d\\s\\-().]+$"
                         },
                         "email": {
                           "type": "string",
@@ -23435,7 +23439,8 @@
                   },
                   "phone": {
                     "type": "string",
-                    "maxLength": 20
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   },
                   "type": {
                     "type": "string",

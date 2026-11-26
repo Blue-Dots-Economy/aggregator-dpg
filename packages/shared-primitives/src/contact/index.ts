@@ -16,13 +16,13 @@
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { normaliseEmail } from '../phone/index.js';
+import { normaliseEmail, STORED_PHONE_REGEX } from '../phone/index.js';
 
 /**
- * Canonical contact phone: `+` then 10–15 digits, as produced by `normalisePhone`.
+ * Canonical contact phone: `+` then 10–15 digits, as produced by `parsePhone`.
  * Matches the SQL `contact_phone_chk`.
  */
-export const CONTACT_PHONE_REGEX = /^\+\d{10,15}$/;
+export const CONTACT_PHONE_REGEX = STORED_PHONE_REGEX;
 
 /** Hex sha-256 id shape. Mirrors the SQL `contact_id_hex_chk`. */
 export const CONTACT_ID_REGEX = /^[0-9a-f]{64}$/;
@@ -44,7 +44,7 @@ export type Contact = z.infer<typeof ContactSchema>;
  * Computes the deterministic contact id for an email + phone pair.
  *
  * The email is normalised here. The phone is not: it must already be
- * canonical (from `normalisePhone`), or `null`. A non-canonical phone is
+ * canonical (from `parsePhone`), or `null`. A non-canonical phone is
  * rejected so one person does not get two ids.
  *
  * @param email - The contact's email address.

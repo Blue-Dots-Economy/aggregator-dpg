@@ -2,14 +2,15 @@
  * Config primitives shared by the api and worker processes.
  *
  * Holds config fields and checks that must be the same in both processes: the
- * SignalStack push fields, the TLS-posture guard, and the campaign export
- * field-set. Each process spreads them into its own `ConfigSchema`.
+ * SignalStack push fields, the TLS-posture guard, the campaign export
+ * field-set and the phone countries. Each process spreads them into its own `ConfigSchema`.
  *
  * @module @aggregator-dpg/shared-primitives/config
  */
 
 import { z } from 'zod';
 import { ConfigError } from '../errors/index.js';
+import { readPhoneCountries } from '../phone/parse.js';
 
 /**
  * SignalStack push env fields shared by every process that pushes to SignalStack.
@@ -70,6 +71,24 @@ export const campaignExportConfigFields = {
    * item_state (variable columns). Default `contact`.
    */
   CAMPAIGN_EXPORT_FIELDS: z.enum(['contact', 'full']).default('contact'),
+} as const;
+
+/**
+ * Phone country env field shared by the api and worker, so both check phones
+ * against the same countries. Set it on both containers. A bad value fails
+ * startup.
+ */
+export const phoneConfigFields = {
+  /** Accepted phone countries, e.g. `IN:+91,GB:+44`; the first is the default. Blank means India. */
+  PHONE_COUNTRIES: z
+    .string()
+    .optional()
+    .transform((raw, ctx) => {
+      const read = readPhoneCountries(raw);
+      if (read.ok) return read.value;
+      ctx.addIssue({ code: 'custom', message: read.error.message });
+      return z.NEVER;
+    }),
 } as const;
 
 /** Minimal shape `assertTlsPosture` reads — any process `Config` satisfies it. */

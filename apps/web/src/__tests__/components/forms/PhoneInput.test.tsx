@@ -14,10 +14,12 @@ function Harness({
   onValue,
   nationalOnly = false,
   phoneCountries,
+  placeholder,
 }: Readonly<{
   onValue: (v: string | undefined) => void;
   nationalOnly?: boolean;
   phoneCountries?: string;
+  placeholder?: string;
 }>) {
   const [value, setValue] = useState<string | undefined>(undefined);
   return (
@@ -29,6 +31,7 @@ function Harness({
           id="p"
           aria-label="Phone"
           nationalOnly={nationalOnly}
+          {...(placeholder ? { placeholder } : {})}
           value={value}
           onChange={(v) => {
             setValue(v);
@@ -99,6 +102,13 @@ describe('<PhoneInput />', () => {
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['🇬🇧 +44', '🇮🇳 +91']);
     fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '7911123456' } });
     expect(onValue).toHaveBeenLastCalledWith('+447911123456');
+  });
+
+  it('shows the given placeholder for the default country and the sample for another', () => {
+    render(<Harness onValue={vi.fn()} phoneCountries="IN:+91,GB:+44" placeholder="98765 43210" />);
+    expect(screen.getByLabelText('Phone')).toHaveAttribute('placeholder', '98765 43210');
+    fireEvent.change(screen.getByLabelText('Country code'), { target: { value: '+44' } });
+    expect(screen.getByLabelText('Phone').getAttribute('placeholder')).toMatch(/^7\d{9}$/);
   });
 
   it('shows a single configured country as fixed text', () => {

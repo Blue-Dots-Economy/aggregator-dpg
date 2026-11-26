@@ -199,6 +199,33 @@ describe('POST /v1/user/invite/accept', () => {
     expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
   });
 
+  it.each([['+91 98765 43210'], ['987-654-3210'], ['(987) 654 3210'], ['098765 43210']])(
+    'stores a phone typed as %j as +919876543210',
+    async (typed) => {
+      const res = await acceptInvite({
+        ...validBody,
+        contact: { ...validBody.contact, phone: typed },
+      });
+      expect(res.statusCode).toBe(201);
+      const { user_id } = res.json() as { user_id: string };
+      const stored = await userStore.findById(user_id);
+      expect(stored.ok && stored.value?.contactPhone).toBe('+919876543210');
+      const kcUser = await idp.findByEmail(validBody.contact.email);
+      expect(kcUser.ok && kcUser.value?.attributes?.phoneNumber?.[0]).toBe('+919876543210');
+    },
+  );
+
+  it('400 INVALID_PHONE with the reason for a number outside the deployment countries', async () => {
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, phone: '+44 7911 123456' },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INVALID_PHONE');
+    expect(body.error.detail).toBe('phone numbers starting +44 are not accepted');
+  });
+
   it('rejects a type that is not one of the network domains (400)', async () => {
     const res = await acceptInvite({ ...validBody, type: 'both' });
     expect(res.statusCode).toBe(400);

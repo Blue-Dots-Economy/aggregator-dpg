@@ -20,19 +20,28 @@ import { z } from 'zod';
 // ─── Phone normalisation ────────────────────────────────────────────────────
 
 /**
- * Loose phone pattern. Matches the `registration.v1.json` regex. Strict
- * normalisation happens later in `normalisePhone`.
+ * What a typed phone may contain: an optional leading `+`, digits, spaces,
+ * dashes, dots and brackets. The country rules are checked later by `parsePhone`.
  */
-const PHONE_REGEX = /^(\+?\d{10,15}|\d{10})$/;
+const PHONE_INPUT_REGEX = /^\+?[\d\s\-().]+$/;
+
+/** Longest typed phone accepted: 15 digits plus room for spacing and punctuation. */
+const PHONE_INPUT_MAX_LENGTH = 32;
+
+/** An alternate phone is stored as sent, so it keeps the plain digits pattern. */
+const ALTERNATE_PHONE_REGEX = /^(\+?\d{10,15}|\d{10})$/;
 
 // ─── Beckn Contact ──────────────────────────────────────────────────────────
 
 export const BecknContactSchema = z
   .object({
     name: z.string().min(1).max(200),
-    phone: z.string().regex(PHONE_REGEX, 'phone must be 10-15 digits (E.164-ish)'),
+    phone: z
+      .string()
+      .max(PHONE_INPUT_MAX_LENGTH)
+      .regex(PHONE_INPUT_REGEX, 'phone may contain only digits, +, spaces, dashes and brackets'),
     email: z.email().max(320).toLowerCase(),
-    alternatePhone: z.string().regex(PHONE_REGEX).optional(),
+    alternatePhone: z.string().regex(ALTERNATE_PHONE_REGEX).optional(),
     company: z.string().max(200).optional(),
     gstNumber: z.string().max(32).optional(),
   })

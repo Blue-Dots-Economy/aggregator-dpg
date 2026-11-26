@@ -45,6 +45,13 @@ describe('getFormRuntimeConfig', () => {
     expect(getFormRuntimeConfig().phoneCountries).toBe('IN:+91,GB:+44');
   });
 
+  it('drops a bad PHONE_COUNTRIES, so the forms fall back to India instead of failing', () => {
+    for (const bad of ['IN=+91,GB:+44', 'GB:+91', 'IN:+91,']) {
+      process.env.PHONE_COUNTRIES = bad;
+      expect(getFormRuntimeConfig().phoneCountries).toBeUndefined();
+    }
+  });
+
   it('reads every configured value', () => {
     process.env.GOOGLE_MAPS_API_KEY = 'maps-key-123';
     process.env.PHOTON_URL = 'https://photon.internal';

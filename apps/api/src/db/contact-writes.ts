@@ -69,7 +69,7 @@ export function splitBecknContact(c: {
 export interface ContactInput {
   /** Any casing; stored lowercased and trimmed. */
   email: string;
-  /** Canonical (`normalisePhone`) phone, or `null`. */
+  /** Canonical (`parsePhone`) phone, or `null`. */
   phone: string | null;
   /** Display name, or `null` when not captured. */
   name: string | null;

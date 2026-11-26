@@ -100,6 +100,22 @@ describe('voice_bots schema', () => {
     if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+919876543210');
   });
 
+  it('accepts a number from outside India', () => {
+    const r = AggregatorYamlSchema.safeParse(
+      yamlWith({ voice_bots: [{ ...BOT, phone: '+44 20 7946 0958' }] }),
+    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+442079460958');
+  });
+
+  it('accepts a landline, as bots are often on one', () => {
+    const r = AggregatorYamlSchema.safeParse(
+      yamlWith({ voice_bots: [{ ...BOT, phone: '+91 120 440 4274' }] }),
+    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+911204404274');
+  });
+
   it('rejects empty languages and empty domains', () => {
     expect(
       AggregatorYamlSchema.safeParse(yamlWith({ voice_bots: [{ ...BOT, languages: [] }] })).success,

@@ -541,6 +541,7 @@ services:
       # selected config resolves to (always the base network, never the brand).
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       CONFIG_ROOT: /app/config
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
@@ -735,6 +736,7 @@ services:
       # selected config resolves to (always the base network, never the brand).
       AGGREGATOR_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       AGGREGATOR_BRAND: ${AGGREGATOR_BRAND:-}
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       CONFIG_ROOT: /app/config
       # Deploy-time override for the signalstack network.json URL (#512);
       # empty = use `aggregator.network.source` from the YAML.
