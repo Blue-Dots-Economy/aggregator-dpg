@@ -8,6 +8,7 @@
  * @module @aggregator-dpg/network-config/voice-bots
  */
 
+import type { z } from 'zod';
 import {
   VoiceBotSchema,
   type AggregatorYaml,
@@ -21,8 +22,93 @@ export interface SanitisedVoiceBots {
   warnings: NetworkConfigWarning[];
 }
 
+/** The bots that passed, as parsed and as written in the YAML. */
+interface KeptBots {
+  parsed: VoiceBot[];
+  raw: unknown[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Joins a failed parse's issues into one line that never holds the input value. */
+function issueReason(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.join('.') || 'entry'}: ${issue.message}`)
+    .join('; ');
+}
+
+/**
+ * Keeps the bots that parse and whose key is not already taken.
+ *
+ * @param rawBots - The `voice_bots` value as parsed from YAML.
+ * @param warnings - Receives one warning per dropped bot.
+ */
+function keepValidBots(rawBots: unknown, warnings: NetworkConfigWarning[]): KeptBots {
+  const kept: KeptBots = { parsed: [], raw: [] };
+  if (!Array.isArray(rawBots)) {
+    warnings.push({
+      path: 'aggregator.voice_bots',
+      code: 'VOICE_BOT_DROPPED',
+      reason: 'voice_bots is not a list',
+    });
+    return kept;
+  }
+  rawBots.forEach((entry: unknown, i) => {
+    const path = `aggregator.voice_bots.${i}`;
+    const bot = VoiceBotSchema.safeParse(entry);
+    if (!bot.success) {
+      warnings.push({ path, code: 'VOICE_BOT_DROPPED', reason: issueReason(bot.error) });
+    } else if (kept.parsed.some((b) => b.key === bot.data.key)) {
+      warnings.push({
+        path,
+        code: 'VOICE_BOT_DROPPED',
+        reason: `key '${bot.data.key}' is listed more than once`,
+      });
+    } else {
+      kept.parsed.push(bot.data);
+      kept.raw.push(entry);
+    }
+  });
+  return kept;
+}
+
+/**
+ * Keeps the defaults that name a kept bot serving that domain.
+ *
+ * @param rawDefaults - The `default_voice_bots` value as parsed from YAML.
+ * @param bots - The bots that were kept.
+ * @param warnings - Receives one warning per dropped default.
+ * @returns The kept defaults, or `undefined` when the block is not a map.
+ */
+function keepValidDefaults(
+  rawDefaults: unknown,
+  bots: VoiceBot[],
+  warnings: NetworkConfigWarning[],
+): Record<string, string> | undefined {
+  if (!isRecord(rawDefaults)) {
+    warnings.push({
+      path: 'aggregator.default_voice_bots',
+      code: 'VOICE_BOT_DEFAULT_DROPPED',
+      reason: 'default_voice_bots is not a map of domain to bot key',
+    });
+    return undefined;
+  }
+  const defaults: Record<string, string> = {};
+  for (const [domain, key] of Object.entries(rawDefaults)) {
+    const bot = typeof key === 'string' ? bots.find((b) => b.key === key) : undefined;
+    if (bot?.domains.includes(domain)) {
+      defaults[domain] = bot.key;
+    } else {
+      warnings.push({
+        path: `aggregator.default_voice_bots.${domain}`,
+        code: 'VOICE_BOT_DEFAULT_DROPPED',
+        reason: `must name a listed voice bot that serves '${domain}'`,
+      });
+    }
+  }
+  return defaults;
 }
 
 /**
@@ -38,72 +124,82 @@ export function sanitiseVoiceBots(parsed: unknown): SanitisedVoiceBots {
   if (!isRecord(parsed) || !isRecord(parsed['aggregator'])) return { value: parsed, warnings: [] };
   const aggregator = { ...parsed['aggregator'] };
   const warnings: NetworkConfigWarning[] = [];
-  const kept: VoiceBot[] = [];
 
-  const rawBots = aggregator['voice_bots'];
-  if (rawBots !== undefined) {
-    if (!Array.isArray(rawBots)) {
-      warnings.push({
-        path: 'aggregator.voice_bots',
-        code: 'VOICE_BOT_DROPPED',
-        reason: 'voice_bots is not a list',
-      });
-      aggregator['voice_bots'] = [];
-    } else {
-      const keptRaw: unknown[] = [];
-      rawBots.forEach((entry: unknown, i) => {
-        const path = `aggregator.voice_bots.${i}`;
-        const bot = VoiceBotSchema.safeParse(entry);
-        if (!bot.success) {
-          const reason = bot.error.issues
-            .map((issue) => `${issue.path.join('.') || 'entry'}: ${issue.message}`)
-            .join('; ');
-          warnings.push({ path, code: 'VOICE_BOT_DROPPED', reason });
-          return;
-        }
-        if (kept.some((b) => b.key === bot.data.key)) {
-          warnings.push({
-            path,
-            code: 'VOICE_BOT_DROPPED',
-            reason: `key '${bot.data.key}' is listed more than once`,
-          });
-          return;
-        }
-        kept.push(bot.data);
-        keptRaw.push(entry);
-      });
-      aggregator['voice_bots'] = keptRaw;
-    }
+  let bots: VoiceBot[] = [];
+  if (aggregator['voice_bots'] !== undefined) {
+    const kept = keepValidBots(aggregator['voice_bots'], warnings);
+    aggregator['voice_bots'] = kept.raw;
+    bots = kept.parsed;
   }
 
-  const rawDefaults = aggregator['default_voice_bots'];
-  if (rawDefaults !== undefined) {
-    if (!isRecord(rawDefaults)) {
-      warnings.push({
-        path: 'aggregator.default_voice_bots',
-        code: 'VOICE_BOT_DEFAULT_DROPPED',
-        reason: 'default_voice_bots is not a map of domain to bot key',
-      });
-      delete aggregator['default_voice_bots'];
-    } else {
-      const defaults: Record<string, string> = {};
-      for (const [domain, key] of Object.entries(rawDefaults)) {
-        const bot = typeof key === 'string' ? kept.find((b) => b.key === key) : undefined;
-        if (bot?.domains.includes(domain) && typeof key === 'string') {
-          defaults[domain] = key;
-        } else {
-          warnings.push({
-            path: `aggregator.default_voice_bots.${domain}`,
-            code: 'VOICE_BOT_DEFAULT_DROPPED',
-            reason: `must name a listed voice bot that serves '${domain}'`,
-          });
-        }
-      }
-      aggregator['default_voice_bots'] = defaults;
-    }
+  if (aggregator['default_voice_bots'] !== undefined) {
+    const defaults = keepValidDefaults(aggregator['default_voice_bots'], bots, warnings);
+    if (defaults === undefined) delete aggregator['default_voice_bots'];
+    else aggregator['default_voice_bots'] = defaults;
   }
 
   return { value: { ...parsed, aggregator }, warnings };
+}
+
+/** Keeps the bots whose every domain exists in the network. */
+function keepBotsInNetwork(
+  bots: VoiceBot[],
+  domainIds: ReadonlySet<string>,
+  warnings: NetworkConfigWarning[],
+): VoiceBot[] {
+  return bots.filter((bot) => {
+    const missing = bot.domains.find((id) => !domainIds.has(id));
+    if (missing === undefined) return true;
+    warnings.push({
+      path: 'aggregator.voice_bots',
+      code: 'VOICE_BOT_DROPPED',
+      reason: `bot '${bot.key}' serves domain '${missing}', which the network does not define`,
+    });
+    return false;
+  });
+}
+
+/** Keeps the defaults whose domain exists and whose bot was kept. */
+function keepDefaultsInNetwork(
+  defaults: Record<string, string>,
+  bots: VoiceBot[],
+  domainIds: ReadonlySet<string>,
+  warnings: NetworkConfigWarning[],
+): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const [domain, key] of Object.entries(defaults)) {
+    const known = domainIds.has(domain);
+    if (known && bots.some((b) => b.key === key && b.domains.includes(domain))) {
+      kept[domain] = key;
+      continue;
+    }
+    warnings.push({
+      path: `aggregator.default_voice_bots.${domain}`,
+      code: 'VOICE_BOT_DEFAULT_DROPPED',
+      reason: known
+        ? `bot '${key}' was dropped`
+        : `domain '${domain}' is not defined by the network`,
+    });
+  }
+  return kept;
+}
+
+/** Warns for each domain that two or more bots serve with no default. */
+function missingDefaultWarnings(
+  bots: VoiceBot[],
+  defaults: Record<string, string> | undefined,
+): NetworkConfigWarning[] {
+  const serving = new Map<string, number>();
+  for (const domain of bots.flatMap((bot) => bot.domains)) {
+    serving.set(domain, (serving.get(domain) ?? 0) + 1);
+  }
+  return [...serving]
+    .filter(([domain, count]) => count > 1 && defaults?.[domain] === undefined)
+    .map(([domain, count]): NetworkConfigWarning => ({
+      path: `aggregator.default_voice_bots.${domain}`,
+      code: 'VOICE_BOT_DEFAULT_MISSING',
+      reason: `${count} voice bots serve '${domain}' and none is the default; links created without a bot choice get none`,
+    }));
 }
 
 /**
@@ -122,50 +218,15 @@ export function dropVoiceBotsOutsideNetwork(
   domainIds: ReadonlySet<string>,
 ): NetworkConfigWarning[] {
   const warnings: NetworkConfigWarning[] = [];
-
-  aggregator.voice_bots = aggregator.voice_bots.filter((bot) => {
-    const missing = bot.domains.find((id) => !domainIds.has(id));
-    if (missing === undefined) return true;
-    warnings.push({
-      path: 'aggregator.voice_bots',
-      code: 'VOICE_BOT_DROPPED',
-      reason: `bot '${bot.key}' serves domain '${missing}', which the network does not define`,
-    });
-    return false;
-  });
-
+  aggregator.voice_bots = keepBotsInNetwork(aggregator.voice_bots, domainIds, warnings);
   if (aggregator.default_voice_bots !== undefined) {
-    const defaults: Record<string, string> = {};
-    for (const [domain, key] of Object.entries(aggregator.default_voice_bots)) {
-      const bot = aggregator.voice_bots.find((b) => b.key === key);
-      if (domainIds.has(domain) && bot?.domains.includes(domain)) {
-        defaults[domain] = key;
-      } else {
-        warnings.push({
-          path: `aggregator.default_voice_bots.${domain}`,
-          code: 'VOICE_BOT_DEFAULT_DROPPED',
-          reason: domainIds.has(domain)
-            ? `bot '${key}' was dropped`
-            : `domain '${domain}' is not defined by the network`,
-        });
-      }
-    }
-    aggregator.default_voice_bots = defaults;
+    aggregator.default_voice_bots = keepDefaultsInNetwork(
+      aggregator.default_voice_bots,
+      aggregator.voice_bots,
+      domainIds,
+      warnings,
+    );
   }
-
-  const serving = new Map<string, number>();
-  for (const bot of aggregator.voice_bots) {
-    for (const domain of bot.domains) serving.set(domain, (serving.get(domain) ?? 0) + 1);
-  }
-  for (const [domain, count] of serving) {
-    if (count > 1 && aggregator.default_voice_bots?.[domain] === undefined) {
-      warnings.push({
-        path: `aggregator.default_voice_bots.${domain}`,
-        code: 'VOICE_BOT_DEFAULT_MISSING',
-        reason: `${count} voice bots serve '${domain}' and none is the default; links created without a bot choice get none`,
-      });
-    }
-  }
-
+  warnings.push(...missingDefaultWarnings(aggregator.voice_bots, aggregator.default_voice_bots));
   return warnings;
 }
