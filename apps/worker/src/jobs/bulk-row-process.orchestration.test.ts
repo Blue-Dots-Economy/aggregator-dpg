@@ -395,6 +395,42 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
   });
 });
 
+describe('processBulkRow — a network that takes only + numbers', () => {
+  beforeEach(() => {
+    schemaResultVal = {
+      success: true,
+      value: {
+        required: [],
+        properties: { phone: { type: 'string', pattern: '^\\+[1-9][0-9]{9,14}$' } },
+      },
+    };
+  });
+
+  it.each(['9876543210', '+91 98765 43210', '919876543210', '09876543210'])(
+    'sends %s to Signals as +919876543210, as the login phone and in the profile',
+    async (typed) => {
+      const writer = new RecordingSignalStackWriter();
+      _setSignalStackWriter(writer);
+      const result = await processBulkRow(makeJob({ payload: { name: 'Asha', phone: typed } }));
+      expect(result.outcome).toBe('passed');
+      expect(writer.inputs).toHaveLength(1);
+      expect(writer.inputs[0]?.phoneNumber).toBe('+919876543210');
+      expect(writer.inputs[0]?.profile['phone']).toBe('+919876543210');
+    },
+  );
+
+  it('sends no phone for an empty cell when the row has an email', async () => {
+    const writer = new RecordingSignalStackWriter();
+    _setSignalStackWriter(writer);
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '', email: 'asha@example.com' } }),
+    );
+    expect(result.outcome).toBe('passed');
+    expect(writer.inputs[0]?.phoneNumber).toBeUndefined();
+    expect(writer.inputs[0]?.profile['phone']).toBeFalsy();
+  });
+});
+
 describe('processBulkRow — signalstack push outcomes', () => {
   // There is no local participant row any more, so there is no local dedup and
   // no `skipped`/`duplicate` outcome on this path. A repeat row is pushed and
@@ -628,10 +664,7 @@ describe('pushToSignalStack — direct-call edge cases not reachable through pro
     expect(result.success).toBe(true);
   });
 
-  it('overrides an empty/missing raw phone cell with the already-normalised pushPhone', async () => {
-    // domainCfg.identity.phone === 'phone'; omit it from the payload entirely
-    // so buildSignalStackItemState's override branch (rawPhone undefined,
-    // pushPhone truthy) is exercised.
+  it('fills a missing phone cell with the cleaned phone', async () => {
     const result = await pushToSignalStack(
       { ...job, payload: { name: 'Asha' } },
       'pid-phone-override',
