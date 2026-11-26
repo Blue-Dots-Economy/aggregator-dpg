@@ -50,15 +50,28 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
-    if (cached.warnings && cached.warnings.length > 0) {
+    const voiceBotWarnings = (cached.warnings ?? []).filter((w) => w.code.startsWith('VOICE_BOT_'));
+    const networkWarnings = (cached.warnings ?? []).filter((w) => !w.code.startsWith('VOICE_BOT_'));
+    if (networkWarnings.length > 0) {
       logger.warn(
         {
           operation: 'network-config.load',
           status: 'skipped',
           finding: 'network_json_parts_dropped',
-          warnings: cached.warnings,
+          warnings: networkWarnings,
         },
         'network.json: malformed optional parts were dropped; the dashboard uses defaults for them',
+      );
+    }
+    if (voiceBotWarnings.length > 0) {
+      logger.warn(
+        {
+          operation: 'network-config.load',
+          status: 'skipped',
+          finding: 'voice_bots_dropped',
+          warnings: voiceBotWarnings,
+        },
+        'aggregator.config.yaml: invalid voice bot settings were ignored; fix them and redeploy',
       );
     }
     // Warn about `SIGNALS_UI_URLS` keys that match no declared domain (e.g. a typo).
