@@ -837,49 +837,6 @@ describe('FileNetworkConfigLoader — domain resolution failures', () => {
     expect((result.error as { message: string }).message).toContain('has no item_schemas');
   });
 
-  it.each([
-    [
-      'a voice bot domain',
-      'voice_bots:\n    - key: a\n      display_name: A\n      phone: "+919876543210"\n      languages: [en]\n      domains: [nope]',
-    ],
-    [
-      'a default_voice_bots key',
-      'default_voice_bots:\n    nope: a\n    seeker: a\n  voice_bots:\n    - key: a\n      display_name: A\n      phone: "+919876543210"\n      languages: [en]\n      domains: [seeker, nope]',
-    ],
-  ])(
-    'returns DOMAIN_RESOLUTION_FAILED for an unknown network domain in %s',
-    async (_name, block) => {
-      await fs.writeFile(configPath, `${BLUE_DOT_YAML}  ${block}\n`, 'utf8');
-      const loader = new FileNetworkConfigLoader({
-        configPath,
-        fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
-      });
-      const result = await loader.load();
-      expect(result.success).toBe(false);
-      if (result.success) return;
-      const error = result.error as { code: string; message: string };
-      expect(error.code).toBe('DOMAIN_RESOLUTION_FAILED');
-      expect(error.message).toContain('voice_bots');
-      expect(error.message).toContain('nope');
-    },
-  );
-
-  it('fails to load when two voice bots serve a domain and no default is set', async () => {
-    const bot = (key: string) =>
-      `    - key: ${key}\n      display_name: ${key}\n      phone: "+919876543210"\n      languages: [en]\n      domains: [seeker]\n`;
-    await fs.writeFile(configPath, `${BLUE_DOT_YAML}  voice_bots:\n${bot('a')}${bot('b')}`, 'utf8');
-    const loader = new FileNetworkConfigLoader({
-      configPath,
-      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
-    });
-    const result = await loader.load();
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    const error = result.error as { code: string; message: string };
-    expect(error.code).toBe('CONFIG_PARSE_FAILED');
-    expect(error.message).toContain('default_voice_bots.seeker is required');
-  });
-
   it('returns DOMAIN_RESOLUTION_FAILED when identity selectors cannot be sniffed and no override exists', async () => {
     const loader = new FileNetworkConfigLoader({
       configPath,
@@ -952,6 +909,114 @@ aggregator:
       phone: 'contact_number',
       email: 'contact_email_addr',
     });
+  });
+});
+
+describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal', () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  const bot = (key: string, phone: string, domains: string): string =>
+    `    - key: ${key}\n      display_name: ${key}\n      phone: "${phone}"\n      languages: [en]\n      domains: [${domains}]\n`;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agg-cfg-voice-'));
+    configPath = path.join(tmpDir, 'aggregator.config.yaml');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function loadWith(block: string) {
+    await fs.writeFile(configPath, `${BLUE_DOT_YAML}${block}`, 'utf8');
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('config did not load');
+    return result.value;
+  }
+
+  it('drops a bot with an invalid phone, keeps the valid one and names the entry', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '+9101204404274', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['good']);
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({ path: 'aggregator.voice_bots.1', code: 'VOICE_BOT_DROPPED' }),
+    ]);
+    expect(cfg.warnings?.[0]?.reason).toContain('phone');
+    expect(JSON.stringify(cfg.warnings)).not.toContain('1204404274');
+  });
+
+  it('keeps the first of two bots with the same key', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('a', '+919876543210', 'seeker')}${bot('a', '+919876543211', 'provider')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.domains)).toEqual([['seeker']]);
+    expect(cfg.warnings?.[0]).toMatchObject({
+      path: 'aggregator.voice_bots.1',
+      code: 'VOICE_BOT_DROPPED',
+    });
+  });
+
+  it('drops a bot serving an unknown domain and the defaults that name it', async () => {
+    const cfg = await loadWith(
+      `  default_voice_bots:\n    nope: a\n    seeker: a\n  voice_bots:\n${bot('a', '+919876543210', 'seeker, nope')}`,
+    );
+    expect(cfg.aggregator.voice_bots).toEqual([]);
+    expect(cfg.aggregator.default_voice_bots).toEqual({});
+    expect(cfg.warnings?.map((w) => w.code)).toEqual([
+      'VOICE_BOT_DROPPED',
+      'VOICE_BOT_DEFAULT_DROPPED',
+      'VOICE_BOT_DEFAULT_DROPPED',
+    ]);
+  });
+
+  it('drops a default naming an unlisted bot', async () => {
+    const cfg = await loadWith(
+      `  default_voice_bots:\n    seeker: x\n  voice_bots:\n${bot('a', '+919876543210', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['a']);
+    expect(cfg.aggregator.default_voice_bots).toEqual({});
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({
+        path: 'aggregator.default_voice_bots.seeker',
+        code: 'VOICE_BOT_DEFAULT_DROPPED',
+      }),
+    ]);
+  });
+
+  it('loads two bots serving a domain with no default and warns', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('a', '+919876543210', 'seeker')}${bot('b', '+919876543211', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots).toHaveLength(2);
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({
+        path: 'aggregator.default_voice_bots.seeker',
+        code: 'VOICE_BOT_DEFAULT_MISSING',
+      }),
+    ]);
+  });
+
+  it('drops voice_bots and default_voice_bots that have the wrong shape', async () => {
+    const cfg = await loadWith('  voice_bots: oops\n  default_voice_bots: [a]\n');
+    expect(cfg.aggregator.voice_bots).toEqual([]);
+    expect(cfg.aggregator.default_voice_bots).toBeUndefined();
+    expect(cfg.warnings?.map((w) => w.path)).toEqual([
+      'aggregator.voice_bots',
+      'aggregator.default_voice_bots',
+    ]);
+  });
+
+  it('reports no warnings for a valid voice bot block', async () => {
+    const cfg = await loadWith(`  voice_bots:\n${bot('a', '+911204404274', 'seeker')}`);
+    expect(cfg.aggregator.voice_bots.map((b) => b.phone)).toEqual(['+911204404274']);
+    expect(cfg.warnings).toBeUndefined();
   });
 });
 

@@ -394,7 +394,7 @@ export const AggregatorYamlSchema = z.object({
       voice_bots: z.array(VoiceBotSchema).default([]),
       /**
        * Domain id to the key of the bot that serves it when a link names none.
-       * Required for every domain served by two or more bots.
+       * Without one, a domain served by two or more bots has no default.
        */
       default_voice_bots: z.record(z.string(), z.string()).optional(),
     })
@@ -417,23 +417,6 @@ export const AggregatorYamlSchema = z.object({
             code: 'custom',
             path: ['default_voice_bots', domain],
             message: `default_voice_bots.${domain} must name a listed voice bot that serves '${domain}'`,
-          });
-        }
-      }
-      // Links store the bot they resolve to at creation; with two or more bots
-      // and no default, a link created without a choice would have none.
-      const servingCount = new Map<string, number>();
-      for (const bot of cfg.voice_bots) {
-        for (const domain of bot.domains) {
-          servingCount.set(domain, (servingCount.get(domain) ?? 0) + 1);
-        }
-      }
-      for (const [domain, count] of servingCount) {
-        if (count > 1 && cfg.default_voice_bots?.[domain] === undefined) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['default_voice_bots', domain],
-            message: `default_voice_bots.${domain} is required: ${count} voice_bots serve '${domain}'`,
           });
         }
       }
@@ -711,15 +694,25 @@ export interface ResolvedNetworkConfig {
   warnings?: NetworkConfigWarning[];
 }
 
-/** One part of `network.json` the loader dropped. */
+/** One part of `network.json` or `aggregator.config.yaml` the loader dropped. */
 export interface NetworkConfigWarning {
-  /** Dot path in `network.json`, e.g. `domains.0.dashboard_tiles`. */
+  /** Dot path, e.g. `domains.0.dashboard_tiles` or `aggregator.voice_bots.1`. */
   path: string;
   /**
    * `MALFORMED_BLOCK_DROPPED`: the whole optional block was ignored.
    * `NON_STRING_ENTRIES_DROPPED`: entries that are not strings were removed from a list.
+   * `VOICE_BOT_DROPPED`: a voice bot was ignored.
+   * `VOICE_BOT_DEFAULT_DROPPED`: a `default_voice_bots` entry was ignored.
+   * `VOICE_BOT_DEFAULT_MISSING`: two or more bots serve a domain that has no default.
    */
-  code: 'MALFORMED_BLOCK_DROPPED' | 'NON_STRING_ENTRIES_DROPPED';
+  code:
+    | 'MALFORMED_BLOCK_DROPPED'
+    | 'NON_STRING_ENTRIES_DROPPED'
+    | 'VOICE_BOT_DROPPED'
+    | 'VOICE_BOT_DEFAULT_DROPPED'
+    | 'VOICE_BOT_DEFAULT_MISSING';
+  /** Why the entry was dropped. Never holds a phone number or other contact data. */
+  reason?: string;
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────
