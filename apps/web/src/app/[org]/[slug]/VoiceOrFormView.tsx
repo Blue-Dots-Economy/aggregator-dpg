@@ -322,6 +322,7 @@ export function VoiceOrFormView({ voiceBot, ...props }: VoiceOrFormViewProps): J
               display_name: voiceBot.display_name,
               phone: voiceBot.phone,
               languages: languageNames(voiceBot.languages, locale),
+              description: voiceBot.description,
             }}
             onSubmit={(payload) => void postVoiceRequest(payload)}
             onMinorChange={setMinor}

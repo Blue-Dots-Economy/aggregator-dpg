@@ -47,8 +47,8 @@ export interface CallToRegisterFormProps {
   showTerms: boolean;
   /** Terms and Privacy text for the links in the checkbox label; plain text when null. */
   consentContent: ConsentDocContent | null;
-  /** The voice bot: its name, number and the languages it speaks, already joined. */
-  bot: { display_name: string; phone: string; languages: string };
+  /** The voice bot: its name, number, the languages it speaks (already joined) and its configured description. */
+  bot: { display_name: string; phone: string; languages: string; description?: string | undefined };
   /** Called with the identity fields once every field is valid. */
   onSubmit: (payload: CallPayload) => void;
   /** Called whenever the chosen birth year makes the participant a minor or stops doing so. */
@@ -271,10 +271,11 @@ export function CallToRegisterForm(props: Readonly<CallToRegisterFormProps>): JS
                 {formatPhoneForReading(props.bot.phone, phoneCountries)}
               </div>
               <p className="mt-1 text-[13px] text-ink-600">
-                {t('talk_to_bot', {
-                  name: props.bot.display_name,
-                  languages: props.bot.languages,
-                })}
+                {props.bot.description ??
+                  t('talk_to_bot', {
+                    name: props.bot.display_name,
+                    languages: props.bot.languages,
+                  })}
               </p>
             </div>
 

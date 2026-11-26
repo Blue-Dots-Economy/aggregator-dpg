@@ -108,7 +108,11 @@ function mockVoiceRequest(status: number, body: unknown) {
 }
 
 function renderView(
-  opts: { consentContent?: ParticipantConsent | null; schema?: Record<string, unknown> } = {},
+  opts: {
+    consentContent?: ParticipantConsent | null;
+    schema?: Record<string, unknown>;
+    botDescription?: string;
+  } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -133,6 +137,7 @@ function renderView(
             display_name: 'UP Rozgar Sahayak',
             phone: '+911234567890',
             languages: ['hi'],
+            ...(opts.botDescription !== undefined && { description: opts.botDescription }),
           }}
         />
       </NextIntlClientProvider>
@@ -189,6 +194,13 @@ describe('<VoiceOrFormView /> first screen', () => {
       'href',
       SIGNALS_URL,
     );
+  });
+
+  it('shows the bot description in place of the generated line when one is set', () => {
+    renderView({ botDescription: 'Talk to us in Hindi to register your company on BlueDots.' });
+    const number = screen.getByTestId('bot-number');
+    expect(number).toHaveTextContent('Talk to us in Hindi to register your company on BlueDots.');
+    expect(number).not.toHaveTextContent('Talk to UP Rozgar Sahayak');
   });
 
   it('labels the fields with the schema titles when the schema has them', () => {
