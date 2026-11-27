@@ -203,6 +203,11 @@ describe('<VoiceOrFormView /> first screen', () => {
     expect(number).not.toHaveTextContent('Talk to UP Rozgar Sahayak');
   });
 
+  it('keeps the generated line when the description is blank', () => {
+    renderView({ botDescription: '  ' });
+    expect(screen.getByTestId('bot-number')).toHaveTextContent('Talk to UP Rozgar Sahayak');
+  });
+
   it('labels the fields with the schema titles when the schema has them', () => {
     renderView({
       schema: {

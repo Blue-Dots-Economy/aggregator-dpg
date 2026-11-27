@@ -120,6 +120,24 @@ describe('getNetworkConfig', () => {
     );
   });
 
+  it('logs a missing voice bot default under its own finding, not as dropped', async () => {
+    const missing = {
+      path: 'aggregator.default_voice_bots.seeker',
+      code: 'VOICE_BOT_DEFAULT_MISSING',
+    };
+    mockLoad.mockResolvedValue({ success: true, value: { ...sampleConfig, warnings: [missing] } });
+    const { getNetworkConfig } = await import('../network-config.js');
+    await getNetworkConfig();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ finding: 'voice_bot_default_missing', warnings: [missing] }),
+      expect.any(String),
+    );
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ finding: 'voice_bots_dropped' }),
+      expect.any(String),
+    );
+  });
+
   it('does not log dropped parts when the loader reports none', async () => {
     mockLoad.mockResolvedValue({ success: true, value: sampleConfig });
     const { getNetworkConfig } = await import('../network-config.js');

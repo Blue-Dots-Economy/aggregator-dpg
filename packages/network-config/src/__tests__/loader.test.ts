@@ -942,14 +942,14 @@ describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal'
 
   it('drops a bot with an invalid phone, keeps the valid one and names the entry', async () => {
     const cfg = await loadWith(
-      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '+9101204404274', 'seeker')}`,
+      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '12345', 'seeker')}`,
     );
     expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['good']);
     expect(cfg.warnings).toEqual([
       expect.objectContaining({ path: 'aggregator.voice_bots.1', code: 'VOICE_BOT_DROPPED' }),
     ]);
     expect(cfg.warnings?.[0]?.reason).toContain('phone');
-    expect(JSON.stringify(cfg.warnings)).not.toContain('1204404274');
+    expect(JSON.stringify(cfg.warnings)).not.toContain('12345');
   });
 
   it('keeps the first of two bots with the same key', async () => {
@@ -974,6 +974,7 @@ describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal'
       'VOICE_BOT_DEFAULT_DROPPED',
       'VOICE_BOT_DEFAULT_DROPPED',
     ]);
+    expect(cfg.warnings?.[0]?.path).toBe('aggregator.voice_bots.a');
   });
 
   it('drops a default naming an unlisted bot', async () => {
