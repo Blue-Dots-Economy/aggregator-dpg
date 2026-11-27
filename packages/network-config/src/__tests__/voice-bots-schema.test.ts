@@ -65,9 +65,9 @@ describe('voice_bots schema', () => {
     ).toContain('default_voice_bots');
   });
 
-  it('rejects two bots serving a domain with no default, naming the domain', () => {
-    const text = errorText(yamlWith({ voice_bots: [BOT, { ...BOT, key: 'b' }] }));
-    expect(text).toContain('default_voice_bots.seeker is required');
+  it('parses two bots serving a domain with no default', () => {
+    const r = AggregatorYamlSchema.safeParse(yamlWith({ voice_bots: [BOT, { ...BOT, key: 'b' }] }));
+    expect(r.success).toBe(true);
   });
 
   it('parses two bots serving a domain when a default is set', () => {

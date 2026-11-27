@@ -18,6 +18,7 @@ import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
+import { dropVoiceBotsOutsideNetwork, sanitiseVoiceBots } from './voice-bots.js';
 import {
   AggregatorYamlSchema,
   BrandAttributionSchema,
@@ -116,8 +117,9 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   async load(): Promise<Result<ResolvedNetworkConfig, BaseError | NetworkConfigError>> {
     if (this.cached) return ok(this.cached);
 
-    const yaml = await this.readYaml();
-    if (!yaml.success) return err(yaml.error);
+    const read = await this.readYaml();
+    if (!read.success) return err(read.error);
+    const { yaml, warnings: yamlWarnings } = read.value;
 
     // The env override replaces the YAML source, so the resolved config and the
     // fetch use the same URL. A malformed URL is an error, not a fallback.
@@ -130,11 +132,11 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
           message: `AGGREGATOR_NETWORK_SOURCE is not a valid URL: "${override}"`,
         });
       }
-      yaml.value.aggregator.network.source = checked.data;
+      yaml.aggregator.network.source = checked.data;
     }
 
     // Either the YAML or the env override must provide a URL.
-    const source = yaml.value.aggregator.network.source;
+    const source = yaml.aggregator.network.source;
     if (!source) {
       return err({
         code: 'CONFIG_PARSE_FAILED',
@@ -147,7 +149,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     const network = await this.fetchNetwork(source);
     if (!network.success) return err(network.error);
 
-    const resolved = resolveDomains(yaml.value, network.value);
+    const resolved = resolveDomains(yaml, network.value, yamlWarnings);
     if (!resolved.success) return err(resolved.error);
 
     // Participant consent is fetched like network.json, but a fetch failure is
@@ -162,9 +164,9 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
           message: `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE is not a valid URL: "${consentOverride}"`,
         });
       }
-      yaml.value.aggregator.network.consent_source = checked.data;
+      yaml.aggregator.network.consent_source = checked.data;
     }
-    const consentSource = yaml.value.aggregator.network.consent_source;
+    const consentSource = yaml.aggregator.network.consent_source;
     if (consentSource) {
       const consent = await this.fetchConsent(consentSource);
       if (consent) resolved.value.participantConsent = consent;
@@ -176,7 +178,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
   // ─── YAML ──────────────────────────────────────────────────────────────────
 
-  private async readYaml(): Promise<Result<AggregatorYaml, NetworkConfigError>> {
+  private async readYaml(): Promise<Result<ParsedYaml, NetworkConfigError>> {
     let raw: string;
     try {
       raw = await fs.readFile(this.opts.configPath, 'utf8');
@@ -196,7 +198,8 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
         cause: toError(e),
       });
     }
-    const validated = AggregatorYamlSchema.safeParse(parsed);
+    const sanitised = sanitiseVoiceBots(parsed);
+    const validated = AggregatorYamlSchema.safeParse(sanitised.value);
     if (!validated.success) {
       return err({
         code: 'CONFIG_PARSE_FAILED',
@@ -205,7 +208,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     }
     const merged = await this.mergeBrandJson(validated.data);
     if (!merged.success) return err(merged.error);
-    return ok(merged.value);
+    return ok({ yaml: merged.value, warnings: sanitised.warnings });
   }
 
   /**
@@ -384,6 +387,12 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
 // ─── Resolution ──────────────────────────────────────────────────────────────
 
+/** A validated aggregator config and the voice-bot entries dropped from it. */
+interface ParsedYaml {
+  yaml: AggregatorYaml;
+  warnings: NetworkConfigWarning[];
+}
+
 /** A validated network and the optional parts dropped while validating it. */
 interface CheckedNetwork {
   network: SignalstackNetwork;
@@ -494,34 +503,10 @@ function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkCo
   return warnings;
 }
 
-/**
- * Finds the first voice-bot setting that names a domain the network lacks.
- *
- * @param yaml - The validated aggregator config.
- * @param domainIds - Domain ids of the fetched network.
- * @returns An error message naming `voice_bots` and the domain, or `null` when all exist.
- */
-function unknownVoiceBotDomain(
-  yaml: AggregatorYaml,
-  domainIds: ReadonlySet<string>,
-): string | null {
-  for (const bot of yaml.aggregator.voice_bots) {
-    const missing = bot.domains.find((id) => !domainIds.has(id));
-    if (missing) {
-      return `voice_bots '${bot.key}' serves domain '${missing}', which the network does not define`;
-    }
-  }
-  for (const domain of Object.keys(yaml.aggregator.default_voice_bots ?? {})) {
-    if (!domainIds.has(domain)) {
-      return `default_voice_bots names domain '${domain}', which the network does not define (voice_bots)`;
-    }
-  }
-  return null;
-}
-
 function resolveDomains(
   yaml: AggregatorYaml,
-  { network, warnings }: CheckedNetwork,
+  { network, warnings: networkWarnings }: CheckedNetwork,
+  yamlWarnings: NetworkConfigWarning[],
 ): Result<ResolvedNetworkConfig, NetworkConfigError> {
   const overrides = yaml.aggregator.network.field_overrides ?? {};
   const labels = yaml.aggregator.domain_labels ?? {};
@@ -568,10 +553,11 @@ function resolveDomains(
     order.push(d.id);
   }
 
-  const unknownDomain = unknownVoiceBotDomain(yaml, new Set(order));
-  if (unknownDomain) {
-    return err({ code: 'DOMAIN_RESOLUTION_FAILED', message: unknownDomain });
-  }
+  const warnings = [
+    ...networkWarnings,
+    ...yamlWarnings,
+    ...dropVoiceBotsOutsideNetwork(yaml.aggregator, new Set(order)),
+  ];
 
   return ok({
     aggregator: yaml.aggregator,
