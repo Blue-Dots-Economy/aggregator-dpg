@@ -560,10 +560,8 @@ export async function pushToSignalStack(
     };
   }
   const nameSourceKey = domainCfg.identity.name;
-  const phoneSourceKey = domainCfg.identity.phone;
   const name = stringCell(job.payload, nameSourceKey) ?? participantId;
-  const phoneFromBody = stringCell(job.payload, phoneSourceKey) ?? phone;
-  const pushPhone = phone ?? phoneFromBody;
+  const pushPhone = phone;
   // The bulk CSV has no per-row consent column. Consent is sent only via
   // `compliance`, which Signals treats as accept-only: a `false` value is
   // rejected with CONSENT_DECLINED.

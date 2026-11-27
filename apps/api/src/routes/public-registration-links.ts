@@ -500,8 +500,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           const nameSourceKey = linkDomainCfg.identity.name;
           // Fallback only; the guard above rejects a blank name. The link id is an opaque UUID.
           const name = readString(body, nameSourceKey) ?? link.id;
-          const phoneFromBody = readString(body, phoneSourceKey) ?? phoneNormalised;
-          const pushPhone = phoneNormalised ?? phoneFromBody;
+          const pushPhone = phoneNormalised;
           const result = await ss.onboard({
             actingOrgId: signalstackOrgId,
             requestId: req.id,
