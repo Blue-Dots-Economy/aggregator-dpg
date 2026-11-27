@@ -47,6 +47,7 @@ export function BlueDotsLogo({ size = 44, dark = false }: BlueDotsLogoProps) {
       height={size}
       viewBox="0 0 48 48"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
       style={{
         display: 'block',
         borderRadius: size * 0.28,
