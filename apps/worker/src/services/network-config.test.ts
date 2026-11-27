@@ -94,6 +94,21 @@ describe('getNetworkConfig', () => {
     );
   });
 
+  it('logs voice bot warnings under their own findings, not as network.json parts', async () => {
+    const warnings: ResolvedNetworkConfig['warnings'] = [
+      { path: 'aggregator.voice_bots.1', code: 'VOICE_BOT_DROPPED' },
+      { path: 'aggregator.default_voice_bots.seeker', code: 'VOICE_BOT_DEFAULT_MISSING' },
+    ];
+    loadMock.mockResolvedValueOnce({ success: true, value: fakeConfig({ warnings }) });
+
+    await getNetworkConfig();
+
+    expect(warnLog.mock.calls.map(([fields]) => fields.finding)).toEqual([
+      'voice_bots_dropped',
+      'voice_bot_default_missing',
+    ]);
+  });
+
   it('does not log dropped parts when the loader reports none', async () => {
     loadMock.mockResolvedValueOnce({ success: true, value: fakeConfig() });
 

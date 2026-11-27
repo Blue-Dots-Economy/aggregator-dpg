@@ -974,6 +974,7 @@ describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal'
       'VOICE_BOT_DEFAULT_DROPPED',
       'VOICE_BOT_DEFAULT_DROPPED',
     ]);
+    expect(cfg.warnings?.[0]?.path).toBe('aggregator.voice_bots.a');
   });
 
   it('drops a default naming an unlisted bot', async () => {

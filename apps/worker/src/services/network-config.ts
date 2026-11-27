@@ -11,6 +11,7 @@ import path from 'node:path';
 import { FileNetworkConfigLoader } from '@aggregator-dpg/network-config/loader';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
 import { resolveConfigPath } from '@aggregator-dpg/network-config/paths';
+import { groupWarnings } from '@aggregator-dpg/network-config/warnings';
 import { logger } from '../logger.js';
 
 let cached: ResolvedNetworkConfig | null = null;
@@ -36,15 +37,15 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
-    if (cached.warnings && cached.warnings.length > 0) {
+    for (const group of groupWarnings(cached.warnings)) {
       logger.warn(
         {
           operation: 'network-config.load',
           status: 'skipped',
-          finding: 'network_json_parts_dropped',
-          warnings: cached.warnings,
+          finding: group.finding,
+          warnings: group.warnings,
         },
-        'network.json: malformed optional parts were dropped',
+        group.message,
       );
     }
     logger.info(

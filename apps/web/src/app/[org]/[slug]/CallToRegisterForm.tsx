@@ -270,11 +270,12 @@ export function CallToRegisterForm(props: Readonly<CallToRegisterFormProps>): JS
                 {formatPhoneForReading(props.bot.phone, phoneCountries)}
               </div>
               <p className="mt-1 text-[13px] text-ink-600">
-                {props.bot.description ??
-                  t('talk_to_bot', {
-                    name: props.bot.display_name,
-                    languages: props.bot.languages,
-                  })}
+                {props.bot.description?.trim()
+                  ? props.bot.description
+                  : t('talk_to_bot', {
+                      name: props.bot.display_name,
+                      languages: props.bot.languages,
+                    })}
               </p>
             </div>
 

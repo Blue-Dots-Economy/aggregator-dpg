@@ -151,7 +151,7 @@ function keepBotsInNetwork(
     const missing = bot.domains.find((id) => !domainIds.has(id));
     if (missing === undefined) return true;
     warnings.push({
-      path: 'aggregator.voice_bots',
+      path: `aggregator.voice_bots.${bot.key}`, // by key: earlier drops shift the YAML index
       code: 'VOICE_BOT_DROPPED',
       reason: `bot '${bot.key}' serves domain '${missing}', which the network does not define`,
     });
