@@ -6,9 +6,10 @@
  * between RJSF's validity, the disabled Submit button and the deferred error
  * display, which a shim would hide. Covers:
  *  - Submit is never disabled by an invalid field; clicking it shows the
- *    field's error inline and names it in the banner.
- *  - The message is readable ("Please enter a valid web address."), never a regex.
- *  - A field the server rejects (`error.fields.field_errors`) is marked inline.
+ *    field's error under the field, with no banner or summary.
+ *  - The message is readable ("Invalid entry. Please enter a valid web address."), never a regex.
+ *  - A field the server rejects (`error.fields.field_errors`) is marked inline, with no banner.
+ *  - A non-field failure shows one readable banner and keeps the input.
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -35,7 +36,6 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 import {
   PublicRegistrationView,
   readableFormErrors,
-  toErrorSchema,
 } from '@/app/[org]/[slug]/PublicRegistrationView';
 
 /** The schema as the API serves it: link fields already carry the URL rule. */
@@ -92,14 +92,44 @@ describe('<PublicRegistrationView /> field errors (#903)', () => {
     expect(submitButton()).toBeEnabled();
     fireEvent.click(submitButton());
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Website: Please enter a valid web address.');
-    // Inline, under the field itself — not only in the banner. (The top error
-    // list is hidden by globals.css, which jsdom does not apply.)
-    expect(document.getElementById('root_website__error')).toHaveTextContent(
-      'Please enter a valid web address.',
+    await waitFor(() =>
+      expect(document.getElementById('root_website__error')).toHaveTextContent(
+        'Invalid entry. Please enter a valid Website.',
+      ),
     );
+    expect(screen.getByLabelText(/Website/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(document.body.textContent).not.toContain('must match pattern');
+  });
+
+  it('says a missing required field is required, under the field, after Submit', async () => {
+    renderView();
+    fireEvent.click(submitButton());
+    await waitFor(() =>
+      expect(document.getElementById('root_name__error')).toHaveTextContent('Name is required.'),
+    );
+  });
+
+  it('shows one readable banner for a non-field failure and keeps the input', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.includes('/lookup')
+          ? new Response('{}', { status: 200 })
+          : new Response(JSON.stringify({ error: { code: 'INTERNAL', detail: 'stack trace' } }), {
+              status: 500,
+              headers: { 'content-type': 'application/json' },
+            }),
+      ),
+    );
+    renderView();
+    fill(/Name/, 'Asha');
+    fill(/Mobile/, '9876543210');
+    fireEvent.click(submitButton());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Something went wrong on our side.');
+    expect(alert).not.toHaveTextContent(/stack trace|INTERNAL|500/);
+    expect(screen.getByLabelText(/Name/)).toHaveValue('Asha');
   });
 
   it('marks the field the server rejected', async () => {
@@ -128,12 +158,49 @@ describe('<PublicRegistrationView /> field errors (#903)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     await waitFor(() =>
       expect(document.getElementById('root_website__error')).toHaveTextContent(
-        'Please enter a valid web address.',
+        'Invalid entry. Please enter a valid web address.',
       ),
     );
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Website: Please enter a valid web address.',
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('<PublicRegistrationView /> INVALID_PHONE', () => {
+  it('adds the phone message to the other field errors and clears only the edited one', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'INVALID_PHONE',
+              fields: { field_errors: { website: 'Please enter a valid web address.' } },
+            },
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
     );
+    vi.stubGlobal('fetch', fetchMock);
+    renderView();
+    fill(/Name/, 'Asha');
+    fill(/Mobile/, '9876543210');
+    fill(/Website/, 'www.example.org');
+    fireEvent.click(submitButton());
+
+    await waitFor(() =>
+      expect(document.getElementById('root_phone__error')).toHaveTextContent(
+        'Please enter a valid phone number.',
+      ),
+    );
+    expect(document.getElementById('root_website__error')).toHaveTextContent(
+      'Please enter a valid web address.',
+    );
+
+    fill(/Website/, 'https://example.org');
+    await waitFor(() => expect(document.getElementById('root_website__error')).toBeNull());
+    expect(document.getElementById('root_phone__error')).toHaveTextContent(
+      'Please enter a valid phone number.',
+    );
+    expect(screen.getByLabelText(/Mobile/)).toHaveValue('9876543210');
   });
 });
 
@@ -161,35 +228,5 @@ describe('readableFormErrors', () => {
       SCHEMA,
     );
     expect(e).toMatchObject({ message: 'must be string', stack: 'Name: must be string.' });
-  });
-});
-
-describe('toErrorSchema', () => {
-  it('nests dotted paths and collects messages per field', () => {
-    expect(toErrorSchema({ website: 'bad', 'address.city': 'is required' })).toEqual({
-      website: { __errors: ['bad'] },
-      address: { city: { __errors: ['is required'] } },
-    });
-  });
-
-  it('never writes through __proto__, and keeps fields named like Object members', () => {
-    const fromServer = JSON.parse(
-      '{"__proto__.polluted":"x","constructor.prototype":"y","toString":"z"}',
-    ) as Record<string, unknown>;
-    const schema = toErrorSchema(fromServer)!;
-    expect('polluted' in schema).toBe(false);
-    expect(Object.getPrototypeOf(schema)).toBe(Object.prototype);
-    expect(schema).toEqual({
-      constructor: { prototype: { __errors: ['y'] } },
-      toString: { __errors: ['z'] },
-    });
-    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
-    expect(({} as Record<string, unknown>)['__errors']).toBeUndefined();
-  });
-
-  it('returns undefined when there is nothing usable to mark', () => {
-    expect(toErrorSchema(undefined)).toBeUndefined();
-    expect(toErrorSchema(['x'])).toBeUndefined();
-    expect(toErrorSchema({ website: 42 })).toBeUndefined();
   });
 });

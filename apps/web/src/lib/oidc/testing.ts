@@ -1,8 +1,7 @@
 /**
  * In-memory OIDC adapter fake for tests.
  *
- * Skips real network calls and returns canned token sets so route handlers
- * and integration tests can exercise the BFF without booting Keycloak.
+ * Returns seeded token sets with no network calls, so tests run without Keycloak.
  */
 
 import {
@@ -16,9 +15,8 @@ import {
 } from './interface';
 
 /**
- * Origin the fake mints its authorization/logout URLs under. Nothing is
- * dialled — `kc.fake` does not resolve — but the scheme stays `https` so the
- * repo contains no cleartext URL literals.
+ * Origin for the fake's authorization and logout URLs. Never called; `https`
+ * avoids cleartext URL literals.
  */
 const FAKE_ISSUER = 'https://kc.fake';
 
@@ -32,6 +30,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   private exchanges = new Map<string, SeededExchange>();
   private refreshResponses = new Map<string, OidcResult<TokenSet>>();
   private failNextExchange: { code: string; message: string } | null = null;
+  private logoutTokens = new Map<string, string>();
 
   /** Seeds a code-to-token mapping that the next `exchangeCode()` will return. */
   seedExchange(entry: SeededExchange): void {
@@ -41,6 +40,11 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
   /** Seeds a refresh-token-to-token mapping. */
   seedRefresh(refreshToken: string, response: OidcResult<TokenSet>): void {
     this.refreshResponses.set(refreshToken, response);
+  }
+
+  /** Seeds a logout token that `verifyLogoutToken()` accepts, naming `sid`. */
+  seedLogoutToken(logoutToken: string, sid: string): void {
+    this.logoutTokens.set(logoutToken, sid);
   }
 
   /** Forces the next exchangeCode call to fail. */
@@ -55,6 +59,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
     url.searchParams.set('code_challenge', input.codeChallenge);
     url.searchParams.set('redirect_uri', input.redirectUri);
     url.searchParams.set('scope', input.scope ?? 'openid profile email');
+    if (input.loginHint) url.searchParams.set('login_hint', input.loginHint);
     return url.toString();
   }
 
@@ -96,6 +101,14 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
     else url.searchParams.set('client_id', 'fake-client');
     url.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
     return url.toString();
+  }
+
+  async verifyLogoutToken(logoutToken: string): Promise<OidcResult<{ sid: string }>> {
+    const sid = this.logoutTokens.get(logoutToken);
+    if (!sid) {
+      return { ok: false, error: { code: 'LOGOUT_TOKEN_INVALID', message: 'not a seeded token' } };
+    }
+    return { ok: true, value: { sid } };
   }
 }
 

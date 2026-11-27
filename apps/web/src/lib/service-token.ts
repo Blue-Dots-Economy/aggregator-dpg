@@ -1,17 +1,22 @@
 /**
  * Keycloak service-account token client.
  *
- * Some BFF routes proxy upstream calls on behalf of an anonymous browser
- * (e.g. POST /api/aggregator/register). The aggregator API requires a
- * Bearer token on every endpoint, so the BFF authenticates to Keycloak
- * with the `aggregator-bff` confidential client (client_credentials grant)
- * and attaches the resulting service-account access token to those calls.
+ * Used only by anonymous, pre-session BFF routes (e.g. registration). Gets a
+ * `client_credentials` token for the `aggregator-bff` client. Never use it for
+ * routes that act for a signed-in user; use `callApi` there.
  *
- * Tokens are cached in-process until ~30s before expiry to avoid one
- * round-trip per upstream call.
+ * Tokens are cached in-process until 30s before expiry.
  */
 
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { z } from 'zod';
+
+/** The Keycloak token response fields this client uses. */
+const TokenResponseSchema = z.object({
+  access_token: z.string().min(1),
+  /** Lifetime in seconds. */
+  expires_in: z.number().positive(),
+});
 
 interface CachedToken {
   accessToken: string;
@@ -38,8 +43,11 @@ function readConfig(): ServiceTokenConfig {
 }
 
 /**
- * Returns a fresh service-account access token, fetching one if the cached
- * value is missing or near expiry.
+ * Returns a service-account access token, fetching a new one when the cached
+ * token is missing or near expiry.
+ *
+ * @returns The access token.
+ * @throws {Error} If config is missing, Keycloak returns an error, or the response has the wrong shape.
  */
 export async function getServiceAccessToken(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt - REFRESH_LEAD_MS) {
@@ -61,7 +69,10 @@ export async function getServiceAccessToken(): Promise<string> {
     const text = await res.text().catch(() => '');
     throw new Error(`service-token HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
-  const body = (await res.json()) as { access_token: string; expires_in: number };
+  const parsed = TokenResponseSchema.safeParse(await res.json());
+  // The message names no values: the body holds the token.
+  if (!parsed.success) throw new Error('service-token response has an unexpected shape');
+  const body = parsed.data;
   cached = {
     accessToken: body.access_token,
     expiresAt: Date.now() + body.expires_in * 1000,

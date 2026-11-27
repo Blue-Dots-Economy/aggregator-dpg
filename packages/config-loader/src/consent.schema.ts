@@ -2,8 +2,8 @@
  * Zod schema and parser for the per-audience versioned consent configuration.
  *
  * Defines the shape of `consent.json` files used by the aggregator registration
- * flows. Each audience (org, aggregator) carries versioned terms and privacy
- * documents, enabling in-place version upgrades without code changes.
+ * flows. Each audience (org, aggregator) has versioned terms and privacy
+ * documents, so a new version needs no code change.
  *
  * Import via `@aggregator-dpg/config-loader/consent`.
  *
@@ -16,9 +16,7 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 /**
  * Schema for a single version of a consent document.
  *
- * Captures the document text, its semantic version, and the date it takes
- * effect so the UI can present the right version and detect when users need
- * to re-consent after a document update.
+ * Holds the document text, its version, and the date it takes effect.
  */
 export const DocVersionSchema = z.object({
   /** Monotonically increasing integer version number (≥ 1). */
@@ -50,21 +48,19 @@ export const DocSchema = z
   .superRefine((doc, ctx) => {
     const nums = doc.versions.map((v) => v.version);
 
-    // current_version must appear in versions
     if (!nums.includes(doc.current_version)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message: `current_version ${doc.current_version} is not present in versions [${nums.join(', ')}]`,
         path: ['current_version'],
       });
     }
 
-    // version integers must be unique
     const seen = new Set<number>();
     for (const num of nums) {
       if (seen.has(num)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           message: `Duplicate version number ${num} in versions array`,
           path: ['versions'],
         });
@@ -87,9 +83,7 @@ export const AudienceSchema = z.object({
     /** Privacy Policy document. */
     privacy: DocSchema,
     /**
-     * Operator attestation shown before a bulk upload — "I have permission
-     * from the individuals in this file" (#522 Task 1). Optional so the
-     * existing consent.json files stay valid until they add it; only the
+     * Operator attestation shown before a bulk upload. Optional. Only the
      * `aggregator` audience uses it.
      */
     bulk_upload_attestation: DocSchema.optional(),
@@ -120,8 +114,7 @@ export type AggregatorConsentConfig = z.infer<typeof AggregatorConsentConfigSche
 /**
  * Parses and validates raw JSON data against the AggregatorConsentConfigSchema.
  *
- * Intended for use at application startup — throws rather than returning a
- * Result so that misconfigured deployments fail fast and loudly.
+ * Call at startup. Throws instead of returning a Result so a bad config stops boot.
  *
  * @param raw - The parsed JSON value to validate.
  * @returns The validated AggregatorConsentConfig.

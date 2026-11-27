@@ -38,6 +38,13 @@ DST_DIR="/opt/keycloak/data/import"
 : "${SIGNALS_API_SECRET:=signals-api-local-dev-secret}"
 : "${SIGNALSTACK_CLIENT_SECRET:=aggregator-dpg-signals-local-dev-secret}"
 : "${VOICE_DPG_SIGNALS_SECRET:=voice-dpg-signals-local-dev-secret}"
+# Back-channel logout URLs: Keycloak calls these server to server when a
+# session ends, so they must be reachable from the Keycloak container, not the
+# browser. Soft-defaulted to the compose service names: the portal's in
+# docker-compose.yml and signals-api's in local-setup (the only compose that
+# runs it). local-setup overrides the portal URL with its own service name.
+: "${PORTAL_BACKCHANNEL_LOGOUT_URL:=http://web:3000/api/auth/backchannel-logout}"
+: "${SIGNALS_BACKCHANNEL_LOGOUT_URL:=http://signals-api:2742/api/v1/auth/session/backchannel-logout}"
 # campaign-manager client secret (#692). Soft-defaulted for the same reason as
 # the Signals-side group above: nothing in the default aggregator-only compose
 # authenticates through this client — it's for the external campaign-manager
@@ -84,6 +91,8 @@ SIGNALS_API_SECRET_ESC=$(escape "$SIGNALS_API_SECRET")
 SIGNALSTACK_CLIENT_SECRET_ESC=$(escape "$SIGNALSTACK_CLIENT_SECRET")
 VOICE_DPG_SIGNALS_SECRET_ESC=$(escape "$VOICE_DPG_SIGNALS_SECRET")
 CAMPAIGN_MANAGER_SECRET_ESC=$(escape "$CAMPAIGN_MANAGER_SECRET")
+PORTAL_BACKCHANNEL_LOGOUT_URL_ESC=$(escape "$PORTAL_BACKCHANNEL_LOGOUT_URL")
+SIGNALS_BACKCHANNEL_LOGOUT_URL_ESC=$(escape "$SIGNALS_BACKCHANNEL_LOGOUT_URL")
 
 for src in "$SRC_DIR"/*.json; do
   [ -f "$src" ] || continue
@@ -108,6 +117,8 @@ for src in "$SRC_DIR"/*.json; do
     -e "s|__SIGNALSTACK_CLIENT_SECRET__|${SIGNALSTACK_CLIENT_SECRET_ESC}|g" \
     -e "s|__VOICE_DPG_SIGNALS_SECRET__|${VOICE_DPG_SIGNALS_SECRET_ESC}|g" \
     -e "s|__CAMPAIGN_MANAGER_SECRET__|${CAMPAIGN_MANAGER_SECRET_ESC}|g" \
+    -e "s|__PORTAL_BACKCHANNEL_LOGOUT_URL__|${PORTAL_BACKCHANNEL_LOGOUT_URL_ESC}|g" \
+    -e "s|__SIGNALS_BACKCHANNEL_LOGOUT_URL__|${SIGNALS_BACKCHANNEL_LOGOUT_URL_ESC}|g" \
     "$src" > "$dst"
   echo "rendered $(basename "$src") -> $dst (PUBLIC_BASE_URL=$PUBLIC_BASE_URL, SMTP=$SMTP_HOST:$SMTP_PORT auth=$SMTP_AUTH)"
 done

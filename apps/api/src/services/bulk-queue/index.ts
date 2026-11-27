@@ -15,6 +15,7 @@ import {
 import type { Redis } from 'ioredis';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let connection: Redis | null = null;
 let fileProcessQueue: Queue<BulkFileProcessJob> | null = null;
@@ -41,8 +42,9 @@ function getFileProcessQueue(): Queue<BulkFileProcessJob> {
 }
 
 /**
- * Enqueues a `bulk-file-process` job. Idempotent via `jobId = uploadId` —
- * a duplicate enqueue for the same upload is silently no-op.
+ * Enqueues a `bulk-file-process` job.
+ *
+ * Idempotent: `jobId = uploadId`, so a second enqueue for the same upload does nothing.
  */
 export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promise<void> {
   const start = Date.now();
@@ -60,7 +62,7 @@ export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promi
     logger.error({
       operation: 'bulkQueue.enqueueBulkFileProcess',
       status: 'failure',
-      error: (err as Error).message,
+      error: errorMessage(err),
       latency_ms: Date.now() - start,
       upload_id: payload.uploadId,
     });
@@ -70,7 +72,7 @@ export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promi
 
 /**
  * Closes the BullMQ enqueue queue and its Redis connection. Idempotent; call
- * from process shutdown so the queue + connection are not leaked on SIGTERM.
+ * on process shutdown.
  */
 export async function closeBulkQueue(): Promise<void> {
   await fileProcessQueue?.close();

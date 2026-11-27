@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
@@ -94,10 +95,30 @@ function stubScrollerToMaxAndScroll() {
 }
 
 function renderForm() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    accepting: true,
+    parents: [
+      {
+        id: 'p-root',
+        name: 'Blue Dots',
+        is_root: true,
+        known_as_name: null,
+        child_known_as_name: 'Aggregator',
+      },
+    ],
+  });
   return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={client}>
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <OrgRegisterForm
+          schema={orgSchema}
+          uiSchema={{}}
+          consentContent={consentContentFixture}
+          invite={{ token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' }}
+        />
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -107,8 +128,8 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       calls.push({ url: String(input), body: init?.body ?? '' });
-      return new Response(JSON.stringify({ slug: 'enable-india-ab12' }), {
-        status: 200,
+      return new Response(JSON.stringify({ status: 'pending', login_hint: 'ravi@enable.org' }), {
+        status: 201,
         headers: { 'content-type': 'application/json' },
       });
     }) as unknown as typeof fetch;
@@ -136,7 +157,8 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
       const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
       expect(body['display_name']).toBe('Enable India');
       expect(body['consent']).toMatchObject({ value: true });
-      expect(await screen.findByText('enable-india-ab12')).toBeInTheDocument();
+      expect(calls[0]!.url).toBe('/api/invite/org/accept');
+      expect(body['invite']).toBe('tok-1');
     } finally {
       globalThis.fetch = originalFetch;
       calls = [];

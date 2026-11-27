@@ -1,0 +1,237 @@
+/**
+ * Unit tests for the console sidebar: the links each actor gets, which link is
+ * active, and the account card, in the shell shared with the coordinator
+ * portal. Hooks the shared shell reads are mocked, as in `Sidebar.test.tsx`.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render as rtlRender, screen, within, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
+import { makeQueryClient } from '@/__tests__/test-utils';
+
+/** Renders inside a query client, which the shell's support dialog reads through. */
+function render(ui: ReactElement) {
+  const client = makeQueryClient();
+  return rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
+const { useAuth, useThemeMode, useAggregatorConfig, usePathname } = vi.hoisted(() => ({
+  useAuth: vi.fn(),
+  useThemeMode: vi.fn(),
+  useAggregatorConfig: vi.fn(),
+  usePathname: vi.fn(),
+}));
+
+vi.mock('@/lib/auth-context', () => ({ useAuth, useCan: () => () => true }));
+vi.mock('@/lib/theme-mode', () => ({ useThemeMode }));
+vi.mock('@/hooks/useAggregatorConfig', () => ({
+  useAggregatorConfig,
+  DEFAULT_AGGREGATOR_CONFIG: {
+    aggregator: { name: 'Aggregator' },
+    brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', url_slug: 'dashboard' },
+    network: { id: 'blue_dot' },
+    domains: [],
+  },
+}));
+vi.mock('@/hooks/useDashboard', () => ({ useDashboard: () => ({ data: undefined }) }));
+vi.mock('@/hooks/useProfile', () => ({ useProfileRaw: () => ({ data: undefined }) }));
+vi.mock('next/navigation', () => ({ usePathname }));
+vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
+
+import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
+
+const account = { title: 'Asha Rao', subtitle: 'nav.network_admin' };
+
+/** The desktop sidebar (the mobile drawer is closed). */
+const aside = () => screen.getByRole('complementary');
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  usePathname.mockReturnValue('/console');
+  useAuth.mockReturnValue({ signOut: vi.fn(), supportEnabled: false });
+  useThemeMode.mockReturnValue({ mode: 'light' });
+  useAggregatorConfig.mockReturnValue({ data: undefined });
+});
+
+describe('<ConsoleSidebar />', () => {
+  const links = () =>
+    within(aside())
+      .getAllByRole('link')
+      .map((a) => [a.textContent, a.getAttribute('href')]);
+
+  it('gives an owner Dashboard, My Team under My Blue Dots, Onboarded Organisations and Profile', () => {
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    expect(links()).toEqual([
+      ['nav.dashboard', '/console/dashboard'],
+      ['nav.my_team', '/console'],
+      ['nav.organisations', '/console/orgs'],
+      ['nav.profile', '/console/profile'],
+    ]);
+    expect(within(aside()).getByText('nav.my_blue_dots')).toBeInTheDocument();
+    expect(within(aside()).getByText('Blue Dots')).toBeInTheDocument();
+    expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
+  });
+
+  it('folds My Blue Dots away and opens it again from its heading', () => {
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    const group = within(aside()).getByRole('button', { name: 'nav.my_blue_dots' });
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(within(aside()).queryByText('overview')).toBeNull();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(within(aside()).queryByRole('link', { name: 'nav.my_team' })).toBeNull();
+    fireEvent.click(group);
+    expect(within(aside()).getByRole('link', { name: 'nav.my_team' })).toBeInTheDocument();
+  });
+
+  it('gives the network admin no My Team and no Profile, and never roles and permissions', () => {
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
+    expect(links()).toEqual([
+      ['nav.dashboard', '/console/dashboard'],
+      ['nav.organisations', '/console/orgs'],
+    ]);
+    expect(within(aside()).queryByText('nav.my_blue_dots')).toBeNull();
+    expect(within(aside()).queryByText('nav.access')).toBeNull();
+    expect(within(aside()).queryByText('overview')).toBeNull();
+  });
+
+  it('marks My Team active only on /console itself when it is the home page', () => {
+    usePathname.mockReturnValue('/console/orgs');
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    const team = within(aside()).getByRole('link', { name: 'nav.my_team' });
+    const orgs = within(aside()).getByRole('link', { name: 'nav.organisations' });
+    expect(team.className).not.toContain('nav-active');
+    expect(orgs.className).toContain('nav-active');
+  });
+
+  it('shows the account card with the role, and sign-out, but no contact support', () => {
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
+    expect(within(aside()).getByText('Asha Rao')).toBeInTheDocument();
+    expect(within(aside()).getByText('AR')).toBeInTheDocument();
+    expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
+    expect(within(aside()).getByRole('button', { name: 'sign_out' })).toBeInTheDocument();
+    expect(within(aside()).queryByText('contact_support')).toBeNull();
+  });
+
+  it('has no account-details pop-up, and the card is plain text, without `details`', () => {
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
+    expect(within(aside()).queryByRole('button', { name: /Asha Rao/ })).toBeNull();
+  });
+
+  it('opens the account-details pop-up on click, independently of sign-out, and replaces the old My account page', () => {
+    const signOut = vi.fn();
+    useAuth.mockReturnValue({ signOut, supportEnabled: false });
+    const withDetails = {
+      ...account,
+      details: [{ label: 'Email', value: 'asha@example.org' }],
+    };
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={withDetails} />);
+    const toggle = within(aside()).getByRole('button', { name: /Asha Rao/ });
+
+    expect(screen.queryByText('asha@example.org')).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByText('Email')).toBeInTheDocument();
+    expect(screen.getByText('asha@example.org')).toBeInTheDocument();
+
+    fireEvent.click(within(aside()).getByRole('button', { name: 'sign_out' }));
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(screen.getByText('asha@example.org')).toBeInTheDocument(); // sign-out didn't close it
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText('asha@example.org')).toBeNull();
+  });
+
+  it('never offers Invite from the sidebar: it lives on the team and organisation pages', () => {
+    render(<ConsoleSidebar teamHref="/console/coordinators" showProfile account={account} />);
+    const hrefs = within(aside())
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/console/coordinators');
+    expect(hrefs).not.toContain('/console/invite');
+    expect(hrefs).not.toContain('/console/orgs/invite');
+  });
+
+  describe('Onboard participants', () => {
+    const ACCOUNT = '00000000-0000-4000-8000-0000000000c3';
+    const original = global.fetch;
+    const assign = vi.fn();
+    beforeEach(() => {
+      vi.stubGlobal('location', { ...window.location, assign });
+    });
+    afterEach(() => {
+      global.fetch = original;
+      vi.unstubAllGlobals();
+    });
+
+    const item = () => within(aside()).queryByRole('button', { name: 'nav.onboard_participants' });
+
+    it("is not offered without the owner's own coordinator account", () => {
+      render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+      expect(item()).toBeNull();
+      expect(within(aside()).queryByText('nav.my_onboarding')).toBeNull();
+    });
+
+    it('sits under My onboarding when the owner has a coordinator account', () => {
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      expect(item()).toBeInTheDocument();
+      expect(within(aside()).getByText('nav.my_onboarding')).toBeInTheDocument();
+    });
+
+    it('starts acting as the account and opens its onboarding', async () => {
+      const fetchSpy = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ redirect: '/onboarding' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      global.fetch = fetchSpy;
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      fireEvent.click(item()!);
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/onboarding'));
+      const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('/api/auth/acting');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(String(init.body))).toEqual({ accountId: ACCOUNT });
+    });
+
+    it('says the access is still being set up on ACTING_NOT_READY', async () => {
+      global.fetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { code: 'ACTING_NOT_READY', title: 'x' } }), {
+            status: 409,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      render(
+        <ConsoleSidebar
+          teamHref="/console"
+          showProfile
+          account={account}
+          ownCoordinatorAccountId={ACCOUNT}
+        />,
+      );
+      fireEvent.click(item()!);
+      expect(await within(aside()).findByText('nav.acting_not_ready')).toBeInTheDocument();
+      expect(assign).not.toHaveBeenCalled();
+    });
+  });
+});

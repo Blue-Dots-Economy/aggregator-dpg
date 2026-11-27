@@ -1,17 +1,10 @@
 /**
- * Assembles the audience groups `/legal` needs for its contents rail: the
- * aggregator's own operator policy, and the organisation one.
+ * Builds the aggregator and organisation document groups for the `/legal` page.
  *
- * **No participant group.** A participant never registers through this portal
- * — they register through a public QR form, which shows them their own
- * documents inline in its consent gate, and their standing copy lives in the
- * Signals portal. Publishing the participant documents here as well meant a
- * page that mixed two unrelated audiences, and (once `/legal` became the one
- * page) that the FIRST group a reader met was for people who never visit.
+ * Participant documents are not shown here; participants see them in the
+ * public registration form and in the Signals portal.
  *
- * The two remaining audiences load from one config call, and a failure returns
- * an empty list rather than throwing: a config problem must render a message,
- * not a stack trace.
+ * Both groups load from one config call. A failure returns an empty list.
  *
  * @module apps/web/src/components/legal/load-legal-groups.server
  */
@@ -31,8 +24,9 @@ interface AudienceDoc {
 /**
  * Picks the current-version entry of an aggregator/org consent document.
  *
- * @throws if `current_version` has no matching entry — the caller catches
- *   this alongside every other `loadConsentConfig` failure.
+ * @param doc - The versioned document.
+ * @returns The current version's content.
+ * @throws {Error} If `current_version` has no matching entry.
  */
 function pickCurrent(doc: AudienceDoc): ConsentDocContent['terms'] {
   const found = doc.versions.find((v) => v.version === doc.current_version);
@@ -46,11 +40,10 @@ function pickCurrent(doc: AudienceDoc): ConsentDocContent['terms'] {
 }
 
 /**
- * Loads the aggregator + org audience groups from the aggregator's own
- * `consent.json` (a single config file covers both audiences). Returns an
- * empty list — rather than throwing — when the network/brand config is
- * missing or invalid, so a config problem on this side never removes the
- * participant group.
+ * Loads the aggregator and org groups from the aggregator's `consent.json`.
+ *
+ * @param labels - Display labels for the two groups.
+ * @returns Both groups, or an empty list when the config is missing or invalid.
  */
 async function loadAggregatorOrgGroups(labels: {
   aggregator: string;
@@ -92,11 +85,9 @@ async function loadAggregatorOrgGroups(labels: {
 }
 
 /**
- * Loads the operator audiences' consent content for `/legal`, in aggregator →
- * org order.
+ * Loads the aggregator and org consent documents for `/legal`, in that order.
  *
- * @returns Both audiences, or an empty list when the config failed to load
- *   (the view then renders a `role="status"` message instead of a blank page).
+ * @returns Both groups, or an empty list when the config failed to load.
  */
 export async function loadLegalGroups(): Promise<LegalGroup[]> {
   const t = await getTranslations('legal');

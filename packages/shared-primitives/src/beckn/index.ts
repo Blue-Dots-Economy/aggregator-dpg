@@ -8,12 +8,9 @@
  *   - Address   — https://schema.beckn.io/Address/v2.0/attributes.yaml
  *   - GeoJSON   — https://schema.beckn.io/GeoJSONGeometry/v2.0/attributes.yaml
  *
- * The upstream Beckn schemas leave most fields optional. This module narrows
- * `phone` + `email` on Contact to required at the aggregator API layer
- * (matching the DB CHECK constraint `aggregators_contact_shape_chk` in
- * migration 0005) and enforces per-element GeoJSON `type` validity for
- * locations — the latter cannot be a DB CHECK because Postgres forbids
- * subqueries inside CHECK expressions.
+ * Beckn leaves most fields optional. Here `phone` and `email` on Contact are
+ * required. Each location's GeoJSON `type` is validated here because Postgres
+ * cannot check it.
  *
  * @module @aggregator-dpg/shared-primitives/beckn
  */
@@ -23,25 +20,28 @@ import { z } from 'zod';
 // ─── Phone normalisation ────────────────────────────────────────────────────
 
 /**
- * Loose E.164-ish accept pattern. Mirrors the existing
- * `registration.v1.json` regex so the API layer and the JSON Schema validator
- * agree on what reaches the database. Strict E.164 normalisation
- * (`+91XXXXXXXXXX`) happens downstream in `services/phone.ts`.
+ * What a typed phone may contain: an optional leading `+`, digits, spaces,
+ * dashes, dots and brackets. The country rules are checked later by `parsePhone`.
  */
-const PHONE_REGEX = /^(\+?\d{10,15}|\d{10})$/;
+const PHONE_INPUT_REGEX = /^\+?[\d\s\-().]+$/;
+
+/** Longest typed phone accepted: 15 digits plus room for spacing and punctuation. */
+const PHONE_INPUT_MAX_LENGTH = 32;
+
+/** An alternate phone is stored as sent, so it keeps the plain digits pattern. */
+const ALTERNATE_PHONE_REGEX = /^(\+?\d{10,15}|\d{10})$/;
 
 // ─── Beckn Contact ──────────────────────────────────────────────────────────
 
 export const BecknContactSchema = z
   .object({
     name: z.string().min(1).max(200),
-    phone: z.string().regex(PHONE_REGEX, 'phone must be 10-15 digits (E.164-ish)'),
-    email: z
+    phone: z
       .string()
-      .email()
-      .max(320)
-      .transform((v) => v.toLowerCase()),
-    alternatePhone: z.string().regex(PHONE_REGEX).optional(),
+      .max(PHONE_INPUT_MAX_LENGTH)
+      .regex(PHONE_INPUT_REGEX, 'phone may contain only digits, +, spaces, dashes and brackets'),
+    email: z.email().max(320).toLowerCase(),
+    alternatePhone: z.string().regex(ALTERNATE_PHONE_REGEX).optional(),
     company: z.string().max(200).optional(),
     gstNumber: z.string().max(32).optional(),
   })

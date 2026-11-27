@@ -36,10 +36,10 @@ describe('useProfile hooks', () => {
   });
 
   it('useProfileRaw resolves with the raw API shape', async () => {
-    svc.getRaw!.mockResolvedValue({ aggregator_id: 'agg-1' });
+    svc.getRaw!.mockResolvedValue({ user_id: 'agg-1' });
     const { wrapper } = makeWrapper();
     const { result } = renderHook(() => useProfileRaw(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual({ aggregator_id: 'agg-1' });
+    expect(result.current.data).toEqual({ user_id: 'agg-1' });
   });
 });

@@ -1,16 +1,15 @@
 /**
  * Keycloak adapter for the IdP admin port.
  *
- * Talks to Keycloak's admin REST API (`/admin/realms/{realm}/...`) using a
- * confidential service-account client (`aggregator-api`) granted only the
- * `realm-management:manage-users` role. Tokens are fetched via the
- * client_credentials grant and cached until ~30s before expiry.
+ * Part of `@aggregator-dpg/api`. Calls Keycloak's admin REST API
+ * (`/admin/realms/{realm}/...`) with a confidential service-account client
+ * (`aggregator-api`) that has only `realm-management:manage-users`. Tokens come
+ * from the client_credentials grant and are cached until ~30s before expiry.
  *
- * Maintained as a thin layer — every method maps to one or two REST calls;
- * no SDK in the dependency graph (DPG-friendly: replace by writing a new
- * adapter, no SDK lock-in).
+ * Each method maps to one or two REST calls; no SDK is used.
  */
 
+import { z } from 'zod';
 import {
   IdpAdminAdapter,
   type CreateUserInput,
@@ -36,6 +35,9 @@ interface CachedToken {
   expiresAt: number;
 }
 
+/** Keycloak's error for a first or last name with a character its validator refuses. */
+const KC_INVALID_NAME_ERROR = 'error-person-name-invalid-character';
+
 export class KeycloakIdpAdmin extends IdpAdminAdapter {
   private cachedToken: CachedToken | null = null;
   private readonly fetchImpl: typeof fetch;
@@ -53,7 +55,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const payload = {
       username: input.username ?? input.email,
       email: input.email,
-      emailVerified: true,
+      emailVerified: input.emailVerified ?? true,
       enabled: input.enabled ?? true,
       ...(input.firstName ? { firstName: input.firstName } : {}),
       ...(input.lastName ? { lastName: input.lastName } : {}),
@@ -79,6 +81,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     }
     if (res.value.status !== 201) {
       const text = await res.value.text().catch(() => '');
+      // Keycloak's person-name validator refuses symbols such as ( ) < > & /.
+      if (res.value.status === 400 && text.includes(KC_INVALID_NAME_ERROR)) {
+        return {
+          ok: false,
+          error: { code: 'INVALID_NAME', message: 'name has a refused character' },
+        };
+      }
       return {
         ok: false,
         error: {
@@ -88,8 +97,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
 
-    // Keycloak returns the new user's URL in the Location header. Re-fetch
-    // to get the full representation.
+    // Keycloak returns the new user's URL in Location; re-fetch the full record.
     const location = res.value.headers.get('location');
     const userId = location?.split('/').pop();
     if (!userId) {
@@ -124,8 +132,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const list = (await res.value.json()) as KcUserPayload[];
-    const u = list[0];
+    const list = await readJson(res.value, z.array(KcUserSchema), 'findByEmail');
+    if (!list.ok) return list;
+    const u = list.value[0];
     if (!u) return { ok: true, value: null };
     return { ok: true, value: toIdpUser(u, { fallbackEmail: email }) };
   }
@@ -146,8 +155,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findById HTTP ${res.value.status}` },
       };
     }
-    const u = (await res.value.json()) as KcUserPayload;
-    return { ok: true, value: toIdpUser(u) };
+    const u = await readJson(res.value, KcUserSchema, 'findById');
+    if (!u.ok) return u;
+    return { ok: true, value: toIdpUser(u.value) };
   }
 
   async findByAttribute(name: string, value: string): Promise<IdpResult<IdpUser | null>> {
@@ -170,10 +180,11 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findByAttribute HTTP ${res.value.status}` },
       };
     }
-    const list = (await res.value.json()) as KcUserPayload[];
-    // Defensive filter — Keycloak's q param matches partial values in some
-    // versions, so post-filter for an exact match on the attribute value.
-    const exact = list.find((u) => {
+    // Every entry must parse: a skipped entry could be the match, and "not found" would fail open.
+    const list = await readJson(res.value, z.array(KcUserSchema), 'findByAttribute');
+    if (!list.ok) return list;
+    // Some Keycloak versions match `q` partially; keep exact matches only.
+    const exact = list.value.find((u) => {
       const vals = u.attributes?.[name];
       return Array.isArray(vals) && vals.includes(value);
     });
@@ -223,9 +234,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;
 
-    // Read existing user representation so we can merge — Keycloak's
-    // `PUT /users/{id}` replaces the full `attributes` block, so partial
-    // writes need a read-modify-write cycle.
+    // `PUT /users/{id}` replaces all attributes, so read and merge first.
     const current = await this.readUser(userId, tokenResult.value);
     if (!current.ok) return current;
 
@@ -240,10 +249,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       }
     }
 
-    // Some Keycloak versions interpret an admin PUT that omits top-level
-    // fields (email, username, firstName, lastName) as "clear those
-    // fields". To stay safe across versions, write back the full user
-    // representation we just read, with the merged attributes layered on.
+    // Write back the full user; some Keycloak versions clear omitted top-level fields.
     const u = current.value;
     const fullPayload: Record<string, unknown> = {
       id: u.id,
@@ -252,6 +258,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       enabled: u.enabled,
       attributes: merged,
     };
+    if (u.emailVerified !== undefined) fullPayload.emailVerified = u.emailVerified;
     if (u.firstName !== undefined) fullPayload.firstName = u.firstName;
     if (u.lastName !== undefined) fullPayload.lastName = u.lastName;
 
@@ -284,7 +291,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
 
   async setUserDecision(
     userId: string,
-    decision: 'pending' | 'approved' | 'rejected',
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
   ): Promise<IdpResult<void>> {
     return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }
@@ -332,9 +339,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
 
-    // Keycloak's `POST /groups` ignores the `attributes` field on creation, so
-    // attributes must be persisted with a follow-up `PUT /groups/{id}`. Without
-    // this the group carries no `org_id` / `display_name`.
+    // `POST /groups` ignores `attributes`, so set them with `PUT /groups/{id}`.
     if (Object.keys(kcAttributes).length > 0) {
       const putUrl = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
       const putRes = await this.safeFetch(putUrl, {
@@ -371,11 +376,56 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       headers: { Authorization: `Bearer ${tokenResult.value}` },
     });
     if (!res.ok) return res;
-    // 404 → already gone; treat as success (idempotent).
+    // 404 means already gone; treat as success.
     if (!res.value.ok && res.value.status !== 404) {
       return {
         ok: false,
         error: { code: 'IDP_UNAVAILABLE', message: `deleteGroup HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async findGroupByName(
+    name: string,
+  ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups?search=${encodeURIComponent(name)}&exact=true&briefRepresentation=false`;
+    const res = await this.safeFetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `findGroupByName HTTP ${res.value.status}` },
+      };
+    }
+    // A body that is not JSON or not a list reads as no match.
+    const body: unknown = await res.value.json().catch(() => []);
+    const groups = validEntries(KcGroupSchema).safeParse(body);
+    const match = groups.success ? groups.data.find((g) => g.name === name && g.id) : undefined;
+    return {
+      ok: true,
+      value: match ? { id: match.id, attributes: match.attributes ?? {} } : null,
+    };
+  }
+
+  async removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/groups/${groupId}`;
+    const res = await this.safeFetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    if (!res.value.ok && res.value.status !== 404) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `removeUserFromGroup HTTP ${res.value.status}` },
       };
     }
     return { ok: true, value: undefined };
@@ -407,8 +457,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;
 
-    // Resolve the realm-role representation first — the role-mappings endpoint
-    // requires the full {id,name} object, not just the role name.
+    // The role-mappings endpoint needs the full {id,name} role object.
     const roleRes = await this.safeFetch(
       `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/roles/${encodeURIComponent(role)}`,
       { headers: { Authorization: `Bearer ${tokenResult.value}` } },
@@ -423,7 +472,8 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const roleRep = (await roleRes.value.json()) as { id: string; name: string };
+    const roleRep = await readJson(roleRes.value, KcRoleSchema, 'assignRealmRole');
+    if (!roleRep.ok) return roleRep;
 
     const mapRes = await this.safeFetch(
       `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
@@ -433,7 +483,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
           Authorization: `Bearer ${tokenResult.value}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify([{ id: roleRep.id, name: roleRep.name }]),
+        body: JSON.stringify([{ id: roleRep.value.id, name: roleRep.value.name }]),
       },
     );
     if (!mapRes.ok) return mapRes;
@@ -444,6 +494,95 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       return {
         ok: false,
         error: { code: 'IDP_UNAVAILABLE', message: `assignRealmRole HTTP ${mapRes.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async listRealmRoles(userId: string): Promise<IdpResult<string[]>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const res = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
+      { headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!res.ok) return res;
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: {
+          code: res.value.status === 404 ? 'USER_NOT_FOUND' : 'IDP_UNAVAILABLE',
+          message: `listRealmRoles HTTP ${res.value.status}`,
+        },
+      };
+    }
+    const roles = await readJson(res.value, validEntries(KcRoleNameSchema), 'listRealmRoles');
+    if (!roles.ok) return roles;
+    return { ok: true, value: roles.value.map((r) => r.name) };
+  }
+
+  async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const roleRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/roles/${encodeURIComponent(role)}`,
+      { headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!roleRes.ok) return roleRes;
+    if (!roleRes.value.ok) {
+      return {
+        ok: false,
+        error: {
+          code: roleRes.value.status === 404 ? 'BAD_REQUEST' : 'IDP_UNAVAILABLE',
+          message: `removeRealmRole role lookup HTTP ${roleRes.value.status}`,
+        },
+      };
+    }
+    const roleRep = await readJson(roleRes.value, KcRoleSchema, 'removeRealmRole');
+    if (!roleRep.ok) return roleRep;
+
+    // DELETE on role-mappings is a no-op for a role the user does not hold.
+    const mapRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${tokenResult.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{ id: roleRep.value.id, name: roleRep.value.name }]),
+      },
+    );
+    if (!mapRes.ok) return mapRes;
+    if (mapRes.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!mapRes.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `removeRealmRole HTTP ${mapRes.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async logoutSessions(userId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const res = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/logout`,
+      { method: 'POST', headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!res.ok) return res;
+    if (res.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `logoutSessions HTTP ${res.value.status}` },
       };
     }
     return { ok: true, value: undefined };
@@ -494,8 +633,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `readUser HTTP ${res.value.status}` },
       };
     }
-    const u = (await res.value.json()) as KcUserPayload;
-    return { ok: true, value: toIdpUser(u) };
+    const u = await readJson(res.value, KcUserSchema, 'readUser');
+    if (!u.ok) return u;
+    return { ok: true, value: toIdpUser(u.value) };
   }
 
   private async getToken(): Promise<IdpResult<string>> {
@@ -522,12 +662,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'AUTH_FAILED', message: `token HTTP ${res.value.status}` },
       };
     }
-    const body = (await res.value.json()) as { access_token: string; expires_in: number };
+    const body = await readJson(res.value, KcTokenSchema, 'getToken');
+    if (!body.ok) return { ok: false, error: { code: 'AUTH_FAILED', message: body.error.message } };
     this.cachedToken = {
-      accessToken: body.access_token,
-      expiresAt: Date.now() + body.expires_in * 1000,
+      accessToken: body.value.access_token,
+      expiresAt: Date.now() + body.value.expires_in * 1000,
     };
-    return { ok: true, value: body.access_token };
+    return { ok: true, value: body.value.access_token };
   }
 
   /** Wraps `fetch` with a timeout and converts thrown errors to Result. */
@@ -559,14 +700,79 @@ function buildAttributes(input: CreateUserInput): Record<string, string[]> {
   return attrs;
 }
 
-interface KcUserPayload {
-  id: string;
-  username: string;
-  email?: string;
-  enabled?: boolean;
-  firstName?: string;
-  lastName?: string;
-  attributes?: Record<string, string[]>;
+/** The fields of a Keycloak user representation the adapter reads. */
+const KcUserSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  email: z.string().nullish(),
+  enabled: z.boolean().nullish(),
+  emailVerified: z.boolean().nullish(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  attributes: z.record(z.string(), z.array(z.string())).nullish(),
+});
+type KcUserPayload = z.infer<typeof KcUserSchema>;
+
+/** A realm role, as the role-mappings endpoint needs it. */
+const KcRoleSchema = z.object({ id: z.string(), name: z.string() });
+
+/** An entry of a user's realm role mappings. */
+const KcRoleNameSchema = z.object({ name: z.string() });
+
+/** A group from the group search. Attributes of another shape read as none. */
+const KcGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  attributes: z.record(z.string(), z.array(z.string())).optional().catch({}),
+});
+
+/**
+ * A list whose entries are parsed one by one; an entry of another shape is skipped.
+ *
+ * One malformed entry then does not hide the valid ones.
+ *
+ * @param entry - Schema of one entry.
+ * @returns A schema for the list of valid entries.
+ */
+function validEntries<T>(entry: z.ZodType<T, unknown>) {
+  return z.array(z.unknown()).transform((items) =>
+    items.flatMap((item) => {
+      const parsed = entry.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+}
+
+/** The client_credentials token response. */
+const KcTokenSchema = z.object({ access_token: z.string().min(1), expires_in: z.number() });
+
+/**
+ * Reads a Keycloak response body and checks its shape.
+ *
+ * The error message names the operation only; the body may hold personal data.
+ *
+ * @param res - A 2xx response.
+ * @param schema - The expected shape.
+ * @param op - Operation name for the error message.
+ * @returns The parsed body, or `IDP_UNAVAILABLE` when it is not JSON or not that shape.
+ */
+async function readJson<T>(
+  res: Response,
+  schema: z.ZodType<T, unknown>,
+  op: string,
+): Promise<IdpResult<T>> {
+  const invalid: IdpResult<T> = {
+    ok: false,
+    error: { code: 'IDP_UNAVAILABLE', message: `${op}: unexpected response body` },
+  };
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return invalid;
+  }
+  const parsed = schema.safeParse(body);
+  return parsed.success ? { ok: true, value: parsed.data } : invalid;
 }
 
 function toIdpUser(u: KcUserPayload, opts: { fallbackEmail?: string } = {}): IdpUser {
@@ -575,6 +781,7 @@ function toIdpUser(u: KcUserPayload, opts: { fallbackEmail?: string } = {}): Idp
     email: u.email ?? opts.fallbackEmail ?? '',
     username: u.username,
     enabled: u.enabled ?? false,
+    ...(u.emailVerified == null ? {} : { emailVerified: u.emailVerified }),
     ...(u.firstName ? { firstName: u.firstName } : {}),
     ...(u.lastName ? { lastName: u.lastName } : {}),
     ...(u.attributes ? { attributes: u.attributes } : {}),

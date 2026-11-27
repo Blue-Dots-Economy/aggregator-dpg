@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
-import { AggregatorConfigSchema } from '../interface.js';
+import { AggregatorConfigSchema, DEFAULT_ORGANISATION } from '../interface.js';
 import { URL_PATTERN } from '../uri-fields.js';
 
 const BLUE_DOT_YAML = `
@@ -394,6 +394,80 @@ describe('AggregatorConfigSchema.registration_modes', () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('defaults organisation to a flat tree when the block is absent', () => {
+    const result = AggregatorConfigSchema.safeParse({ aggregator: baseAggregator });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation).toEqual(DEFAULT_ORGANISATION);
+    expect(DEFAULT_ORGANISATION).toEqual({
+      hierarchy: { max_depth: 1, max_total_orgs: 50 },
+    });
+  });
+
+  it('accepts tree limits', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        organisation: {
+          hierarchy: { max_depth: 3, max_children: 50, max_total_orgs: 200 },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation.hierarchy).toEqual({
+      max_depth: 3,
+      max_children: 50,
+      max_total_orgs: 200,
+    });
+  });
+
+  it('fills hierarchy defaults inside a partial block', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: { ...baseAggregator, organisation: { hierarchy: { max_depth: 2 } } },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation).toEqual({
+      hierarchy: { max_depth: 2, max_total_orgs: 50 },
+    });
+  });
+
+  it('loads a config that still has a known_as block, and ignores the block', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        organisation: {
+          hierarchy: { max_depth: 2 },
+          known_as: {
+            values: [{ key: 'state', name: 'State', depths: [5] }],
+            suggest: [{ depth: 1, key: 'state' }],
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation.hierarchy).toEqual({
+      max_depth: 2,
+      max_total_orgs: 50,
+    });
+    expect(result.data.aggregator.organisation.known_as).toBeDefined();
+  });
+
+  it.each([
+    ['max_depth 0', { max_depth: 0 }],
+    ['max_depth 11', { max_depth: 11 }],
+    ['a fractional max_depth', { max_depth: 1.5 }],
+    ['max_children 0', { max_children: 0 }],
+    ['max_total_orgs 0', { max_total_orgs: 0 }],
+  ])('rejects organisation with %s', (_case, hierarchy) => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: { ...baseAggregator, organisation: { hierarchy } },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects non-snake_case mode keys', () => {
@@ -838,6 +912,115 @@ aggregator:
   });
 });
 
+describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal', () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  const bot = (key: string, phone: string, domains: string): string =>
+    `    - key: ${key}\n      display_name: ${key}\n      phone: "${phone}"\n      languages: [en]\n      domains: [${domains}]\n`;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agg-cfg-voice-'));
+    configPath = path.join(tmpDir, 'aggregator.config.yaml');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function loadWith(block: string) {
+    await fs.writeFile(configPath, `${BLUE_DOT_YAML}${block}`, 'utf8');
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => new Response(JSON.stringify(BLUE_DOT_NETWORK), { status: 200 }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('config did not load');
+    return result.value;
+  }
+
+  it('drops a bot with an invalid phone, keeps the valid one and names the entry', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '+91 12345', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['good']);
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({ path: 'aggregator.voice_bots.1', code: 'VOICE_BOT_DROPPED' }),
+    ]);
+    expect(cfg.warnings?.[0]?.reason).toContain('phone');
+    expect(JSON.stringify(cfg.warnings)).not.toContain('1204404274');
+  });
+
+  it('keeps the first of two bots with the same key', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('a', '+919876543210', 'seeker')}${bot('a', '+919876543211', 'provider')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.domains)).toEqual([['seeker']]);
+    expect(cfg.warnings?.[0]).toMatchObject({
+      path: 'aggregator.voice_bots.1',
+      code: 'VOICE_BOT_DROPPED',
+    });
+  });
+
+  it('drops a bot serving an unknown domain and the defaults that name it', async () => {
+    const cfg = await loadWith(
+      `  default_voice_bots:\n    nope: a\n    seeker: a\n  voice_bots:\n${bot('a', '+919876543210', 'seeker, nope')}`,
+    );
+    expect(cfg.aggregator.voice_bots).toEqual([]);
+    expect(cfg.aggregator.default_voice_bots).toEqual({});
+    expect(cfg.warnings?.map((w) => w.code)).toEqual([
+      'VOICE_BOT_DROPPED',
+      'VOICE_BOT_DEFAULT_DROPPED',
+      'VOICE_BOT_DEFAULT_DROPPED',
+    ]);
+    expect(cfg.warnings?.[0]?.path).toBe('aggregator.voice_bots.a');
+  });
+
+  it('drops a default naming an unlisted bot', async () => {
+    const cfg = await loadWith(
+      `  default_voice_bots:\n    seeker: x\n  voice_bots:\n${bot('a', '+919876543210', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['a']);
+    expect(cfg.aggregator.default_voice_bots).toEqual({});
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({
+        path: 'aggregator.default_voice_bots.seeker',
+        code: 'VOICE_BOT_DEFAULT_DROPPED',
+      }),
+    ]);
+  });
+
+  it('loads two bots serving a domain with no default and warns', async () => {
+    const cfg = await loadWith(
+      `  voice_bots:\n${bot('a', '+919876543210', 'seeker')}${bot('b', '+919876543211', 'seeker')}`,
+    );
+    expect(cfg.aggregator.voice_bots).toHaveLength(2);
+    expect(cfg.warnings).toEqual([
+      expect.objectContaining({
+        path: 'aggregator.default_voice_bots.seeker',
+        code: 'VOICE_BOT_DEFAULT_MISSING',
+      }),
+    ]);
+  });
+
+  it('drops voice_bots and default_voice_bots that have the wrong shape', async () => {
+    const cfg = await loadWith('  voice_bots: oops\n  default_voice_bots: [a]\n');
+    expect(cfg.aggregator.voice_bots).toEqual([]);
+    expect(cfg.aggregator.default_voice_bots).toBeUndefined();
+    expect(cfg.warnings?.map((w) => w.path)).toEqual([
+      'aggregator.voice_bots',
+      'aggregator.default_voice_bots',
+    ]);
+  });
+
+  it('reports no warnings for a valid voice bot block', async () => {
+    const cfg = await loadWith(`  voice_bots:\n${bot('a', '+911204404274', 'seeker')}`);
+    expect(cfg.aggregator.voice_bots.map((b) => b.phone)).toEqual(['+911204404274']);
+    expect(cfg.warnings).toBeUndefined();
+  });
+});
+
 describe('FileNetworkConfigLoader — domain_labels overrides', () => {
   let tmpDir: string;
   let configPath: string;
@@ -1089,5 +1272,289 @@ aggregator:
         'AGGREGATOR_PARTICIPANT_CONSENT_SOURCE',
       );
     });
+  });
+});
+
+describe('FileNetworkConfigLoader — network.json shape checks', () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agg-cfg-shape-'));
+    configPath = path.join(tmpDir, 'aggregator.config.yaml');
+    await fs.writeFile(configPath, BLUE_DOT_YAML, 'utf8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Blue dot network with extra keys merged into the seeker domain. */
+  function networkWithSeeker(extra: Record<string, unknown>): Record<string, unknown> {
+    const [seeker, provider] = BLUE_DOT_NETWORK.domains;
+    return { ...BLUE_DOT_NETWORK, domains: [{ ...seeker, ...extra }, provider] };
+  }
+
+  function serve(payload: unknown): typeof fetch {
+    return async () => new Response(JSON.stringify(payload), { status: 200 });
+  }
+
+  it('returns NETWORK_FETCH_FAILED when the cached network.json has the wrong shape', async () => {
+    const cacheDir = path.join(tmpDir, 'cache');
+    const first = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: serve(BLUE_DOT_NETWORK),
+    });
+    expect((await first.load()).success).toBe(true);
+    const [cacheFile] = await fs.readdir(cacheDir);
+    expect(cacheFile).toBeDefined();
+    await fs.writeFile(path.join(cacheDir, cacheFile ?? ''), JSON.stringify({ id: 'x' }), 'utf8');
+
+    const second = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: async () => new Response('down', { status: 503 }),
+    });
+    const result = await second.load();
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: 'NETWORK_FETCH_FAILED',
+        message: expect.stringContaining('cached network.json'),
+      },
+    });
+  });
+
+  it('reports the thrown value when the fetch rejects with a non-Error', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => {
+        throw 'socket hang up';
+      },
+    });
+    const result = await loader.load();
+    expect(result).toMatchObject({
+      success: false,
+      error: { message: expect.stringContaining('socket hang up') },
+    });
+  });
+
+  it('names the domain when item_schemas is missing', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(networkWithSeeker({ item_schemas: undefined })),
+    });
+    const result = await loader.load();
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: 'NETWORK_FETCH_FAILED',
+        message: expect.stringContaining('domain seeker missing item_schemas'),
+      },
+    });
+  });
+
+  it('rejects a domain whose first item schema is not an object', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(networkWithSeeker({ item_schemas: { 'profile_1.0': 'oops' } })),
+    });
+    const result = await loader.load();
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: 'NETWORK_FETCH_FAILED',
+        message: expect.stringContaining('domain seeker item schema profile_1.0 must be an object'),
+      },
+    });
+  });
+
+  it('rejects a domain whose second item schema is not an object', async () => {
+    const [seeker] = BLUE_DOT_NETWORK.domains;
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(
+        networkWithSeeker({ item_schemas: { ...seeker?.item_schemas, 'draft_2.0': 42 } }),
+      ),
+    });
+    const result = await loader.load();
+    expect(result).toMatchObject({
+      success: false,
+      error: {
+        code: 'NETWORK_FETCH_FAILED',
+        message: expect.stringContaining('domain seeker item schema draft_2.0 must be an object'),
+      },
+    });
+  });
+
+  it('drops malformed dashboard blocks and reports each one as a warning', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ dashboard_tiles: 'oops', status_rules: [{ label: 'No status' }] }),
+        dashboard_buckets: ['oops'],
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.domains['seeker']?.dashboardTiles).toBeUndefined();
+    expect(result.value.domains['seeker']?.statusRules).toBeUndefined();
+    expect(result.value.dashboardBuckets).toBeUndefined();
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'domains.0.status_rules', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'dashboard_buckets', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
+  it('drops the whole dashboard_tiles block when one tile is malformed', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(
+        networkWithSeeker({
+          dashboard_tiles: {
+            profile: [{ field: 'total_items', label: 'Profiles' }, { field: 'no_label' }],
+            user: [{ field: 'total_users', label: 'Users' }],
+          },
+        }),
+      ),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.domains['seeker']?.dashboardTiles).toBeUndefined();
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
+  it('keeps a partial bucket label map, as in orange_dot', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...BLUE_DOT_NETWORK,
+        dashboard_buckets: { by_status: { new: 'New', active: 'Active' } },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.dashboardBuckets).toEqual({ by_status: { new: 'New', active: 'Active' } });
+    expect(result.value.warnings).toBeUndefined();
+  });
+
+  it('keeps every string label in the bucket maps, including keys Signals does not fix', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...BLUE_DOT_NETWORK,
+        dashboard_buckets: {
+          by_status: { new: 'New', dormant: 'Dormant' },
+          by_initiated_action_status: { create: 'Requested', escalate: 'Escalated' },
+          by_received_action_status: { hold: 'On hold' },
+        },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.dashboardBuckets).toEqual({
+      by_status: { new: 'New', dormant: 'Dormant' },
+      by_initiated_action_status: { create: 'Requested', escalate: 'Escalated' },
+      by_received_action_status: { hold: 'On hold' },
+    });
+    expect(result.value.warnings).toBeUndefined();
+  });
+
+  it('drops non-string bucket labels and reports the drop', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...BLUE_DOT_NETWORK,
+        dashboard_buckets: { by_status: { new: 'New', active: 3 } },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.dashboardBuckets).toEqual({ by_status: { new: 'New' } });
+    expect(result.value.warnings).toEqual([
+      { path: 'dashboard_buckets.by_status', code: 'NON_STRING_ENTRIES_DROPPED' },
+    ]);
+  });
+
+  it('still reports dropped blocks when the network is served from the cache', async () => {
+    const cacheDir = path.join(tmpDir, 'cache');
+    const payload = networkWithSeeker({ dashboard_tiles: 'oops' });
+    const first = new FileNetworkConfigLoader({ configPath, cacheDir, fetchImpl: serve(payload) });
+    expect((await first.load()).success).toBe(true);
+
+    const second = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: async () => new Response('down', { status: 503 }),
+    });
+    const result = await second.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
+  it('drops a malformed display_name or description and reports it', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ description: null }),
+        display_name: 42,
+        description: { en: 'Blue Dot' },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.network.display_name).toBeUndefined();
+    expect(result.value.network.description).toBeUndefined();
+    expect(result.value.network.domains[0]?.description).toBeUndefined();
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.description', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'display_name', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'description', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
+  it('keeps only the string tokens of go_live_required and reports the drop', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(networkWithSeeker({ go_live_required: ['consent_required', 7] })),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.domains['seeker']?.goLiveRequired).toEqual(['consent_required']);
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.go_live_required', code: 'NON_STRING_ENTRIES_DROPPED' },
+    ]);
+  });
+
+  it('keeps unknown network keys and the status rule condition unchanged', async () => {
+    const when = { metric: 'days_since_update', op: '<=', value: 7 };
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ status_rules: [{ status: 'new', when }], owner: 'ops' }),
+        version: 3,
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.network['version']).toBe(3);
+    expect(result.value.network.domains[0]?.['owner']).toBe('ops');
+    expect(result.value.domains['seeker']?.statusRules).toEqual([{ status: 'new', when }]);
+    expect(result.value.warnings).toBeUndefined();
   });
 });

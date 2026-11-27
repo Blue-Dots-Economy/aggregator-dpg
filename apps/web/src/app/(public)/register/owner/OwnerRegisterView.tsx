@@ -4,7 +4,7 @@ import { type JSX } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
-import { OrgRegisterForm } from '../OrgRegisterForm';
+import { OrgRegisterForm, type OrgFormInvite } from '../OrgRegisterForm';
 import type { ConsentDocContent } from '../../../../components/consent/consent-types';
 
 export interface OwnerRegisterViewProps {
@@ -13,18 +13,24 @@ export interface OwnerRegisterViewProps {
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the org audience. `null` when
-   * `loadConsentConfig` failed — the widget degrades to plain text.
+   * Terms/Privacy content for the org audience. `null` when loading failed;
+   * the widget then shows plain text.
    */
   orgConsentContent?: ConsentDocContent | null;
+  /**
+   * Terms/Privacy content for the team member (aggregator) audience, when the
+   * owner also joins the org's team at registration; `null` otherwise.
+   */
+  teamConsentContent?: ConsentDocContent | null;
+  /** The org invite the owner arrived with. */
+  invite: OrgFormInvite;
 }
 
 /**
- * Owner (organisation) registration page reached only via the `/register/owner`
- * deep link (#619) — not linked from the public `/register` page. Wraps
- * {@link OrgRegisterForm} in the shared {@link RegisterPageShell}. The route
- * that renders this view has already asserted the org-hierarchy flag and the
- * presence of the org schema, so this view assumes the owner flow is live.
+ * Owner (organisation) registration page body for `/register/owner`.
+ *
+ * Wraps {@link OrgRegisterForm} in {@link RegisterPageShell}. The route has
+ * already checked that the org schema exists.
  *
  * @param props - The org schema/UI schema and org consent content.
  * @returns The owner registration page body.
@@ -33,16 +39,19 @@ export function OwnerRegisterView({
   schema,
   uiSchema,
   orgConsentContent,
+  teamConsentContent,
+  invite,
 }: Readonly<OwnerRegisterViewProps>): JSX.Element {
   const t = useTranslations('register');
-  const headingTitle = (schema.title as string | undefined) ?? t('owner_page_title');
 
   return (
-    <RegisterPageShell heading={headingTitle}>
+    <RegisterPageShell heading={t('org_page_title')}>
       <OrgRegisterForm
         schema={schema}
         uiSchema={uiSchema}
         {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
+        {...(teamConsentContent ? { teamConsentContent } : {})}
+        invite={invite}
       />
     </RegisterPageShell>
   );

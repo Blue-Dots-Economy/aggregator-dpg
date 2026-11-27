@@ -36,7 +36,7 @@ const { headObjectMock, signDownloadUrlMock } = vi.hoisted(() => ({
   headObjectMock: vi.fn(),
   signDownloadUrlMock: vi.fn(),
 }));
-vi.mock('../services/object-storage/index.js', () => ({
+vi.mock('../services/object-storage/dump-storage.js', () => ({
   headObject: headObjectMock,
   signDownloadUrl: signDownloadUrlMock,
   signBulkUploadUrl: vi.fn(),

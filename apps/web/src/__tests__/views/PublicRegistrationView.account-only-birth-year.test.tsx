@@ -27,6 +27,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type { ParticipantConsent } from '@/components/consent/consent-types';
+import { chooseOption } from '@/__tests__/test-utils';
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -132,10 +133,10 @@ function submitBody(fetchMock: ReturnType<typeof stubFetch>): Record<string, unk
   return JSON.parse(String((call![1] as RequestInit).body)) as Record<string, unknown>;
 }
 
-function fillIdentity(birthYear: string) {
+async function fillIdentity(birthYear: string) {
   fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane Doe' } });
   fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
-  fireEvent.change(screen.getByLabelText(/Year of birth/i), { target: { value: birthYear } });
+  await chooseOption(screen.getByLabelText(/Year of birth/i), String(birthYear));
 }
 
 beforeEach(() => {
@@ -147,7 +148,7 @@ describe('<PublicRegistrationView /> account-only birth year', () => {
     const fetchMock = stubFetch('sub-1');
 
     renderView();
-    fillIdentity(ADULT_YEAR);
+    await fillIdentity(ADULT_YEAR);
     fireEvent.click(screen.getByRole('checkbox', { name: /permit the aggregator/i }));
     fireEvent.click(screen.getByRole('button', { name: /submit/i }));
 
@@ -169,7 +170,7 @@ describe('<PublicRegistrationView /> account-only birth year', () => {
     const fetchMock = stubFetch('sub-2');
 
     renderView();
-    fillIdentity(MINOR_YEAR);
+    await fillIdentity(MINOR_YEAR);
     // No call-consent tick: a minor establishes no consent here, so the form
     // does not require it and the gate is never opened.
     fireEvent.click(screen.getByRole('button', { name: /submit/i }));
@@ -190,9 +191,16 @@ describe('<PublicRegistrationView /> account-only birth year', () => {
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane Doe' } });
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
 
-    expect(screen.getByRole('button', { name: /submit/i })).toBeDisabled();
+    const submit = screen.getByRole('button', { name: /submit/i });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
     expect(
-      screen.getByText(messages.profile.public_reg.account_only.blockers.year_of_birth),
+      screen.getByText(
+        `${messages.profile.public_reg.account_only.year_of_birth_label} is required.`,
+      ),
     ).toBeInTheDocument();
+    expect(
+      vi.mocked(globalThis.fetch).mock.calls.filter(([u]) => String(u).includes('/submit')),
+    ).toHaveLength(0);
   });
 });

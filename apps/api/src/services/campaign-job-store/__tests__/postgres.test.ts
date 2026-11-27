@@ -63,7 +63,7 @@ function queue(...r: unknown[]): void {
 
 const jobRow = {
   id: 'job-1',
-  aggregatorId: 'agg-1',
+  userId: 'agg-1',
   signalstackOrgId: 'org-1',
   channel: 'export',
   status: 'pending',
@@ -79,7 +79,7 @@ const jobRow = {
 };
 
 const baseInput = {
-  aggregatorId: 'agg-1',
+  userId: 'agg-1',
   signalstackOrgId: 'org-1',
   channel: 'export' as const,
   metadata: [{ key: 'purpose', value: 'audit' }],

@@ -22,7 +22,7 @@ describe('PostgresCampaignAuditWriter', () => {
     await new PostgresCampaignAuditWriter(db).recordCompleted(buildCompletedAudit());
     const row = values.mock.calls[0]![0] as Record<string, unknown>;
     expect(row.event).toBe('completed');
-    expect(row.actorOrgId).toBe('org_test');
+    expect(row.actorSignalstackOrgId).toBe('org_test');
     expect(row.outcome).toBe('succeeded');
   });
 
@@ -31,7 +31,7 @@ describe('PostgresCampaignAuditWriter', () => {
     await new PostgresCampaignAuditWriter(db).recordDumpAccess(buildDumpAudit());
     const row = values.mock.calls[0]![0] as Record<string, unknown>;
     expect(row.channel).toBe('dump');
-    expect(row.actorOrgId).toBeUndefined();
+    expect(row.actorSignalstackOrgId).toBeUndefined();
     expect(row.piiFields).toEqual([]);
   });
 

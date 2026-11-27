@@ -1,12 +1,25 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { applyTerms } from './src/i18n/terms';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reactPlugin = react() as any;
 
+// Tests import the message files directly; fill their term placeholders the
+// same way `src/i18n/request.ts` does at runtime.
+const MESSAGE_FILE = /\/i18n\/messages\/(\w+)\.json$/;
+const termsPlugin = {
+  name: 'i18n-terms',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    const locale = MESSAGE_FILE.exec(id)?.[1];
+    return locale ? JSON.stringify(applyTerms(JSON.parse(code), locale)) : null;
+  },
+};
+
 export default defineConfig({
-  plugins: [reactPlugin],
+  plugins: [reactPlugin, termsPlugin],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -1,0 +1,331 @@
+/**
+ * Server Component test: `(console)/console` home. An owner of one
+ * organisation gets one list of its users, the invited ones included, and no
+ * child organisations; an owner of several is sent to the organisations page.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '@/i18n/messages/en.json';
+import type {
+  MeOrg,
+  MeResponse,
+  OrgReadResponse,
+  OrgSearchResponse,
+  UserSearchResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
+
+vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ ownerSelfAddMode: vi.fn(async () => 'owner') }));
+vi.mock('@/lib/console-api.server', () => ({ consoleRead: vi.fn() }));
+vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn() }));
+vi.mock('@/lib/console-domains.server', () => ({
+  networkDomains: vi.fn(async () => []),
+  servedDomains: vi.fn(() => []),
+}));
+vi.mock('next-intl/server', () => ({
+  getTranslations: vi.fn(
+    async () => (key: string, values?: Record<string, unknown>) =>
+      values ? `console.${key} ${JSON.stringify(values)}` : `console.${key}`,
+  ),
+  getFormatter: vi.fn(async () => ({ dateTime: () => '13 Nov 2026' })),
+}));
+vi.mock('@/lib/console-invites.server', () => ({ readOpenInvites: vi.fn(async () => null) }));
+vi.mock('@/app/(public)/register/register-server', () => ({
+  loadConsentContent: vi.fn(async () => null),
+}));
+vi.mock('next/navigation', () => ({
+  redirect: vi.fn((to: string) => {
+    throw new Error(`redirect:${to}`);
+  }),
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+vi.mock('@/components/shell/Topbar', () => ({
+  Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
+}));
+
+import ConsoleHomePage from '@/app/(console)/console/page';
+import { getConsoleActor } from '@/lib/console-actor';
+import { ownerSelfAddMode } from '@/lib/features.server';
+import { consoleRead } from '@/lib/console-api.server';
+import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
+import { readOpenInvites } from '@/lib/console-invites.server';
+import { networkDomains } from '@/lib/console-domains.server';
+
+type Row = OrgSearchResponse['orgs'][number];
+
+const row = (id: string, name: string, over: Partial<Row> = {}): Row => ({
+  id,
+  slug: id,
+  name,
+  org_type: 'aggregator',
+  status: 'active',
+  is_default: false,
+  url: null,
+  locations: [],
+  legal_name: null,
+  gst_number: null,
+  known_as: null,
+  known_as_name: null,
+  depth: 2,
+  parent_id: null,
+  parent_name: null,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  coordinator_count: 2,
+  child_count: 0,
+  pending_count: 1,
+  ...over,
+});
+
+const meOrg = (id: string, name: string, over: Partial<MeOrg> = {}): MeOrg => ({
+  id,
+  name,
+  slug: id,
+  org_type: 'aggregator',
+  role: 'owner',
+  is_default: false,
+  capabilities: ['org.manage'],
+  ...over,
+});
+
+const me = (orgs: MeOrg[], over: Partial<MeResponse> = {}): MeResponse => ({
+  kind: 'admin',
+  user: { id: 'u', contact: { name: null, email: 'owner@a.org', phone: null } },
+  orgs,
+  is_network_admin: false,
+  ...over,
+});
+
+const users: UserSearchResponse = {
+  users: [
+    {
+      id: 'c1',
+      name: 'Edge Org A',
+      status: 'active',
+      serves: [],
+      contact: { name: 'Coord One', email: 'c1@edge.test', phone: null },
+    },
+    {
+      id: 'c2',
+      name: 'Edge Org A',
+      status: 'pending',
+      serves: [],
+      contact: { name: null, email: 'cp@edge.test', phone: null },
+    },
+    {
+      id: 'c3',
+      name: 'Edge Org A',
+      status: 'inactive',
+      serves: [],
+      contact: { name: 'Old Reject', email: 'rej@edge.test', phone: null },
+    },
+  ],
+  next_cursor: null,
+} as unknown as UserSearchResponse;
+
+/** Answers the org reads by id and the coordinator search. */
+function mockReads(own: Row[], below: Row[] = []) {
+  vi.mocked(consoleRead).mockImplementation(async (path: string) => {
+    const found = own.find((o) => path === `/v1/org/read/${o.id}`);
+    if (found) {
+      const { coordinator_count, child_count, pending_count, ...org } = found;
+      return {
+        org,
+        owner: { id: 'u', contact: { name: null, email: 'owner@a.org', phone: null } },
+        coordinator_count,
+        child_count,
+        pending_count,
+      } satisfies OrgReadResponse as never;
+    }
+    if (path === '/v1/user/search') return users as never;
+    throw new Error(`unexpected read ${path}`);
+  });
+  vi.mocked(readReachableOrgs).mockResolvedValue([...below, ...own]);
+}
+
+const show = async () =>
+  render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      {await ConsoleHomePage()}
+    </NextIntlClientProvider>,
+  );
+
+describe('console home — owner', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('lists the joined, the registered and the invited users of the one organisation together', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')]),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    vi.mocked(readOpenInvites).mockResolvedValue({
+      invites: [
+        {
+          email: 'new@edge.test',
+          status: 'pending',
+          created_at: '2026-11-13T06:00:00Z',
+          expires_at: '2026-11-20T06:00:00Z',
+        },
+        {
+          email: 'late@edge.test',
+          status: 'expired',
+          created_at: '2026-10-01T06:00:00Z',
+          expires_at: '2026-10-15T06:00:00Z',
+        },
+      ],
+      next_cursor: null,
+    });
+    await show();
+    expect(screen.getByRole('heading', { name: 'console.org_home.heading' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /console\.org_home\.invite/ })).toHaveAttribute(
+      'href',
+      '/console/invite',
+    );
+    expect(screen.getByText('Coord One')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'cp@edge.test' })).toHaveAttribute(
+      'href',
+      '/console/coordinators/c2',
+    );
+    expect(screen.getByText('new@edge.test')).toBeInTheDocument();
+    expect(screen.getByText('console.sent_on {"date":"13 Nov 2026"}')).toBeInTheDocument();
+    expect(screen.queryByText('Old Reject')).toBeNull();
+    expect(screen.getAllByRole('row')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: /^Invited\s*3/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Team Members\s*4/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Resend/ }).length).toBeGreaterThan(0);
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
+      filter: { org_id: 'org-1' },
+      limit: 100,
+    });
+  });
+
+  it('shows no child organisations on the home page', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('own', 'Zeta Own')]),
+    });
+    mockReads(
+      [row('own', 'Zeta Own')],
+      [row('c1', 'Child Pending', { status: 'pending' }), row('c2', 'Child Live')],
+    );
+    await show();
+    expect(screen.getByText('Zeta Own')).toBeInTheDocument();
+    expect(screen.queryByText('Child Pending')).not.toBeInTheDocument();
+    expect(screen.queryByText(/home\.below/)).not.toBeInTheDocument();
+    expect(readReachableOrgs).not.toHaveBeenCalled();
+  });
+
+  it('sends an owner of several organisations to the organisations page', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A'), meOrg('org-2', 'Edge Org B')]),
+    });
+    await expect(ConsoleHomePage()).rejects.toThrow('redirect:/console/orgs');
+    expect(consoleRead).not.toHaveBeenCalled();
+  });
+
+  it('hides Invite when the owner cannot invite', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: { ...me([meOrg('org-1', 'Edge Org A', { capabilities: [] })]), capabilities: [] },
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    await show();
+    expect(
+      screen.queryByRole('link', { name: /console\.org_home\.invite/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('console home — network admin', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sends the network admin to the organisations page', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me(
+        [
+          meOrg('root', 'Blue Dots', { org_type: 'network_facilitator' }),
+          meOrg('def', 'Default', { is_default: true }),
+        ],
+        { is_network_admin: true },
+      ),
+    });
+    await expect(ConsoleHomePage()).rejects.toThrow('redirect:/console/orgs');
+    expect(consoleRead).not.toHaveBeenCalled();
+  });
+});
+
+describe('console home — adding the owner to My Team', () => {
+  const OWN = '00000000-0000-4000-8000-0000000000c1';
+  const addMyself = () =>
+    screen.queryByRole('button', { name: /console\.self_add\.button|Add myself/ });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(networkDomains).mockResolvedValue([{ id: 'seeker', label: 'Seekers' }]);
+  });
+
+  it('offers "Add myself to My Team" to an owner without a coordinator account', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: null }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    await show();
+    expect(addMyself()).toBeInTheDocument();
+    expect(screen.queryByText(messages.console.org_home.you)).toBeNull();
+  });
+
+  it('hides it when the deployment turns self-add off', async () => {
+    vi.mocked(ownerSelfAddMode).mockResolvedValueOnce('off');
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: null }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    await show();
+    expect(addMyself()).toBeNull();
+  });
+
+  it('hides it once the account exists and tags the owner\'s own row "You"', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('org-1', 'Edge Org A')], { own_coordinator_account_id: OWN }),
+    });
+    mockReads([row('org-1', 'Edge Org A')]);
+    vi.mocked(consoleRead).mockImplementation(async (path: string) => {
+      if (path === '/v1/user/search') {
+        return {
+          users: [
+            {
+              id: OWN,
+              name: 'Edge Org A',
+              status: 'active',
+              serves: ['seeker'],
+              contact: { name: 'Owner Self', email: 'owner@a.org', phone: null },
+            },
+            ...users.users,
+          ],
+          next_cursor: null,
+        } as never;
+      }
+      const { coordinator_count, child_count, pending_count, ...org } = row('org-1', 'Edge Org A');
+      return {
+        org,
+        owner: { id: 'u', contact: { name: null, email: 'owner@a.org', phone: null } },
+        coordinator_count,
+        child_count,
+        pending_count,
+      } as never;
+    });
+    await show();
+    expect(addMyself()).toBeNull();
+    const tags = screen.getAllByText(messages.console.org_home.you);
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.closest('tr')).toHaveTextContent('Owner Self');
+  });
+});

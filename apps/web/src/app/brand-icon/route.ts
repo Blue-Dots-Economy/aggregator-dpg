@@ -1,23 +1,23 @@
 /**
- * Dynamic favicon route. Replaces the static `app/icon.svg` so the
- * browser tab icon matches the active network's brand colour. The
- * route reads `primary_color` from the api's `/v1/aggregator-config`
- * endpoint and emits the same network-mark SVG re-tinted to that hex.
+ * Dynamic favicon route that tints the network-mark SVG with the brand colour.
  *
- * Cached for five minutes (network config rarely changes; cache lets
- * the browser get the icon without round-tripping to the api on every
- * page load).
+ * Reads `primary_color` from the api's `/v1/aggregator-config`. The response
+ * is cached for five minutes.
  */
 
+import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { logger } from '@/lib/logger';
+import { summariseIssues } from '@/lib/response-shape-error';
+
+export const runtime = 'nodejs';
 
 const FALLBACK_PRIMARY = '#2563EB';
 const FALLBACK_PRIMARY_DARK = '#1D4ED8';
 
 function deriveDark(hex: string): string {
-  // Tint towards black by ~12% — matches the ThemeProvider's
-  // `--bd-primary-600` derivation so the centre orb stays a notch
-  // darker than the outer dots.
+  // Darken by ~12%, matching the ThemeProvider's `--bd-primary-600`.
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
   if (!m) return FALLBACK_PRIMARY_DARK;
   const num = Number.parseInt(m[1]!, 16);
@@ -34,20 +34,31 @@ function rgbaTriple(hex: string): string {
   return `${(num >> 16) & 0xff},${(num >> 8) & 0xff},${num & 0xff}`;
 }
 
-interface BrandShape {
-  primary_color?: string;
-}
+/** The part of `/v1/aggregator-config` this route reads. The colour must be `#RRGGBB`, because it goes into the SVG as-is. */
+const BrandColourSchema = z.object({
+  brand: z.object({ primary_color: BrandConfigSchema.shape.primary_color }),
+});
 
 async function loadPrimary(): Promise<string> {
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiBase}/v1/aggregator-config`, {
-      // Re-fetch every 5 minutes; brand colour is stable per release.
+      // Re-fetch every 5 minutes.
       next: { revalidate: 300 },
     });
     if (!res.ok) return FALLBACK_PRIMARY;
-    const body = (await res.json()) as { brand?: BrandShape };
-    return body?.brand?.primary_color ?? FALLBACK_PRIMARY;
+    const body: unknown = await res.json();
+    const parsed = BrandColourSchema.safeParse(body);
+    if (!parsed.success) {
+      logger.warn({
+        operation: 'brandIcon.loadPrimary',
+        status: 'failure',
+        error: 'unexpected response shape',
+        issues: summariseIssues(parsed.error.issues),
+      });
+      return FALLBACK_PRIMARY;
+    }
+    return parsed.data.brand.primary_color ?? FALLBACK_PRIMARY;
   } catch {
     return FALLBACK_PRIMARY;
   }
@@ -57,8 +68,7 @@ export async function GET() {
   const primary = await loadPrimary();
   const primaryDark = deriveDark(primary);
   const primaryRgb = rgbaTriple(primary);
-  // Brand-mark dot — concentric rings + filled centre matching the "o"
-  // in the "dots" wordmark of the PDF guidelines.
+  // Brand-mark dot: concentric rings around a filled centre.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
   <rect width="48" height="48" rx="10" fill="#ffffff"/>
   <circle cx="24" cy="24" r="22" fill="none" stroke="rgba(${primaryRgb},0.18)" stroke-width="1.2"/>

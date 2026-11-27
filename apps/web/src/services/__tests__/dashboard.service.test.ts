@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { dashboardService, triggerCsvDownload } from '../dashboard.service';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 /** Captures a rejected promise's Error and returns its message, for
  * environments where `.rejects.toThrow(/regex/)` loses the message text. */
@@ -38,6 +39,37 @@ describe('dashboardService.dashboard', () => {
   const origFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = origFetch;
+  });
+
+  it('keeps keys of the Signals payload it does not declare', async () => {
+    const payload = {
+      by_domain: {
+        seeker: {
+          rollup: { total_items: 2, complete_profiles: 1, by_status: { new: 2 }, extra_count: 7 },
+          items: [{ item_id: 'i1' }],
+          total_matching: 2,
+          next_cursor: null,
+          facets: { city: 3 },
+        },
+      },
+      metadata: { refreshed: true, source: 'cache' },
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
+  });
+
+  it('accepts a dashboard that Signals has not computed yet (last_computed_at null)', async () => {
+    const payload = { by_domain: {}, metadata: { last_computed_at: null, refreshed: false } };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
   });
 
   it('throws when domain is missing', async () => {
@@ -241,6 +273,25 @@ describe('dashboardService.dashboardExportProfiles', () => {
       itemIds: ['i1'],
     });
     expect(result.filename).toBe('profiles-seeker.csv');
+  });
+
+  it.each([
+    ['a text count', { accepted: 'all' }],
+    ['no count', {}],
+  ])('throws ResponseShapeError when the ack has %s', async (_label, body) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      dashboardService.dashboardBulkAction({
+        action: 'trigger_callback',
+        domain: 'seeker',
+        ids: ['1'],
+      }),
+    ).rejects.toBeInstanceOf(ResponseShapeError);
   });
 
   it('surfaces the upstream error detail on failure', async () => {

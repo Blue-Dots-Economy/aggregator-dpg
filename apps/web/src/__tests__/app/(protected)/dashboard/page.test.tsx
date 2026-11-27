@@ -30,7 +30,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import { useSyncExternalStore } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ThemeModeProvider } from '@/lib/theme-mode';
+import { AuthProvider } from '@/lib/auth-context';
 import messages from '@/i18n/messages/en.json';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { HttpError } from '@/services/http';
+import { chooseOption } from '@/__tests__/test-utils';
 
 // ---------------------------------------------------------------------------
 // next/navigation — locally overridden (not the global setup.ts stub) so the
@@ -140,7 +144,7 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
   DEFAULT_AGGREGATOR_CONFIG: CFG_FIXTURE,
 }));
 
-const mockUseProfileRaw = vi.fn(() => ({ data: { type: 'seeker' } }));
+const mockUseProfileRaw = vi.fn(() => ({ data: { type: 'seeker', serves: ['seeker'] } }));
 vi.mock('@/hooks/useProfile', () => ({
   useProfileRaw: () => mockUseProfileRaw(),
 }));
@@ -172,7 +176,11 @@ function renderPage(ui: ReactElement = <DashboardPageRoot />) {
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ThemeModeProvider>{ui}</ThemeModeProvider>
+        <AuthProvider
+          initialUser={{ id: 'u1', name: 'Coord', org: '', email: 'coord@example.com' }}
+        >
+          <ThemeModeProvider>{ui}</ThemeModeProvider>
+        </AuthProvider>
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
@@ -247,7 +255,7 @@ describe('<DashboardPageRoot />', () => {
     vi.clearAllMocks();
     nav.resetSearchParams();
     mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE });
-    mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     mockUseDashboard.mockReturnValue({
       data: dashboardPageFixture(),
       isLoading: false,
@@ -276,9 +284,9 @@ describe('<DashboardPageRoot />', () => {
       expect(mockPush).toHaveBeenCalledWith('/onboarding');
     });
 
-    it('renders no tab strip for a single-domain aggregator', () => {
+    it('renders no domain tabs for a single-domain aggregator', () => {
       renderPage();
-      expect(screen.queryByRole('button', { name: /Seekers/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('tablist', { name: 'Profile Type' })).not.toBeInTheDocument();
     });
 
     it('renders the Providers tab directly when the aggregator profile type is "provider"', () => {
@@ -288,7 +296,7 @@ describe('<DashboardPageRoot />', () => {
       // this exercises `isProviderLike`/`ProvidersTab` via the profile type
       // rather than a tab click.
       mockUseAggregatorConfig.mockReturnValue({ data: TWO_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'provider' } });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'provider', serves: ['provider'] } });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'provider' }),
         isLoading: false,
@@ -301,6 +309,120 @@ describe('<DashboardPageRoot />', () => {
     });
   });
 
+  describe('domain tabs', () => {
+    const selectedTab = () =>
+      within(screen.getByRole('tablist', { name: 'Profile Type' })).getByRole('tab', {
+        selected: true,
+      });
+
+    beforeEach(() => {
+      window.localStorage.clear();
+      mockUseAggregatorConfig.mockReturnValue({ data: TWO_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'seeker', serves: ['seeker', 'provider'] },
+      });
+    });
+
+    it('opens on the first served domain with a tab for every served domain', () => {
+      renderPage();
+      const tabs = within(screen.getByRole('tablist', { name: 'Profile Type' })).getAllByRole(
+        'tab',
+      );
+      expect(tabs.map((tab) => tab.textContent?.replace(/\d+/g, '').trim())).toEqual([
+        'Seekers',
+        'Providers',
+      ]);
+      expect(selectedTab()).toHaveTextContent('Seekers');
+      expect(screen.queryByPlaceholderText('Search org, role, ID…')).not.toBeInTheDocument();
+    });
+
+    it('switches to the clicked domain and keeps it in the URL', () => {
+      // One stable result per domain: a fresh object per render loops the page's effects.
+      const results = {
+        seeker: { data: dashboardPageFixture(), isLoading: false, isError: false },
+        provider: {
+          data: dashboardPageFixture({ domain: 'provider' }),
+          isLoading: false,
+          isError: false,
+        },
+      };
+      mockUseDashboard.mockImplementation((q?: { domain?: string }) =>
+        q?.domain === 'provider' ? results.provider : results.seeker,
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole('tab', { name: /Providers/ }));
+      expect(mockReplace).toHaveBeenCalledWith('/dashboard?domain=provider', { scroll: false });
+      expect(screen.getByPlaceholderText('Search org, role, ID…')).toBeInTheDocument();
+      expect(selectedTab()).toHaveTextContent('Providers');
+    });
+
+    it('moves to the next domain with the arrow keys and wraps around', () => {
+      renderPage();
+      fireEvent.keyDown(selectedTab(), { key: 'ArrowRight' });
+      expect(selectedTab()).toHaveTextContent('Providers');
+      expect(selectedTab()).toHaveFocus();
+      fireEvent.keyDown(selectedTab(), { key: 'ArrowRight' });
+      expect(selectedTab()).toHaveTextContent('Seekers');
+    });
+
+    it("shows each domain's participant count from the dashboard rollup", () => {
+      const seeker = dashboardPageFixture({ rollup: { total_items: 128 } });
+      const provider = dashboardPageFixture({ domain: 'provider', rollup: { total_items: 42 } });
+      const both = {
+        data: { ...seeker, by_domain: { ...seeker.by_domain, ...provider.by_domain } },
+        isLoading: false,
+        isError: false,
+      };
+      mockUseDashboard.mockReturnValue(both);
+      renderPage();
+      expect(screen.getByRole('tab', { name: 'Seekers 128' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Providers 42' })).toBeInTheDocument();
+    });
+
+    it('shows no count for a domain missing from the payload', () => {
+      renderPage();
+      expect(screen.getByRole('tab', { name: 'Providers' })).toBeInTheDocument();
+    });
+
+    it('opens on the domain named in the URL', () => {
+      nav.resetSearchParams('domain=provider');
+      renderPage();
+      expect(selectedTab()).toHaveTextContent('Providers');
+    });
+
+    it('shows the no-profile-types notice, and fetches nothing, for a coordinator serving none', () => {
+      mockUseProfileRaw.mockReturnValue({ data: { type: null, serves: [] } });
+      renderPage();
+      expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: "You don't have access yet" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('coord@example.com')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+      expect(mockUseDashboard).not.toHaveBeenCalled();
+    });
+
+    it('shows a load error with a retry, not the no-access notice, when the profile fails to load', () => {
+      const refetch = vi.fn();
+      mockUseProfileRaw.mockReturnValue({
+        data: undefined,
+        isError: true,
+        isFetching: false,
+        refetch,
+      });
+      mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE, refetch: vi.fn() });
+      renderPage();
+      expect(
+        screen.getByRole('heading', { name: "We couldn't load your account details" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("You don't have access yet")).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(refetch).toHaveBeenCalled();
+    });
+  });
+
   describe('multi-domain routing', () => {
     it('requests its OWN domain for a third-domain aggregator, not domains[0]', () => {
       // Regression: the branch was `primaryDomain === cfg.domains[1].id`, which
@@ -309,7 +431,9 @@ describe('<DashboardPageRoot />', () => {
       // seeker view, and that view fetched `domains[0]` — so the dashboard was
       // headed "Seekers" and asked for seeker data the coordinator does not own.
       mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'service_provider', serves: ['service_provider'] },
+      });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'service_provider' }),
         isLoading: false,
@@ -325,7 +449,9 @@ describe('<DashboardPageRoot />', () => {
 
     it('labels a third-domain dashboard from its own domain label', () => {
       mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'service_provider', serves: ['service_provider'] },
+      });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'service_provider' }),
         isLoading: false,
@@ -395,18 +521,18 @@ describe('<DashboardPageRoot />', () => {
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
 
-      await userEvent.selectOptions(select, 'draft');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_draft);
       expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
       // The rollup-driven total is unaffected by the row-level filter.
       expect(screen.getByText('120 total')).toBeInTheDocument();
       expect(mockReplace).toHaveBeenCalledWith('/dashboard?lifecycle=draft', { scroll: false });
 
-      await userEvent.selectOptions(select, 'live');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_live);
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.queryByText('Bob Draft')).not.toBeInTheDocument();
 
-      await userEvent.selectOptions(select, 'all');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_all);
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
       expect(mockReplace).toHaveBeenLastCalledWith('/dashboard', { scroll: false });
@@ -415,7 +541,9 @@ describe('<DashboardPageRoot />', () => {
     it('reads the initial lifecycle value from the URL on mount', () => {
       nav.resetSearchParams('lifecycle=draft');
       renderPage();
-      expect(screen.getByLabelText('Lifecycle')).toHaveValue('draft');
+      expect(screen.getByLabelText('Lifecycle')).toHaveTextContent(
+        messages.dashboard.filters.lifecycle_draft,
+      );
       expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
     });
@@ -423,7 +551,9 @@ describe('<DashboardPageRoot />', () => {
     it('falls back an unknown lifecycle URL value to "all"', () => {
       nav.resetSearchParams('lifecycle=bogus');
       renderPage();
-      expect(screen.getByLabelText('Lifecycle')).toHaveValue('all');
+      expect(screen.getByLabelText('Lifecycle')).toHaveTextContent(
+        messages.dashboard.filters.lifecycle_all,
+      );
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
     });
@@ -451,6 +581,15 @@ describe('<DashboardPageRoot />', () => {
       const menu = screen.getByRole('menu');
       expect(within(menu).getByText('Any status')).toBeInTheDocument();
       expect(within(menu).queryByText('All statuses')).toBeNull();
+    });
+
+    it('closes on a click outside it and stays open on a click inside it', async () => {
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+      fireEvent.mouseDown(within(screen.getByRole('menu')).getByText('Any status'));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole('menu')).toBeNull();
     });
 
     it('lists rollup-derived status options and refetches with the selected status', async () => {
@@ -663,7 +802,27 @@ describe('<DashboardPageRoot />', () => {
       renderPage();
       const refreshBtn = screen.getByRole('button', { name: /Refresh dashboard/i });
       await userEvent.click(refreshBtn);
-      expect(await screen.findByText('Refresh failed')).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed');
+      expect(screen.queryByText(/upstream timeout/)).not.toBeInTheDocument();
+    });
+
+    it('shows the profile type text when the refresh is refused for an unserved type', async () => {
+      mockDashboardServiceDashboard.mockRejectedValueOnce(new HttpError(403, 'DOMAIN_NOT_SERVED'));
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(messages.access.domain_not_served);
+    });
+
+    it('keeps the raw text of an unreadable refresh reply out of the banner', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockDashboardServiceDashboard.mockRejectedValueOnce(
+        new ResponseShapeError('/api/dashboard/items', []),
+      );
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        messages.dashboard.state.refreshUnreadable,
+      );
     });
   });
 

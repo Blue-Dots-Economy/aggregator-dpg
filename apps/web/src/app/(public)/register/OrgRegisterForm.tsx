@@ -6,137 +6,217 @@ import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
-import { toConsentDocs } from '../../../components/consent/consent-docs';
+import { toConsentDocs, type ConsentDoc } from '../../../components/consent/consent-docs';
 import {
+  inviteSignInUrl,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
   withOrgCoordinates,
+  withReadonlyField,
+  type SubmitError,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
+  showsErrorBanner,
   RegistrationSubmitButton,
-  RegistrationSuccessPanel,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
+  useRegistrationError,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import { gstinCustomValidate } from '../../../lib/org-schema';
+import { withPhoneWidget } from '../../../lib/phone-ui-schema';
+import { useFieldErrors } from '@/components/forms/useFieldErrors';
+
+/** Message keys for the API's refusals when the inviting org can no longer take the org. */
+const TREE_ERRORS: Record<string, string> = {
+  ORG_DEPTH_LIMIT: 'org_error_depth_limit',
+  ORG_CHILD_LIMIT: 'org_error_child_limit',
+  ORG_TOTAL_LIMIT: 'org_error_total_limit',
+  CONFLICT: 'org_error_conflict',
+};
+
+/**
+ * Returns the message key for a tree refusal, or null for any other error.
+ *
+ * @param error - The failed submission.
+ * @returns A key under `register`, or null.
+ */
+function treeErrorKey(error: SubmitError): string | null {
+  return TREE_ERRORS[error.code] ?? null;
+}
+
+/** The invite an invited owner registers with. */
+export interface OrgFormInvite {
+  token: string;
+  /** The invited owner email. */
+  email: string;
+  /** The inviting org, which the new org registers under. */
+  parentName: string;
+}
 
 export interface OrgRegisterFormProps {
   /** Org-registration JSON Schema loaded by the server component. */
   schema: RJSFSchema;
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
-  /**
-   * Versioned Terms/Privacy content for the org audience. Flattened via
-   * {@link toConsentDocs} into the ordered document list the blocking
-   * {@link ConsentGate} reads at submit time. Omit (or pass `undefined`)
-   * when `loadConsentConfig` failed — the gate then has nothing to show, so
-   * submit surfaces an error instead of opening it.
-   */
+  /** Terms/Privacy content for the org audience; omit when loading failed. */
   consentContent?: ConsentDocContent;
+  /**
+   * Terms/Privacy content for the team member audience. When set, the owner
+   * also reads and accepts it, and the org registration adds them to its team.
+   */
+  teamConsentContent?: ConsentDocContent;
+  invite: OrgFormInvite;
 }
 
 /**
- * Renders the parent-org registration form (spec §6.1). Submits to the BFF
- * proxy which forwards to `/v1/orgs/create`; on success the org sits `pending`
- * until a network admin approves it. Shown only when the org hierarchy flag is
- * on — the caller gates rendering.
+ * Builds the gate's documents: the org's, then the team member's, labelled as such.
  *
- * @param props - The org JSON Schema + UI schema.
- * @returns The org registration content block (form, success, or error state).
+ * @param org - Org consent content.
+ * @param team - Team member consent content, when the owner joins the team.
+ * @param teamTitle - Labels a team document from its own title.
+ * @returns The documents in reading order; the team ones carry `team-` ids.
+ */
+export function orgGateDocs(
+  org: ConsentDocContent | undefined,
+  team: ConsentDocContent | undefined,
+  teamTitle: (title: string) => string,
+): ConsentDoc[] {
+  const teamDocs = toConsentDocs(team).map((d) => ({
+    ...d,
+    id: `team-${d.id}`,
+    title: teamTitle(d.title),
+  }));
+  return [...toConsentDocs(org), ...teamDocs];
+}
+
+/**
+ * Renders the organisation registration form for an invite.
+ *
+ * The org registers under the inviting org and the owner email is locked to
+ * the invited address. After the consent gate it posts to
+ * `/api/invite/org/accept` and then goes to sign-in with that email pre-filled.
+ * With team consent content, the gate also holds the team member documents and
+ * the body carries `team_consent`, so the owner joins the org's team.
+ *
+ * @param props - The org JSON Schema + UI schema, consent content and the invite.
+ * @returns The org registration content block.
  */
 export function OrgRegisterForm({
   schema,
   uiSchema,
   consentContent,
+  teamConsentContent,
+  invite,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
-  // Coordinate the address widget resolved, held outside `formData` because
-  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  const { state, setState, errorRef } = useRegistrationFormState();
+  const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
+    owner: { email: invite.email },
+  }));
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
-  const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
+  const consentDocs = useMemo(
+    () =>
+      orgGateDocs(consentContent, teamConsentContent, (title) =>
+        t('consent.team_doc_title', { title }),
+      ),
+    [consentContent, teamConsentContent, t],
+  );
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
     setState,
   );
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+  const formUiSchema = useMemo(
+    () =>
+      withReadonlyField(withPhoneWidget(uiSchema, formSchema as Record<string, unknown>), [
+        'owner',
+        'email',
+      ]),
+    [uiSchema, formSchema],
+  );
+  const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
+  const fieldErrors = useFieldErrors(formSchema);
+  const registrationError = useRegistrationError(fieldErrors, {
+    email: 'owner.email',
+    phone: 'owner.phone',
+    name: 'display_name',
+  });
 
-  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
+  const teamScope = teamConsentContent ? t('consent.team_scope') : '';
+  const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}${teamScope}.`;
 
-  /** Runs after the gate is accepted: stamps consent and posts. */
+  /** Runs after the gate is accepted: stamps consent, posts, then goes to sign-in. */
   const submitWithConsent = async (): Promise<void> => {
     setGateOpen(false);
     setState({ status: 'submitting' });
     const body: Record<string, unknown> = {
-      // No `?? {}`: spreading null contributes nothing, so the fallback
-      // object was dead weight rather than a guard.
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
+      ...(teamConsentContent ? { team_consent: stampConsent({ value: true }) } : {}),
+      invite: invite.token,
     };
-    const payload = withOrgCoordinates(body, resolvedPlace);
-    const result = await submitRegistration('/api/org/register', payload);
+    const result = await submitRegistration(
+      '/api/invite/org/accept',
+      withOrgCoordinates(body, resolvedPlace),
+    );
     if (!result.ok) {
-      setState({ status: 'error', ...result.error });
+      const key = treeErrorKey(result.error);
+      setState(
+        key
+          ? {
+              status: 'error',
+              title: t(key),
+              detail: '',
+              code: result.error.code,
+              requestId: result.error.requestId,
+            }
+          : registrationError(result.error),
+      );
       return;
     }
-    // A 201 is a new pending registration; a 200 with status 'active' means the
-    // org already existed and its owner was mailed the invite link instead.
-    const alreadyRegistered = result.body['status'] === 'active';
-    setState({
-      status: 'done',
-      refId: String(result.body['slug'] ?? ''),
-      outcome: alreadyRegistered ? 'already_registered' : 'pending',
-      mailSent: result.body['mail_sent'] !== false,
-    });
+    setState({ status: 'signing_in' });
+    window.location.assign(inviteSignInUrl(result.body, '/console'));
   };
-
-  if (state.status === 'done') {
-    const already = state.outcome === 'already_registered';
-    const message = already
-      ? state.mailSent === false
-        ? t('org_exists_mail_failed')
-        : t('org_exists_link_sent')
-      : t('org_success_review');
-    return (
-      <RegistrationSuccessPanel
-        heading={already ? t('org_exists_heading') : t('org_success_heading')}
-        refLabel={t('org_success_slug')}
-        refId={state.refId}
-        message={message}
-      />
-    );
-  }
 
   return (
     <div className="mt-7">
-      {state.status === 'error' ? (
+      {showsErrorBanner(state) ? (
         <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
+      ) : null}
+
+      <output className="mb-5 block text-[13.5px] text-ink-500">
+        {t('invite_org_under', { parent: invite.parentName })}
+      </output>
+      {teamConsentContent ? (
+        <p className="mb-5 text-[13.5px] text-ink-500">{t('consent.team_join_note')}</p>
       ) : null}
 
       <RjsfThemedForm
         schema={formSchema}
-        uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
+        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          setCanSubmit,
-          setState,
           handleSubmit,
-          formSchema,
+          fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
-          validationErrorTitle: t('validation_error_title'),
+          personName: {
+            path: 'owner.name',
+            message: (symbols) => t('name_symbols', { symbols }),
+          },
+          customValidate,
         })}
       >
         <RegistrationSubmitButton
-          submitting={state.status === 'submitting'}
-          canSubmit={canSubmit}
+          submitting={state.status === 'submitting' || state.status === 'signing_in'}
+          onAttempt={fieldErrors.markAttempted}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

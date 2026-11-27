@@ -19,7 +19,7 @@ function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T
 
 export interface ConformanceOpts {
   /** A valid aggregator id (Postgres needs an existing FK target; memory ignores it). */
-  aggregatorId: string;
+  userId: string;
 }
 
 export function runStoreConformance(
@@ -29,7 +29,7 @@ export function runStoreConformance(
   const base = (over: Partial<CreateJobInput> = {}): CreateJobInput => {
     const p = randomUUID().slice(0, 8);
     return {
-      aggregatorId: opts.aggregatorId,
+      userId: opts.userId,
       signalstackOrgId: `org-${p}`,
       channel: 'export',
       metadata: [{ key: 'purpose', value: 'audit' }],
@@ -289,8 +289,8 @@ export function runStoreConformance(
       expect(proc.channel).toBe('export');
       expect(proc.signalstackOrgId).toBe(input.signalstackOrgId);
       expect(proc.requestedBy).toBe('user@org.example');
-      expect(proc.items.map((i) => i.itemId).sort()).toEqual(
-        input.items.map((i) => i.itemId).sort(),
+      expect(proc.items.map((i) => i.itemId).sort((a, b) => a.localeCompare(b))).toEqual(
+        input.items.map((i) => i.itemId).sort((a, b) => a.localeCompare(b)),
       );
     });
 

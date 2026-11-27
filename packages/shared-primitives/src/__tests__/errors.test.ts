@@ -6,6 +6,9 @@ import {
   AuthError,
   ValidationError,
   DomainError,
+  toError,
+  errorMessage,
+  errorType,
 } from '../errors/index.js';
 
 describe('BaseError', () => {
@@ -95,5 +98,68 @@ describe('Error subclasses', () => {
   it('toJSON reflects subclass name', () => {
     const e = new ValidationError('bad');
     expect(e.toJSON().name).toBe('ValidationError');
+  });
+});
+
+describe('toError', () => {
+  it('returns an Error unchanged', () => {
+    const e = new UpstreamError('UPSTREAM_TIMEOUT', 'timed out');
+    expect(toError(e)).toBe(e);
+  });
+
+  it('wraps a thrown string, keeping it as the message', () => {
+    const e = toError('boom');
+    expect(e).toBeInstanceOf(Error);
+    expect(e.message).toBe('boom');
+  });
+
+  it('wraps a thrown object, keeping the original as the cause', () => {
+    const thrown = { code: 'X' };
+    const e = toError(thrown);
+    expect(e.message).toBe('[object Object]');
+    expect(e.cause).toBe(thrown);
+  });
+
+  it('keeps the message of a thrown error-like object', () => {
+    const thrown = { message: 'socket hang up', code: 'ECONNRESET' };
+    const e = toError(thrown);
+    expect(e.message).toBe('socket hang up');
+    expect(e.cause).toBe(thrown);
+  });
+
+  it('ignores a message that is not a string', () => {
+    expect(toError({ message: 42 }).message).toBe('[object Object]');
+  });
+
+  it('wraps undefined and null', () => {
+    expect(toError(undefined).message).toBe('undefined');
+    expect(toError(null).message).toBe('null');
+  });
+});
+
+describe('errorMessage', () => {
+  it('reads the message of an Error', () => {
+    expect(errorMessage(new Error('db down'))).toBe('db down');
+  });
+
+  it('stringifies anything else', () => {
+    expect(errorMessage('plain')).toBe('plain');
+    expect(errorMessage(42)).toBe('42');
+  });
+
+  it('reads the message of an error-like object', () => {
+    expect(errorMessage({ message: 'db down' })).toBe('db down');
+  });
+});
+
+describe('errorType', () => {
+  it('names the class of an Error', () => {
+    expect(errorType(new TypeError('x'))).toBe('TypeError');
+    expect(errorType(new ConfigError('BAD', 'x'))).toBe('ConfigError');
+  });
+
+  it("answers 'unknown' for a value that is not an Error", () => {
+    expect(errorType('boom')).toBe('unknown');
+    expect(errorType(undefined)).toBe('unknown');
   });
 });

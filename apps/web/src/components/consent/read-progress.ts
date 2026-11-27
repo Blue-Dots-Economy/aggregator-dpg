@@ -2,11 +2,8 @@
 /**
  * Scroll-gating logic for the consent gate.
  *
- * All decisions live in {@link computeReadProgress}, a pure function over plain
- * numbers. jsdom performs no layout — every offset and scroll property reads 0
- * — so testing this through the DOM would mean stubbing geometry on every
- * element. Keeping the logic pure makes it directly testable; the hook only
- * measures and delegates.
+ * All decisions live in the pure function {@link computeReadProgress}, so they
+ * can be tested without layout. The hook only measures and delegates.
  *
  * @module apps/web/src/components/consent/read-progress
  */
@@ -14,9 +11,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { ConsentDoc } from './consent-docs';
 
 /**
- * Slack when comparing scroll offsets, in CSS pixels. Fractional device pixel
- * ratios and iOS momentum overscroll both leave `scrollTop + clientHeight` a
- * pixel or so short of `scrollHeight`; exact equality would never fire.
+ * Tolerance for scroll offset comparisons, in CSS pixels. Fractional pixel
+ * ratios and iOS overscroll can leave the bottom a pixel short.
  */
 const TOLERANCE = 8;
 
@@ -48,8 +44,7 @@ export interface ReadProgress {
  *
  * @param scroll - Scroll container geometry.
  * @param sections - Section geometry, in document order.
- * @param alreadyRead - Ids already read; never dropped, so scrolling back up
- *   cannot un-read a document.
+ * @param alreadyRead - Ids already read; never dropped.
  * @returns Progress across the whole stack.
  */
 export function computeReadProgress(
@@ -61,9 +56,7 @@ export function computeReadProgress(
     return { readIds: [], currentId: null, fillPercent: 100, allRead: true };
   }
 
-  // A container that has not been laid out yet is 0x0, which would otherwise
-  // satisfy the unscrollable test below and mark every document read before
-  // the reader has seen anything. Unmeasured is not evidence of anything.
+  // An unmeasured (0x0) container must not count as unscrollable.
   if (scroll.clientHeight === 0 || scroll.scrollHeight === 0) {
     const readIds = sections.filter((s) => alreadyRead.includes(s.id)).map((s) => s.id);
     return {
@@ -75,10 +68,7 @@ export function computeReadProgress(
   }
 
   const viewBottom = scroll.scrollTop + scroll.clientHeight;
-  // Content that cannot scroll has, by definition, already been shown in full.
-  // Without this a document shorter than the viewport — the 111-character
-  // profile statement — would never be markable as read and would lock the
-  // form permanently on every network.
+  // Content that cannot scroll has been shown in full, so it counts as read.
   const unscrollable =
     scroll.clientHeight > 0 && scroll.scrollHeight <= scroll.clientHeight + TOLERANCE;
 
@@ -97,27 +87,10 @@ export function computeReadProgress(
   }
 
   const readIds = sections.filter((s) => read.has(s.id)).map((s) => s.id);
-  // The fill line spans the N-1 gaps *between* the N per-document dots, so a
-  // document's own reading progress only shows up once the reader has moved
-  // on to the NEXT document.
-  //
-  // That model degenerates at exactly two documents: with one gap,
-  // `(readIds.length + fractionOfCurrent) / segments` already reads 1/1 =
-  // 100% the instant the FIRST document finishes — before a single pixel of
-  // the second has been read. Three of this repo's four consent surfaces
-  // (org registration, coordinator registration, the account-only QR gate)
-  // show exactly two documents (privacy + terms), so this is the common case,
-  // not an edge case.
-  //
-  // Widening the denominator to `sections.length` (instead of `- 1`) would
-  // fix it, but would also change the fill trajectory for three-or-more
-  // documents — e.g. at 1 of 3 read, halfway through the 2nd: 75% today
-  // under the gap model vs 50% under a whole-count model — a real behaviour
-  // change for the QR full form (privacy + terms + profile) this repo does
-  // not want to diverge from. So only the exact two-document case gets the
-  // wider denominator; three-and-up keeps the unchanged gap model. Ported
-  // from the sibling Signals repo (commit 033d6315), which mirrors this
-  // repo's identical geometry.
+  // The fill line spans the gaps between dots, so a document's progress shows
+  // once the reader moves to the next one. With exactly two documents that
+  // model would show 100% as soon as the first is read, so the two-document
+  // case divides by the document count instead.
   const segments = sections.length === 2 ? sections.length : Math.max(1, sections.length - 1);
   const fillPercent = Math.min(100, ((readIds.length + fractionOfCurrent) / segments) * 100);
 
@@ -127,16 +100,12 @@ export function computeReadProgress(
 /**
  * Bootstrap progress, before the first measurement has run.
  *
- * Deliberately NOT `computeReadProgress({...}, [], [])`: an empty `sections`
- * array hits the pure function's empty-document-list branch, which reports
- * `allRead: true` so a genuinely empty list cannot block forever. Here "no
- * sections yet" means "not measured", the opposite — and an unmeasured gate
- * must never render its checkbox enabled. `useEffect` runs after paint, so a
- * wrong `true` here is briefly visible in a real browser before `measure()`
- * ever runs.
+ * Not `computeReadProgress({...}, [], [])`: an empty `sections` list reports
+ * `allRead: true`, but here it means "not measured yet", which must keep the
+ * checkbox disabled.
  *
  * @param docs - Documents the gate is about to render, in order.
- * @returns Nothing-read progress, except for a genuinely empty `docs` list.
+ * @returns Nothing-read progress, or all-read for an empty `docs` list.
  */
 export function initialProgress(docs: readonly ConsentDoc[]): ReadProgress {
   return {
@@ -150,8 +119,8 @@ export function initialProgress(docs: readonly ConsentDoc[]): ReadProgress {
 /**
  * Tracks read progress for a scroll container holding `docs` in order.
  *
- * Re-measures on scroll and on resize: a web-font swap, async Markdown render,
- * or orientation change all move the geometry after first paint.
+ * Re-measures on scroll and resize, since font loads, Markdown rendering, and
+ * orientation changes move the layout after first paint.
  *
  * @param scrollRef - Ref to the scrolling element.
  * @param docs - Documents rendered inside it, in order.
@@ -167,14 +136,9 @@ export function useReadProgress(
   const measure = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Section top in the SCROLLER's own content space — the same space as
-    // `scrollTop + clientHeight` below — via a getBoundingClientRect delta.
-    // `node.offsetTop` measures from the nearest *positioned* ancestor, which
-    // in a real layout is very often not the scroller itself (here it was the
-    // dialog panel, several headers up). That produced a constant shortfall
-    // between `viewBottom` and every section's bottom, so `allRead` could
-    // never be reached — verified in a real browser, not just jsdom. A rect
-    // delta is independent of which ancestor happens to be positioned.
+    // Section top in the scroller's content space, from a getBoundingClientRect
+    // delta. `offsetTop` is relative to the nearest positioned ancestor, which
+    // may not be the scroller.
     const readerRect = el.getBoundingClientRect();
     const sections: SectionBox[] = [];
     for (const doc of docs) {
@@ -193,11 +157,8 @@ export function useReadProgress(
       sections,
       readRef.current,
     );
-    // Union, don't replace: computeReadProgress only re-emits an id whose
-    // section was found in *this* call's `sections`. A transiently missing
-    // DOM node (remount, conditional render, a measurement racing layout)
-    // would otherwise silently drop that id from the bookkeeping and the
-    // tracker would go backwards. Stickiness is the whole guarantee.
+    // Union with the previous ids so a briefly missing section never makes
+    // the tracker go backwards.
     readRef.current = Array.from(new Set([...readRef.current, ...next.readIds]));
     setProgress(next);
   }, [scrollRef, docs]);

@@ -14,7 +14,7 @@ function keyPaths(obj: Record<string, unknown>, prefix = ''): string[] {
 }
 
 describe('message catalogs', () => {
-  const enKeys = keyPaths(en).sort();
+  const enKeys = keyPaths(en).sort((a, b) => a.localeCompare(b));
 
   it('en has at least the seed namespaces', () => {
     expect(enKeys).toContain('language.label');
@@ -22,10 +22,20 @@ describe('message catalogs', () => {
   });
 
   it('kn has exactly the same keys as en', () => {
-    expect(keyPaths(kn).sort()).toEqual(enKeys);
+    expect(keyPaths(kn).sort((a, b) => a.localeCompare(b))).toEqual(enKeys);
   });
 
   it('hi has exactly the same keys as en', () => {
-    expect(keyPaths(hi).sort()).toEqual(enKeys);
+    expect(keyPaths(hi).sort((a, b) => a.localeCompare(b))).toEqual(enKeys);
+  });
+
+  // Call-back is deferred (#1123): the participant places the call, so no
+  // locale may say they can request one.
+  it.each([
+    ['en', en.registration_mode.voice_or_form.hint, /request a call/i],
+    ['hi', hi.registration_mode.voice_or_form.hint, /अनुरोध/],
+    ['kn', kn.registration_mode.voice_or_form.hint, /ಕೋರ/],
+  ])('%s voice_or_form hint does not promise a call-back', (_locale, hint, forbidden) => {
+    expect(hint).not.toMatch(forbidden);
   });
 });

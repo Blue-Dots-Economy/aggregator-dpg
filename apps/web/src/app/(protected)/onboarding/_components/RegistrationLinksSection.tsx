@@ -6,7 +6,14 @@ import QRCode from 'qrcode';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
-import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
+import {
+  FieldMessage,
+  useHandFieldErrors,
+  type HandControlProps,
+  type HandFieldError,
+} from '@/components/forms/useHandFieldErrors';
+import { useFieldErrorCopy } from '@/components/forms/useFieldErrors';
+import { useRequestErrorMessage } from '@/components/forms/useRequestErrorMessage';
 import { I } from '../../../../icons';
 import {
   useActivateLink,
@@ -17,19 +24,22 @@ import {
 } from '../../../../hooks/useOnboarding';
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
+import { useIsClient } from '@/hooks/useIsClient';
+import { useActiveDomain } from '@/hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
+import { SelectField } from '@/components/ui/SelectField';
+import { VoiceBotPicker, needsVoiceBotChoice } from './VoiceBotPicker';
+import { useVoiceBots } from '@/hooks/useOnboarding';
+import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
+import { formatPhoneForReading } from '@/lib/phone';
 
 interface CreateLinkFormState {
-  /**
-   * Domain id from the live network config (e.g. 'seeker' on blue/purple,
-   * 'tourist' on orange_dot). Pinned to the aggregator's registered
-   * `type` at mount time — the read-only Domain field shows the matching
-   * `label`/`plural_label` from cfg.domains.
-   */
+  /** Domain id from the network config (e.g. `seeker`), set to the aggregator's registered type. */
   domain: string;
   /** Instance (state of operation). Drives slug + display title. */
   state: string;
-  /** District — required, drives slug + display title. */
+  /** District. Required. Drives slug + display title. */
   district: string;
   /** Free-form lever / event label (e.g. "Field Drive", "Campaign"). */
   lever_event: string;
@@ -38,18 +48,19 @@ interface CreateLinkFormState {
   /** Optional event venue / city. */
   event_location: string;
   /**
-   * Per-link registration mode key — chosen at create time, immutable
-   * afterwards. Sourced from the live network config's `registration_modes`.
-   * Empty until the config loads (an effect pins the default).
+   * Registration mode key from the network config's `registration_modes`.
+   *
+   * Set at create time and cannot change. Empty until the config loads.
    */
   registration_mode: string;
+  /** Chosen voice bot key, or `null` to let the API store the default bot. Only sent when the mode offers voice. */
+  voice_bot_key: string | null;
   /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
   tags: string;
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
-  // Empty until rawProfile loads — the effect below pins it to the
-  // aggregator's registered domain id once the profile resolves.
+  // Empty until the profile loads; an effect then sets the aggregator's domain.
   domain: '',
   state: '',
   district: '',
@@ -57,6 +68,7 @@ const EMPTY_FORM: CreateLinkFormState = {
   event_date: '',
   event_location: '',
   registration_mode: '',
+  voice_bot_key: null,
   tags: '',
 };
 
@@ -106,9 +118,9 @@ function buildLinkTitle(f: CreateLinkFormState): string {
 }
 
 /**
- * Splits a public URL into `{ host, path }` for the emphasised-slug display.
- * Empty for a null URL (draft/retired rows); a malformed URL keeps the raw
- * string as the host.
+ * Splits a public URL into `{ host, path }` for display.
+ *
+ * Returns empty parts for a null URL. A malformed URL is returned as the host.
  */
 function splitPublicUrl(publicUrl: string | null): { host: string; path: string } {
   if (!publicUrl) return { host: '', path: '' };
@@ -120,36 +132,43 @@ function splitPublicUrl(publicUrl: string | null): { host: string; path: string 
   }
 }
 
+/** How long a success toast stays on screen; long enough to read one short sentence. */
+const TOAST_VISIBLE_MS = 2400;
+
 /**
- * Top-right green toast for success notifications. Portals to <body> so a
- * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
- * dismisses after 2400ms, matching the profile-save toast.
+ * Top-right success toast, rendered in a portal on <body>.
+ *
+ * Closes itself `TOAST_VISIBLE_MS` after it mounts. A parent re-render does
+ * not restart the timer; give it a new `key` to show a new message.
  */
 function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const isClient = useIsClient();
+  // The latest callback, so a new function from the parent does not restart the timer.
+  const onDoneRef = useRef(onDone);
   useEffect(() => {
-    const t = setTimeout(onDone, 2400);
-    return () => clearTimeout(t);
-  }, [onDone]);
-  if (!mounted) return null;
+    onDoneRef.current = onDone;
+  });
+  useEffect(() => {
+    const timer = setTimeout(() => onDoneRef.current(), TOAST_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (!isClient) return null;
   return createPortal(
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className="fixed top-4 left-4 right-4 sm:left-auto z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
       <I.check size={14} /> {message}
-    </div>,
+    </output>,
     document.body,
   );
 }
 
 /**
- * QR preview modal (#650). The QR is derived data — the caller generates the
- * PNG data-URI in the browser from the link's public URL and passes it here;
- * nothing is persisted. Portals to <body>. Shows the code with a Download
- * action. `dataUrl === null` while generating; `error` when generation failed.
+ * QR preview modal with a Download action, rendered in a portal on <body>.
+ *
+ * The caller generates the PNG data URI in the browser. `dataUrl` is `null`
+ * while generating; `error` is set when generation failed.
  */
 function QrPreviewModal({
   title,
@@ -166,15 +185,13 @@ function QrPreviewModal({
 }>) {
   const t = useTranslations('onboarding');
   const dialogRef = useRef<HTMLDialogElement>(null);
-  // Native <dialog> + showModal(): top-layer stacking (no z-index), a built-in
-  // focus trap, focus restore to the trigger, and Esc-to-close for free.
+  // Native <dialog> gives focus trapping, focus restore, and Esc-to-close.
   useEffect(() => {
     const el = dialogRef.current;
     el?.showModal?.();
     return () => el?.close?.();
   }, []);
 
-  // Extracted from a nested ternary so each state reads as one branch.
   let body: React.ReactNode;
   if (error) {
     body = <p className="text-[13px] text-rose-600">{error}</p>;
@@ -222,91 +239,115 @@ function QrPreviewModal({
 function Field({
   label,
   required,
+  error,
   children,
 }: {
   label: string;
   required?: boolean;
+  /** Message under the control, and its element id. */
+  error?: { id: string; message: string | undefined };
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="bd-label">
-        {label}
-        {required && <span className="text-rose-500 ml-0.5">*</span>}
-      </span>
-      {children}
-    </label>
+    <div>
+      <label className="block">
+        <span className="bd-label">
+          {label}
+          {required && <span className="text-rose-500 ml-0.5">*</span>}
+        </span>
+        {children}
+      </label>
+      {error ? <FieldMessage id={error.id} message={error.message} /> : null}
+    </div>
   );
+}
+
+/** Required-field checks shared by the create and edit link forms. */
+type LinkFieldKey = 'state' | 'lever_event' | 'district' | 'domain' | 'registration_mode';
+
+/** A "{label} is required." error when `value` is empty. */
+function requiredError(value: string, message: string): HandFieldError | null {
+  return value ? null : { kind: 'required', message };
+}
+
+/** Control props plus the Field `error` prop for one key. */
+function wire<K extends string>(
+  fe: {
+    controlProps: (k: K) => HandControlProps;
+    errorId: (k: K) => string;
+    message: (k: K) => string | undefined;
+  },
+  key: K,
+) {
+  return {
+    control: fe.controlProps(key),
+    error: { id: fe.errorId(key), message: fe.message(key) },
+  };
 }
 
 export function CreateLinkSection() {
   const t = useTranslations('onboarding');
-  // Root-scoped translator for runtime-config i18n keys (registration mode
-  // labels/hints are top-level keys declared in network config, not under
-  // the `onboarding` namespace).
+  const requestErrorText = useRequestErrorText();
+  // Root translator for registration mode keys from network config.
   const tRoot = useTranslations();
   const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
+  const copy = useFieldErrorCopy();
+  const requestMessage = useRequestErrorMessage({
+    DUPLICATE_SLUG: t('create_link.error_duplicate_slug'),
+  });
   const [toast, setToast] = useState<string | null>(null);
   const create = useCreateLink();
   const profile = useProfile();
   const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
-  const aggregatorType = rawProfile.data?.type ?? '';
+  const { domains: servedDomains, active: activeDomain } = useActiveDomain();
   const { data: cfg } = useAggregatorConfig();
-  const domainCfg = cfg?.domains?.find((d) => d.id === aggregatorType);
-  // Label rendered in the read-only Domain field. Pulls from the live
-  // network config so orange's `tourist` shows "Tourists" not "Provider".
-  const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? aggregatorType;
-  // Field caption lists every configured domain, e.g. "Seekers / Providers".
-  // The value below is the one this aggregator is scoped to.
-  const domainsCaption =
-    (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
-    t('create_link.field_domain');
+  const offersVoice = cfg?.registration_modes?.[form.registration_mode]?.offers?.includes('voice');
+  const domainCfg = servedDomains.find((d) => d.id === form.domain);
+  // Shares the picker's cached bot list; blocks submit when a bot must be chosen.
+  const voiceBots = useVoiceBots(form.domain);
+  const [botChoiceBlocked, setBotChoiceBlocked] = useState(false);
+  const mustChooseBot = !!offersVoice && needsVoiceBotChoice(voiceBots.data, form.voice_bot_key);
+  // Label for the read-only Domain field, from network config.
+  const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? form.domain;
 
-  // Unmet required fields, surfaced under the (disabled) create button so the
-  // user is never left guessing why submit won't fire.
-  const createBlockers: string[] = [];
-  if (!form.state) createBlockers.push(t('create_link.blockers.state'));
-  if (!form.district) createBlockers.push(t('create_link.blockers.district'));
-  if (!form.lever_event) createBlockers.push(t('create_link.blockers.lever_event'));
-  if (!form.domain) createBlockers.push(t('create_link.blockers.domain'));
-  if (!form.registration_mode) createBlockers.push(t('create_link.blockers.registration_mode'));
+  const fe = useHandFieldErrors<LinkFieldKey>('create-link', {
+    state: requiredError(form.state, copy.required(t('create_link.field_state'))),
+    lever_event: requiredError(form.lever_event, copy.required(t('create_link.field_event'))),
+    district: requiredError(form.district, copy.required(t('create_link.field_district'))),
+    domain: requiredError(form.domain, copy.required(t('create_link.field_domain'))),
+    registration_mode: requiredError(
+      form.registration_mode,
+      copy.required(t('create_link.field_registration_mode')),
+    ),
+  });
+  const w = (key: LinkFieldKey) => wire(fe, key);
 
-  // Pin the link domain to the aggregator's registered type — the API
-  // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
-  // the user pick the wrong one.
+  // The page's domain tabs choose the link's domain, including after the form resets.
   useEffect(() => {
-    if (rawProfile.data?.type) {
-      setForm((f) =>
-        f.domain === rawProfile.data.type ? f : { ...f, domain: rawProfile.data.type! },
-      );
-    }
-  }, [rawProfile.data?.type]);
+    if (!activeDomain) return;
+    // A bot chosen for one domain may not exist in another, so the choice resets with the domain.
+    setForm((f) =>
+      f.domain === activeDomain ? f : { ...f, domain: activeDomain, voice_bot_key: null },
+    );
+  }, [activeDomain, form.domain]);
 
-  // Pin the registration mode to the network's default once the config
-  // loads. Prefer the `form` key (full-profile, legacy default) when the
-  // network declares it, else the first declared mode. Only fills while
-  // empty so a user selection stays sticky.
+  // Default the mode once config loads: `voice_or_form` if declared, else
+  // `form`, else the first mode. Only fills while empty, so a user choice is kept.
   useEffect(() => {
     const modes = cfg?.registration_modes ?? {};
     const keys = Object.keys(modes);
     if (keys.length === 0) return;
-    const fallback = keys.includes('form') ? 'form' : keys[0]!;
+    const fallback = ['voice_or_form', 'form'].find((k) => keys.includes(k)) ?? keys[0]!;
     setForm((f) => (f.registration_mode ? f : { ...f, registration_mode: fallback }));
   }, [cfg?.registration_modes]);
 
-  // Prefill state / district / event location from the aggregator's first
-  // postal address. User can still override. Only fills on first load —
-  // subsequent edits stay sticky.
-  //
-  // Since #810 the address is one free-text line, so `addressRegion` and
-  // `addressLocality` exist only on rows registered before that. State and
-  // district are left blank rather than guessed — a state cannot be parsed out
-  // of free text reliably, and a wrong prefill the user does not notice is
-  // worse than an empty one they fill in. `event_location` is itself a
-  // free-text label, so the address is a valid value for it.
+  // Prefill state, district, and event location from the first postal address
+  // on first load. The address is one free-text line; `addressRegion` and
+  // `addressLocality` exist only on older rows. State and district are not
+  // parsed from free text.
   useEffect(() => {
     const firstLoc = rawProfile.data?.locations?.[0]?.address;
     if (!firstLoc) return;
@@ -327,13 +368,16 @@ export function CreateLinkSection() {
       event_location: firstLoc?.addressLocality ?? firstLoc?.streetAddress ?? '',
     });
     setCreateError(null);
+    fe.reset();
   };
 
   const onCreate = async () => {
-    // The Create button is disabled while `createBlockers` is non-empty
-    // (state/district/lever_event required) — this handler can't fire
-    // with any of those missing, so no separate guard is needed here.
     setCreateError(null);
+    if (!fe.validate()) return;
+    if (mustChooseBot) {
+      setBotChoiceBlocked(true);
+      return;
+    }
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
@@ -341,6 +385,7 @@ export function CreateLinkSection() {
         domain: form.domain,
         status: 'draft',
         registration_mode: form.registration_mode,
+        ...(offersVoice && form.voice_bot_key ? { voice_bot_key: form.voice_bot_key } : {}),
         ...(slug ? { slug } : {}),
         title,
         context: {
@@ -354,16 +399,12 @@ export function CreateLinkSection() {
           ...(parseTags(form.tags).length > 0 ? { tags: parseTags(form.tags) } : {}),
         },
       });
-      // Refresh the form so the user can compose the next link from scratch.
-      // The newly-created draft appears in "Your Registration Links" on the
-      // onboarding page; pass its id as `?new=` so that list scrolls to and
-      // highlights the fresh draft (and its "Make Live" CTA) — otherwise the
-      // navigation makes the just-created link feel like it vanished.
+      // Reset the form. `?new=` tells the links list to scroll to and highlight the new draft.
       resetSection();
       setToast(t('create_link.link_created'));
       router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
     } catch (err) {
-      setCreateError((err as Error).message);
+      setCreateError(requestErrorText(err, requestMessage(err, t('create_link.save_failed'))));
     }
   };
 
@@ -394,17 +435,19 @@ export function CreateLinkSection() {
               />
             </Field>
           </div>
-          <Field label={t('create_link.field_state')} required>
+          <Field label={t('create_link.field_state')} required error={w('state').error}>
             <input
               className="bd-input"
+              {...w('state').control}
               value={form.state}
               onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
               placeholder={t('create_link.placeholder_state')}
             />
           </Field>
-          <Field label={t('create_link.field_event')} required>
+          <Field label={t('create_link.field_event')} required error={w('lever_event').error}>
             <input
               className="bd-input"
+              {...w('lever_event').control}
               value={form.lever_event}
               onChange={(e) => setForm((f) => ({ ...f, lever_event: e.target.value }))}
               placeholder={t('create_link.placeholder_event')}
@@ -426,43 +469,57 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_location')}
             />
           </Field>
-          <Field label={t('create_link.field_district')} required>
+          <Field label={t('create_link.field_district')} required error={w('district').error}>
             <input
               className="bd-input"
+              {...w('district').control}
               value={form.district}
               onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
               placeholder={t('create_link.placeholder_district')}
             />
           </Field>
-          <Field label={domainsCaption} required>
-            {/*
-             * Pinned to the aggregator's registered type — single-type
-             * enforcement is what the API expects. Rendered read-only so
-             * the user sees the value but can't switch domains.
-             */}
-            <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
+          <Field label={t('create_link.field_domain')} required error={w('domain').error}>
+            {/* Set by the page's domain tabs, so plain text, not an input that looks editable. */}
+            <span
+              {...w('domain').control}
+              className="block rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2.5 text-[14px] text-(--bd-fg)"
+            >
+              {domainLabel}
+            </span>
           </Field>
           {/*
-           * Per-link registration mode — chosen here at create time, immutable
-           * afterwards. Options are sourced from the live network config's
-           * `registration_modes` so adding a channel (sms, kiosk, …) needs no
-           * web change. The mode's `public_hint_i18n_key` is intentionally NOT
-           * shown here — it is end-user copy for the public submission form,
-           * not for the aggregator creating the link.
+           * Registration mode, set at create time and fixed afterwards. Options
+           * come from the network config's `registration_modes`. The mode's
+           * `public_hint_i18n_key` is for the public form, so it is not shown here.
            */}
-          <Field label={t('create_link.field_registration_mode')} required>
-            <select
-              className="bd-input"
+          <Field
+            label={t('create_link.field_registration_mode')}
+            required
+            error={w('registration_mode').error}
+          >
+            <SelectField
+              {...w('registration_mode').control}
               value={form.registration_mode}
-              onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
-            >
-              {Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => (
-                <option key={key} value={key}>
-                  {tRoot(mode.label_i18n_key)}
-                </option>
-              ))}
-            </select>
+              onChange={(v) =>
+                setForm((f) => ({ ...f, registration_mode: v, voice_bot_key: null }))
+              }
+              options={Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => ({
+                value: key,
+                label: tRoot(mode.label_i18n_key),
+              }))}
+            />
           </Field>
+          {offersVoice && form.domain && (
+            <VoiceBotPicker
+              domain={form.domain}
+              value={form.voice_bot_key}
+              onChange={(key) => {
+                setBotChoiceBlocked(false);
+                setForm((f) => ({ ...f, voice_bot_key: key }));
+              }}
+              showChoiceRequired={botChoiceBlocked}
+            />
+          )}
           {/* Optional free-form tags (comma-separated). Stored on context.tags. */}
           <Field label={t('create_link.field_tags')}>
             <input
@@ -472,23 +529,21 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_tags')}
             />
           </Field>
-          {/* Option B: keep the create button gated, but list what's still
-              missing so a disabled button always explains itself. */}
-          {createBlockers.length > 0 && (
-            <div className="md:col-span-2">
-              <SubmitBlockers
-                reasons={createBlockers}
-                heading={t('create_link.blockers.heading')}
-              />
-            </div>
-          )}
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending || createBlockers.length > 0}>
+            <Button
+              onClick={() => {
+                void onCreate();
+              }}
+              disabled={create.isPending}
+            >
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
           {createError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+            <div
+              role="alert"
+              className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+            >
               {createError}
             </div>
           )}
@@ -505,16 +560,15 @@ export function CreateLinkSection() {
           </div>
         </div>
       </div>
-      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
+      {toast && <SuccessToast key={toast} message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
 
 /**
- * When `highlight` is set (a just-created draft, `?new=`), bring the card into
- * view and pulse a ring for ~2s so the user sees where it landed and its
- * "Make Live" CTA — otherwise the create → onboarding nav can feel like the
- * link vanished. Returns the card ref + whether the ring is currently shown.
+ * Scrolls a just-created card into view and shows a ring for about 2s.
+ *
+ * @returns The card ref and whether the ring is shown.
  */
 function useHighlightOnMount(highlight: boolean) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -528,11 +582,7 @@ function useHighlightOnMount(highlight: boolean) {
   return { cardRef, ringed };
 }
 
-/**
- * Pill + dot colours per link status. A lookup rather than nested ternaries in
- * the JSX: the two were duplicating the same status test, and the nesting is
- * what pushed LinkCard over the cognitive-complexity limit.
- */
+/** Pill and dot colours per link status. */
 const STATUS_STYLE: Record<string, { pill: string; dot: string }> = {
   live: { pill: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
   retired: { pill: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
@@ -544,17 +594,24 @@ function LinkCard({
   highlight = false,
 }: Readonly<{
   link: ApiRegistrationLink;
-  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
+  /** True for a just-created link (`?new=`); scrolls to and highlights it. */
   highlight?: boolean;
 }>) {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   const format = useFormatter();
+  const phoneCountries = usePhoneCountries();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const { cardRef, ringed } = useHighlightOnMount(highlight);
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const update = useUpdateLink();
+  const copy = useFieldErrorCopy();
+  const requestMessage = useRequestErrorMessage({
+    DUPLICATE_SLUG: t('create_link.error_duplicate_slug'),
+  });
+  const [actionError, setActionError] = useState<string | null>(null);
   const isLive = link.status === 'live';
   const isDraft = link.status === 'draft';
   const badge = STATUS_STYLE[link.status] ?? DRAFT_STATUS_STYLE;
@@ -569,8 +626,7 @@ function LinkCard({
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
     `${t('link_card.created_prefix')} ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
-  // `<host>/<orgSlug>/<slug>` with the slug emphasised. Empty for drafts/
-  // retired rows (null public_url); a malformed URL falls back to raw host.
+  // `<host>/<orgSlug>/<slug>`. Empty when `public_url` is null.
   const { host: urlHost, path: urlPath } = splitPublicUrl(link.public_url);
   const onCopy = async () => {
     if (!link.public_url || !navigator.clipboard) return;
@@ -578,9 +634,7 @@ function LinkCard({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-  // #650: the QR is derived data — generated in the browser from the public
-  // URL on demand (no S3 round-trip, never expires). Opening the preview
-  // renders the PNG data-URI; Download reuses the same in-memory value.
+  // The QR is generated in the browser from the public URL when the preview opens.
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -610,9 +664,7 @@ function LinkCard({
     a.remove();
   };
 
-  // Inline edit form state — drafts only. Pre-populated from the link's
-  // current context. Slug is regenerated server-side from district+lever+date
-  // on save (matches the create flow).
+  // Inline edit form state (drafts only). The server regenerates the slug on save.
   const [editForm, setEditForm] = useState<CreateLinkFormState>(() => ({
     domain: link.domain,
     state: ctxString('state'),
@@ -620,18 +672,22 @@ function LinkCard({
     lever_event: ctxString('lever_event'),
     event_date: ctxString('event_date'),
     event_location: ctxString('event_location'),
-    // Carry the existing link's mode so the edit form can render a
-    // read-only badge. registration_mode is immutable post-create so the
-    // edit path must not POST a new value.
+    // Shown read-only. The edit request must not send a new registration_mode.
     registration_mode: link.registration_mode ?? 'form',
+    // The bot is fixed at create time; the edit form never sends it.
+    voice_bot_key: null,
     tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
+  const editFe = useHandFieldErrors<LinkFieldKey>(`edit-link-${link.link_id}`, {
+    state: requiredError(editForm.state, copy.required(t('create_link.field_state'))),
+    district: requiredError(editForm.district, copy.required(t('create_link.field_district'))),
+    lever_event: requiredError(editForm.lever_event, copy.required(t('create_link.field_event'))),
+  });
+  const ew = (key: LinkFieldKey) => wire(editFe, key);
   const onSaveEdit = async () => {
-    // The Save button is disabled while state/district/lever_event are
-    // missing — this handler can't fire with any of those unset, so no
-    // separate guard is needed here.
     setEditError(null);
+    if (!editFe.validate()) return;
     try {
       const slug = buildLinkSlug(editForm);
       const editTitle = buildLinkTitle(editForm);
@@ -653,7 +709,7 @@ function LinkCard({
       });
       setEditing(false);
     } catch (err) {
-      setEditError((err as Error).message);
+      setEditError(requestErrorText(err, requestMessage(err, t('create_link.save_failed'))));
     }
   };
 
@@ -664,8 +720,7 @@ function LinkCard({
         ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
       }`}
     >
-      {/* Phones stack the actions under the card body instead of squeezing
-          them beside it (#793). */}
+      {/* Actions stack under the card body below `sm`. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -682,31 +737,21 @@ function LinkCard({
 
           <p className="text-[12.5px] text-ink-400 mt-1.5">{subtitle}</p>
 
-          {/*
-           * Public URL + QR are only meaningful once the link is live. Drafts
-           * carry a null public_url from the API; rendering it here would
-           * show "host/null" and copy the literal string — both wrong.
-           */}
+          {/* Public URL and QR only for live links; drafts have a null public_url. */}
           {isLive && link.public_url && (
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               <div className="inline-flex flex-wrap sm:flex-nowrap items-center gap-1 min-w-0 max-w-full bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
                 <span className="text-ink-500">{urlHost}/</span>
-                {/* Below `sm` the pill wraps, so a long slug drops onto its own
-                    line under the host; min-w-0 + wrap-anywhere then let it break
-                    inside the pill instead of pushing the card off-screen. From
-                    `sm` up the layout is the original single row. */}
+                {/* Below `sm` a long slug wraps inside the pill. */}
                 <span className="min-w-0 wrap-anywhere text-amber-700 font-semibold">
                   {urlPath}
                 </span>
-                {/*
-                 * The only copy affordance on the card. A second, labelled
-                 * "Copy link" button used to sit at the end of this row firing
-                 * the same handler; it was removed, so the copied confirmation
-                 * it carried moves here.
-                 */}
+                {/* Copy button for the public URL; shows the copied confirmation. */}
                 <button
                   type="button"
-                  onClick={onCopy}
+                  onClick={() => {
+                    void onCopy();
+                  }}
                   title={copied ? t('link_card.copied') : t('link_card.copy_title')}
                   aria-label={t('link_card.copy_title')}
                   className={`ml-1 shrink-0 ${copied ? 'text-emerald-600' : 'text-ink-400 hover:text-primary-600'}`}
@@ -716,7 +761,9 @@ function LinkCard({
               </div>
               <button
                 type="button"
-                onClick={openQr}
+                onClick={() => {
+                  void openQr();
+                }}
                 title={t('link_card.view_qr')}
                 className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-(--bd-border) text-ink-500 hover:text-primary-600 hover:border-(--bd-primary-100)"
               >
@@ -745,6 +792,15 @@ function LinkCard({
 
           {isDraft && !editing && (
             <div className="mt-3 text-[12.5px] text-ink-400">{t('link_card.draft_notice')}</div>
+          )}
+
+          {link.voice_bot && (
+            <div className="mt-2 text-[12.5px] text-ink-500">
+              {t('link_card.voice_bot', {
+                name: link.voice_bot.display_name,
+                phone: formatPhoneForReading(link.voice_bot.phone, phoneCountries),
+              })}
+            </div>
           )}
 
           {/* Metadata row */}
@@ -793,7 +849,12 @@ function LinkCard({
           )}
           {isDraft && (
             <Button
-              onClick={() => activate.mutate(link.link_id)}
+              onClick={() => {
+                setActionError(null);
+                activate.mutate(link.link_id, {
+                  onError: (err) => setActionError(requestMessage(err)),
+                });
+              }}
               disabled={activate.isPending || editing || update.isPending}
             >
               {activate.isPending ? t('link_card.going_live') : t('link_card.make_live')}
@@ -802,7 +863,12 @@ function LinkCard({
           {isLive && (
             <Button
               kind="ghost"
-              onClick={() => deactivate.mutate(link.link_id)}
+              onClick={() => {
+                setActionError(null);
+                deactivate.mutate(link.link_id, {
+                  onError: (err) => setActionError(requestMessage(err)),
+                });
+              }}
               disabled={deactivate.isPending}
             >
               {deactivate.isPending ? t('link_card.retiring') : t('link_card.deactivate')}
@@ -811,25 +877,37 @@ function LinkCard({
         </div>
       </div>
 
+      {actionError && (
+        <div
+          role="alert"
+          className="mt-3 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+        >
+          {actionError}
+        </div>
+      )}
+
       {isDraft && editing && (
         <div className="mt-4 pt-4 border-t border-(--bd-border) grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label={t('create_link.field_state')} required>
+          <Field label={t('create_link.field_state')} required error={ew('state').error}>
             <input
               className="bd-input"
+              {...ew('state').control}
               value={editForm.state}
               onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
             />
           </Field>
-          <Field label={t('create_link.field_district')} required>
+          <Field label={t('create_link.field_district')} required error={ew('district').error}>
             <input
               className="bd-input"
+              {...ew('district').control}
               value={editForm.district}
               onChange={(e) => setEditForm((f) => ({ ...f, district: e.target.value }))}
             />
           </Field>
-          <Field label={t('create_link.field_event')} required>
+          <Field label={t('create_link.field_event')} required error={ew('lever_event').error}>
             <input
               className="bd-input"
+              {...ew('lever_event').control}
               value={editForm.lever_event}
               onChange={(e) => setEditForm((f) => ({ ...f, lever_event: e.target.value }))}
             />
@@ -850,7 +928,10 @@ function LinkCard({
             />
           </Field>
           {editError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+            <div
+              role="alert"
+              className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+            >
               {editError}
             </div>
           )}
@@ -859,10 +940,10 @@ function LinkCard({
               {t('link_card.cancel')}
             </Button>
             <Button
-              onClick={onSaveEdit}
-              disabled={
-                update.isPending || !editForm.state || !editForm.district || !editForm.lever_event
-              }
+              onClick={() => {
+                void onSaveEdit();
+              }}
+              disabled={update.isPending}
             >
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
@@ -874,30 +955,25 @@ function LinkCard({
 }
 
 /**
- * Body-only "Your Registration Links" list. Designed to be rendered INSIDE
- * another card shell (the merged Registration via Link section on the
- * onboarding landing). No outer card padding/border — parent owns chrome.
+ * "Your Registration Links" list body, without an outer card.
+ *
+ * Render it inside a parent card.
  */
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
-  // `?new=<link_id>` is set by the create flow after it navigates here, so the
-  // fresh draft can be scrolled to and highlighted (its card carries the
-  // "Make Live" CTA). Absent on a normal visit.
+  const requestErrorText = useRequestErrorText();
+  // `?new=<link_id>` is set by the create flow to highlight the new draft.
   const newLinkId = useSearchParams().get('new');
-  // The create toast can't survive the navigation from the create page, so it
-  // is surfaced here on arrival: confirm the draft + point at "Make Live".
-  const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (newLinkId) setToast(t('your_links.draft_created'));
-  }, [newLinkId, t]);
-  const rawProfile = useProfileRaw();
-  const { data: cfg } = useAggregatorConfig();
-  // Domain id the aggregator is scoped to; falls back to the network's first
-  // declared domain (networks.json order) until the profile loads.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
-  // The aggregator only ever has links of its registered type — no tab
-  // switcher needed. Filter is pinned via `aggregatorType`.
+  // Show the create confirmation here, after navigation from the create page.
+  const [dismissedLinkId, setDismissedLinkId] = useState<string | null>(null);
+  const toast = newLinkId && newLinkId !== dismissedLinkId ? t('your_links.draft_created') : null;
+  const { domains: servedDomains, active } = useActiveDomain();
+  const aggregatorType: string = active ?? '';
+  const activeCfg = servedDomains.find((d) => d.id === aggregatorType);
+  const typeLabel = activeCfg?.plural_label ?? activeCfg?.label ?? aggregatorType;
+  // Links are filtered to the active domain.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
+  const requestMessage = useRequestErrorMessage();
   const links: ApiRegistrationLink[] = data ?? [];
   const activeCount = links.filter((l) => l.status === 'live').length;
 
@@ -911,8 +987,8 @@ export function YourLinksBody() {
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
             {t('your_links.active_count', { count: activeCount })}
           </span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold capitalize">
-            {t('your_links.type_pill', { type: aggregatorType })}
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-ink-50 text-ink-600 text-[11px] font-semibold">
+            {t('your_links.type_pill', { type: typeLabel })}
           </span>
         </div>
       </div>
@@ -921,11 +997,11 @@ export function YourLinksBody() {
           <div className="text-center py-8 text-ink-400 text-[13px]">{t('your_links.loading')}</div>
         ) : error ? (
           <div className="text-center py-8 text-rose-600 text-[13px]">
-            {(error as Error).message}
+            {requestErrorText(error, requestMessage(error, t('your_links.load_failed')))}
           </div>
         ) : links.length === 0 ? (
           <div className="text-center py-8 text-ink-400 text-[13px]">
-            {t('your_links.empty', { type: aggregatorType })}
+            {t('your_links.empty', { type: typeLabel })}
           </div>
         ) : (
           links.map((l) => (
@@ -933,7 +1009,13 @@ export function YourLinksBody() {
           ))
         )}
       </div>
-      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
+      {toast && (
+        <SuccessToast
+          key={newLinkId}
+          message={toast}
+          onDone={() => setDismissedLinkId(newLinkId)}
+        />
+      )}
     </div>
   );
 }

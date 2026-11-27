@@ -1,25 +1,25 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
-  AggregatorOrgStoreFake,
-  buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { IdentityStoreFake } from '../services/identity-store/testing.js';
+import { _setIdentityStore } from '../services/identity-store/index.js';
+import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 
-const aggregatorId = '22222222-2222-2222-2222-222222222222';
+const userId = '22222222-2222-2222-2222-222222222222';
 
 describe('aggregator profile routes', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
-  let orgStore: AggregatorOrgStoreFake;
+  let userStore: UserStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -27,11 +27,11 @@ describe('aggregator profile routes', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([buildAggregator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
-    _setAggregatorStore(aggregatorStore);
-    orgStore = new AggregatorOrgStoreFake();
-    _setAggregatorOrgStore(orgStore);
+    userStore = new UserStoreFake();
+    userStore.seed([buildCoordinator({ id: userId, orgSlug: 'trrain-zzzz' })]);
+    _setUserStore(userStore);
+    orgStore = new OrganisationStoreFake();
+    _setOrganisationStore(orgStore);
 
     idp = new IdpAdminFake();
     await idp.createUser({
@@ -39,7 +39,7 @@ describe('aggregator profile routes', () => {
       firstName: 'Asha',
       lastName: 'Rao',
       phone: '+919876543210',
-      attributes: { aggregator_id: aggregatorId, association: 'TRRAIN' },
+      attributes: { user_id: userId, association: 'TRRAIN' },
     });
     _setIdpAdmin(idp);
     // sub claim is populated lazily — use the KC user id created above so
@@ -55,7 +55,7 @@ describe('aggregator profile routes', () => {
           given_name: 'Asha',
           family_name: 'Rao',
           phone_number: '+919876543210',
-          aggregator_id: aggregatorId,
+          user_id: userId,
         };
       }
       if (token === 'no-attribute') {
@@ -69,8 +69,8 @@ describe('aggregator profile routes', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setAccessTokenVerifier(null);
     _setIdpAdmin(null);
   });
@@ -80,7 +80,7 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('GET returns 403 when token has no aggregator_id', async () => {
+  it('GET returns 403 when token has no user_id', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -97,7 +97,7 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(body.aggregator_id).toBe(aggregatorId);
+    expect(body.user_id).toBe(userId);
     // The removed `aggregator_profile` keys must not reappear in the response.
     for (const k of [
       'contact_name',
@@ -118,6 +118,35 @@ describe('aggregator profile routes', () => {
     expect(id.active).toBe(true);
   });
 
+  it('GET returns every domain the coordinator serves', async () => {
+    userStore.seed([
+      buildCoordinator({
+        id: userId,
+        orgSlug: 'trrain-zzzz',
+        type: 'seeker',
+        serves: ['seeker', 'provider'],
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { type: string | null; serves: string[] };
+    expect(body.serves).toEqual(['seeker', 'provider']);
+    expect(body.type).toBe('seeker');
+  });
+
+  it('GET returns an empty domain list for a coordinator serving every domain', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+    });
+    expect((res.json() as { serves: string[] }).serves).toEqual([]);
+  });
+
   it('PATCH rejects an empty body — `aggregator` is required', async () => {
     const res = await app.inject({
       method: 'PATCH',
@@ -128,35 +157,6 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(400);
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
-  });
-
-  it('PATCH rejects `consent` — it is read-only and the stored record is unchanged', async () => {
-    const before = await aggregatorStore.findById(aggregatorId);
-    let updateCalls = 0;
-    const realUpdate = aggregatorStore.update.bind(aggregatorStore);
-    aggregatorStore.update = async (...args) => {
-      updateCalls += 1;
-      return realUpdate(...args);
-    };
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: {
-        aggregator: {
-          consent: {
-            value: false,
-            given_at: '2020-01-01T00:00:00Z',
-            valid_till: '2099-01-01T00:00:00Z',
-          },
-        },
-      },
-    });
-    expect(res.statusCode).toBe(400);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
-    expect(updateCalls).toBe(0);
-    const after = await aggregatorStore.findById(aggregatorId);
-    expect(after.ok && after.value?.consent).toEqual(before.ok && before.value?.consent);
   });
 
   it('PATCH rejects a `profile` key — the profile half of the body is gone', async () => {
@@ -171,7 +171,7 @@ describe('aggregator profile routes', () => {
   });
 
   it('GET returns 503 when the aggregator store fails', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -184,7 +184,7 @@ describe('aggregator profile routes', () => {
   });
 
   it('GET returns 404 when the aggregator row is missing', async () => {
-    aggregatorStore.findById = async () => ({ ok: true, value: null });
+    userStore.findById = async () => ({ ok: true, value: null });
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -227,12 +227,30 @@ describe('aggregator profile routes', () => {
   // PATCH aggregator.contact branch
   // ---------------------------------------------------------------------------
 
-  // Note: PATCH's own INVALID_PHONE branch (normalisePhone failing) is not
-  // reachable via a real HTTP request — `BecknContactSchema`'s phone regex
-  // (`^(\+?\d{10,15}|\d{10})$`) already enforces the same 10-15-digit window
-  // that `normalisePhone` checks, at the Fastify schema-validation layer, so
-  // any input that would fail `normalisePhone` is already rejected as 400
-  // SCHEMA_VALIDATION before the handler body runs. Left uncovered.
+  it('PATCH 400 INVALID_PHONE for a new +91 number that is not a mobile', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: { contact: { name: 'Asha', phone: '+912234567890', email: 'asha@trrain.org' } },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INVALID_PHONE');
+  });
+
+  it('PATCH keeps a stored phone saved before the mobile rule when it is sent back unchanged', async () => {
+    const legacy = { name: 'Asha', phone: '+912234567890', email: 'asha@trrain.org' };
+    userStore.seed([buildCoordinator({ id: userId, orgSlug: 'trrain-zzzz', contact: legacy })]);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: { aggregator: { name: 'Asha Renamed', contact: legacy } },
+    });
+    expect(res.statusCode).toBe(200);
+  });
 
   it('PATCH aborts with IDP_UNAVAILABLE (no DB write) when mirroring the phone to Keycloak fails', async () => {
     idp.setAttributes = async () => ({
@@ -251,13 +269,13 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
-    const stored = await aggregatorStore.findById(aggregatorId);
+    const stored = await userStore.findById(userId);
     if (stored.ok) expect(stored.value?.contact.phone).not.toBe('+919876543211');
   });
 
   it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when an org owner holds the phone', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         ownerEmail: 'boss@else.org',
         ownerPhone: '+919876543299',
         status: 'active',
@@ -284,8 +302,8 @@ describe('aggregator profile routes', () => {
   });
 
   it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when another coordinator holds the phone', async () => {
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         id: '00000000-0000-0000-0000-00000000beef',
         orgSlug: 'other-coord',
         contact: { name: 'Other', phone: '+919876543288', email: 'other@x.org' },
@@ -307,7 +325,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 USER_EXISTS (before any Keycloak write) when an org owner holds the email', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         ownerEmail: 'boss@else.org',
         ownerPhone: '+919876543277',
         status: 'active',
@@ -335,16 +353,16 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 CONFLICT before any Keycloak write when the contact is shared with an org owner', async () => {
     const shared = 'c'.repeat(64);
-    aggregatorStore.seed([
-      buildAggregator({
-        id: aggregatorId,
+    userStore.seed([
+      buildCoordinator({
+        id: userId,
         orgSlug: 'trrain-zzzz',
         contactId: shared,
         contact: { name: 'Both', phone: '+919876543201', email: 'both@trrain.org' },
       }),
     ]);
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         contactId: shared,
         ownerEmail: 'both@trrain.org',
         ownerPhone: '+919876543201',
@@ -377,7 +395,7 @@ describe('aggregator profile routes', () => {
       phones.push(String((attrs as Record<string, unknown>)['phoneNumber']));
       return { ok: true, value: undefined };
     };
-    aggregatorStore.update = async () => ({
+    userStore.update = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -407,7 +425,7 @@ describe('aggregator profile routes', () => {
           : { ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } },
       );
     };
-    aggregatorStore.update = () =>
+    userStore.update = () =>
       Promise.resolve({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } });
     const res = await app.inject({
       method: 'PATCH',
@@ -425,8 +443,8 @@ describe('aggregator profile routes', () => {
   });
 
   it('PATCH 409 USER_EXISTS (before any Keycloak write) when another coordinator holds the email', async () => {
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         id: '00000000-0000-0000-0000-00000000cafe',
         orgSlug: 'other-coord-email',
         contact: { name: 'Other', phone: '+919876543255', email: 'taken@x.org' },
@@ -475,7 +493,8 @@ describe('aggregator profile routes', () => {
     expect(kcWrites).toBe(0);
   });
 
-  it('PATCH updates aggregator name/url/locations successfully', async () => {
+  it('PATCH refuses consent: read-only after registration (#836, 0029)', async () => {
+    const before = await userStore.findById(userId);
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -483,15 +502,35 @@ describe('aggregator profile routes', () => {
       payload: {
         aggregator: {
           name: 'TRRAIN Renamed',
-          url: 'https://trrain.example.org',
-          locations: [],
+          consent: {
+            value: false,
+            given_at: '2020-01-15T10:00:00Z',
+            valid_till: '2099-01-15T10:00:00Z',
+          },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    const after = await userStore.findById(userId);
+    expect(after.ok && after.value?.name).toBe(before.ok ? before.value?.name : undefined);
+    expect(after.ok && after.value?.consent).toEqual(before.ok ? before.value?.consent : undefined);
+  });
+
+  it('PATCH updates the aggregator name successfully', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'TRRAIN Renamed',
         },
       },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect(body.name).toBe('TRRAIN Renamed');
-    expect(body.url).toBe('https://trrain.example.org');
     for (const k of [
       'contact_name',
       'personas',
@@ -504,6 +543,69 @@ describe('aggregator profile routes', () => {
     }
   });
 
+  it('PATCH accepts org details unchanged from what GET returned (an echoed contact)', async () => {
+    const before = await userStore.findById(userId);
+    if (!before.ok || !before.value) throw new Error('seed missing');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'Echoed',
+          url: before.value.url,
+          locations: before.value.locations,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { name: string }).name).toBe('Echoed');
+  });
+
+  it.each([
+    [{ url: 'https://trrain.example.org' }, ['url']],
+    [
+      {
+        locations: [
+          {
+            geo: { type: 'Point', coordinates: [77.6, 12.9] },
+            address: { streetAddress: 'New st' },
+          },
+        ],
+      },
+      ['locations'],
+    ],
+    [
+      {
+        contact: {
+          name: 'Asha Rao',
+          phone: '+919876543210',
+          email: 'asha@trrain.org',
+          company: 'TRRAIN',
+          gstNumber: 'G1',
+        },
+      },
+      ['contact.company', 'contact.gstNumber'],
+    ],
+  ])(
+    'PATCH of org details %j → 409 ORG_DETAILS_READ_ONLY before any write (0028)',
+    async (aggregator, fields) => {
+      const before = await userStore.findById(userId);
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/v1/aggregators/profile/me',
+        headers: { authorization: 'Bearer good-token' },
+        payload: { aggregator: { name: 'Should Not Apply', ...aggregator } },
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json() as { error: { code: string; fields: { fields: string[] } } };
+      expect(body.error.code).toBe('ORG_DETAILS_READ_ONLY');
+      expect(body.error.fields.fields).toEqual(fields);
+      const after = await userStore.findById(userId);
+      expect(after.ok && after.value?.name).toBe(before.ok && before.value?.name);
+    },
+  );
+
   it.each([
     ['DUPLICATE_PHONE', 409, 'PHONE_EXISTS'],
     ['DUPLICATE_EMAIL', 409, 'USER_EXISTS'],
@@ -512,9 +614,9 @@ describe('aggregator profile routes', () => {
     ['DB_UNAVAILABLE', 503, 'DB_UNAVAILABLE'],
     ['NOT_FOUND', 404, 'NOT_FOUND'],
   ] as const)(
-    'PATCH maps aggregatorStore.update error %s to %d %s',
+    'PATCH maps userStore.update error %s to %d %s',
     async (storeCode, status, errCode) => {
-      aggregatorStore.update = async () => ({
+      userStore.update = async () => ({
         ok: false,
         error: { code: storeCode, message: 'store error' },
       });
@@ -530,10 +632,10 @@ describe('aggregator profile routes', () => {
   );
 
   it('PATCH returns 500 INTERNAL when the post-write read fails', async () => {
-    // PATCH's only aggregatorStore.findById call is the post-write "echo the
+    // PATCH's only userStore.findById call is the post-write "echo the
     // merged view" read — nulling it out simulates the row vanishing between
     // the write and the re-read.
-    aggregatorStore.findById = async () => ({ ok: true, value: null });
+    userStore.findById = async () => ({ ok: true, value: null });
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -542,5 +644,126 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+});
+
+describe('aggregator profile routes, owner acting as its coordinator account', () => {
+  const SUB = 'kc-owner-1';
+  const ADMIN = '00000000-0000-4000-8000-0000000000a1';
+  const COORD = '00000000-0000-4000-8000-0000000000c1';
+  const ORG = '00000000-0000-4000-8000-0000000000b1';
+  let app: FastifyInstance;
+  let identities: IdentityStoreFake;
+  let idp: IdpAdminFake;
+
+  beforeEach(async () => {
+    _resetJwks();
+    process.env.KEYCLOAK_URL = 'http://kc.local';
+    process.env.KEYCLOAK_REALM = 'bluedots';
+    identities = new IdentityStoreFake();
+    identities.seed([
+      { userId: COORD, userType: 'coordinator', provider: IDP_PROVIDER, subject: SUB },
+      { userId: ADMIN, userType: 'admin', provider: IDP_PROVIDER, subject: SUB },
+    ]);
+    _setIdentityStore(identities);
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: COORD,
+        status: 'active',
+        parentOrgId: ORG,
+        serves: ['seeker', 'provider'],
+        contact: { name: 'Asha Rao', email: 'owner@example.org', phone: '+919800000000' },
+      }),
+    ]);
+    _setUserStore(users);
+    const orgs = new OrganisationStoreFake();
+    orgs.seed([buildOrganisation({ id: ORG, status: 'active' })]);
+    _setOrganisationStore(orgs);
+    idp = new IdpAdminFake();
+    _setIdpAdmin(idp);
+    // Owner token: no user_id.
+    _setAccessTokenVerifier(async () => ({
+      sub: SUB,
+      email: 'owner@example.org',
+      email_verified: true,
+      given_name: 'Owner',
+      family_name: 'Token',
+      phone_number: '+919811111111',
+    }));
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    _setUserStore(null);
+    _setOrganisationStore(null);
+    _setIdentityStore(null);
+    _setAccessTokenVerifier(null);
+    _setIdpAdmin(null);
+  });
+
+  it('GET returns the coordinator profile with identity from the row', async () => {
+    const findById = vi.spyOn(idp, 'findById');
+    const link = vi.spyOn(identities, 'link');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: COORD },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      user_id: string;
+      serves: string[];
+      identity: Record<string, unknown>;
+    };
+    expect(body.user_id).toBe(COORD);
+    expect(body.serves).toEqual(['seeker', 'provider']);
+    expect(body.identity).toEqual({
+      first_name: 'Asha Rao',
+      last_name: null,
+      email: 'owner@example.org',
+      email_verified: true,
+      phone: '+919800000000',
+      // The token's phone is not the row's.
+      phone_verified: false,
+      active: true,
+    });
+    expect(findById).not.toHaveBeenCalled();
+    expect(link).not.toHaveBeenCalled();
+  });
+
+  it('GET refuses an account this login may not act as', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: {
+        authorization: 'Bearer owner',
+        [ACTING_ACCOUNT_HEADER]: '00000000-0000-4000-8000-0000000000c9',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('ACTING_ACCOUNT_INVALID');
+  });
+
+  it('GET without the header is still refused for an owner token', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('PATCH refuses acting: it writes the login’s Keycloak attributes', async () => {
+    const setAttributes = vi.spyOn(idp, 'setAttributes');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: COORD },
+      payload: { aggregator: { name: 'Renamed' } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(setAttributes).not.toHaveBeenCalled();
   });
 });

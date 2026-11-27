@@ -1,15 +1,15 @@
 /**
- * View test: <CoordinatorInviteView /> — the coordinator invite landing (#701).
+ * View test: <CoordinatorInviteView /> — the coordinator invite landing.
  *
- * Covers token decode → org lookup (reusing /api/orgs) → form wiring, plus the
- * invalid / expired / unknown-org fallbacks. The heavy RJSF form is stubbed;
- * this test is about the view's routing + prop wiring, not the form.
+ * The invite is read on the server; the view either wires the form with the
+ * org and the locked email, or explains why the link cannot be used. The RJSF
+ * form is stubbed.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
+import type { InviteReadResult } from '@/lib/invite-read.server';
 
 vi.mock('@/hooks/useAggregatorConfig', () => {
   const cfg = { brand: { short_name: 'Test Aggregator' } };
@@ -19,7 +19,6 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
   };
 });
 
-// Stub the coordinator form — echo the invite props so we can assert wiring.
 vi.mock('@/app/(public)/register/CoordinatorRegisterForm', () => ({
   CoordinatorRegisterForm: (props: {
     inviteToken?: string;
@@ -38,64 +37,42 @@ import { CoordinatorInviteView } from '@/app/(public)/register/coordinator/Coord
 
 const SCHEMA = { title: 'Aggregator Registration', type: 'object' as const };
 
-function makeInvite(claims: { org: string; email: string; exp: number }): string {
-  const b64 = btoa(JSON.stringify(claims))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-  return `h.${b64}.s`;
-}
-
-function renderView(inviteToken: string) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderView(invite: InviteReadResult) {
   return render(
-    <QueryClientProvider client={client}>
-      <NextIntlClientProvider locale="en" messages={messages}>
-        <CoordinatorInviteView schema={SCHEMA} uiSchema={{}} inviteToken={inviteToken} />
-      </NextIntlClientProvider>
-    </QueryClientProvider>,
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <CoordinatorInviteView schema={SCHEMA} uiSchema={{}} inviteToken="tok" invite={invite} />
+    </NextIntlClientProvider>,
   );
 }
 
-const FUTURE = Math.floor(Date.now() / 1000) + 3600;
-const PAST = Math.floor(Date.now() / 1000) - 3600;
-
 describe('<CoordinatorInviteView />', () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ orgs: [{ id: 'org-1', slug: 'o', display_name: 'JFC' }] }),
-      } as Response),
-    );
-  });
-  afterEach(() => vi.clearAllMocks());
-
-  it('decodes the invite, resolves the org name, and wires the form', async () => {
-    renderView(makeInvite({ org: 'org-1', email: 'coord@x.org', exp: FUTURE }));
-    await waitFor(() => expect(screen.getByTestId('coordinator-form')).toBeInTheDocument());
-    expect(screen.getByTestId('org')).toHaveTextContent('JFC');
-    expect(screen.getByTestId('email')).toHaveTextContent('coord@x.org');
-    expect(screen.getByTestId('token')).not.toBeEmptyDOMElement();
+  it('wires the form with the inviting org, the invited email and the token', () => {
+    renderView({
+      ok: true,
+      invite: {
+        email: 'asha@trrain.org',
+        expires_at: '2099-01-01T00:00:00.000Z',
+        org: { id: 'o1', name: 'TRRAIN' },
+      },
+    });
+    expect(screen.getByTestId('org')).toHaveTextContent('TRRAIN');
+    expect(screen.getByTestId('email')).toHaveTextContent('asha@trrain.org');
+    expect(screen.getByTestId('token')).toHaveTextContent('tok');
   });
 
-  it('shows an invalid notice for a malformed token', () => {
-    renderView('not-a-jwt');
-    expect(screen.getByText(/not valid/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('coordinator-form')).toBeNull();
-  });
-
-  it('shows an expired notice for a past-exp token', () => {
-    renderView(makeInvite({ org: 'org-1', email: 'coord@x.org', exp: PAST }));
-    expect(screen.getByText(/this invitation has expired/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('coordinator-form')).toBeNull();
-  });
-
-  it('falls back when the org is not in the active list', async () => {
-    renderView(makeInvite({ org: 'org-unknown', email: 'coord@x.org', exp: FUTURE }));
-    await waitFor(() => expect(screen.getByText(/can.?t be used/i)).toBeInTheDocument());
-    expect(screen.queryByTestId('coordinator-form')).toBeNull();
+  it.each([
+    ['invalid', 'This invitation link is not valid.'],
+    ['expired', 'This invitation has expired.'],
+    ['used', 'This invitation has already been used.'],
+    ['org_inactive', "This invitation can't be used right now."],
+    ['unavailable', "We couldn't load your invitation."],
+  ] as const)('explains a %s invite and offers sign-in, without the form', (reason, text) => {
+    renderView({ ok: false, reason });
+    expect(screen.getByText(new RegExp(text.replace(/[.()]/g, '\\$&')))).toBeInTheDocument();
+    // The shell's "Already registered? Sign in" link and the message's own link.
+    for (const link of screen.getAllByRole('link', { name: 'Sign in' })) {
+      expect(link).toHaveAttribute('href', '/login');
+    }
+    expect(screen.queryByTestId('coordinator-form')).not.toBeInTheDocument();
   });
 });

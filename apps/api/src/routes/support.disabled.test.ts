@@ -10,6 +10,18 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import {
+  ActorResolverFake,
+  buildCoordinatorActor,
+  _setActorResolver,
+} from '../services/auth/actor/index.js';
+
+/** Registers the token's coordinator (`agg-9`) with the actor resolver the route uses. */
+function seedCoordinator(): void {
+  const resolver = new ActorResolverFake();
+  resolver.seed('agg-9', buildCoordinatorActor());
+  _setActorResolver(resolver);
+}
 
 describe('support routes (SUPPORT_EMAIL unset)', () => {
   let app: FastifyInstance;
@@ -21,17 +33,19 @@ describe('support routes (SUPPORT_EMAIL unset)', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good-token') {
-        return { sub: 'u1', aggregator_id: 'agg-9', email: 'asha@example.com' };
+        return { sub: 'u1', user_id: 'agg-9', email: 'asha@example.com' };
       }
       throw new Error('invalid token');
     });
 
+    seedCoordinator();
     app = await buildApp();
   });
 
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
+    _setActorResolver(null);
   });
 
   it('returns 503 SUPPORT_NOT_CONFIGURED when SUPPORT_EMAIL is unset', async () => {

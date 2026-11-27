@@ -118,6 +118,41 @@ aggregator:
       public_hint_i18n_key: null
       signals_cta: true
 
+    # Two-option link: the public page offers both channels. Keep `voice` and
+    # `form` above: removing either changes the behaviour of links already issued.
+    voice_or_form:
+      label_i18n_key: registration_mode.voice_or_form.label
+      submission_shape: account_and_profile
+      public_hint_i18n_key: null
+      signals_cta: true
+      offers: [voice, form]
+
+  # ── Voice bots (the number shown on a two-option link) ─────────────────────
+  # One entry per calling number. Read at startup: a number change needs a
+  # config rollout. Left empty until a number is provisioned. Example (comment only):
+  #   - key: example_bot
+  #     display_name: Example helpline
+  #     phone: '+919999999999'
+  #     languages: [en, hi]
+  #     domains: [seeker]
+  #     description: Optional note shown to admins
+  voice_bots: []
+  # Per-domain default when a link names no bot: domain id -> bot key.
+  # Without an entry, the only bot serving that domain is used, else none.
+  # Required for every domain that two or more bots serve (load fails otherwise).
+  # default_voice_bots:
+  #   seeker: example_bot
+
   # ── Admin email recipients (registration approval notifications) ───────────
   admin_emails:
     - admin@bbmp.gov.in
+
+  # ── Organisation tree ──────────────────────────────────────────────────────
+  # Omit the block for a flat tree: every organisation sits directly under the
+  # network and at most 50 organisations. Every organisation is "Aggregator"
+  # until its parent's owner defines "known as" values in the console.
+  organisation:
+    hierarchy:
+      max_depth: 3 # Default 1 (flat). Deepest allowed aggregator org.
+      max_children: 50 # Direct children of any org, the network included. Omit for no limit.
+      max_total_orgs: 50 # Aggregator orgs in the instance (root and Default org not counted).

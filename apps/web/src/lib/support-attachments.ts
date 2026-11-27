@@ -1,26 +1,30 @@
 /**
- * Client-side half of the support-attachment rules (#551).
+ * Client-side checks for support attachments.
  *
- * The API validates everything again — this exists so a coordinator learns a
- * file is too big or the wrong type before spending time uploading it. Mirrors
- * signals-dpg's `apps/ui/src/lib/support-attachments.ts`; change both together.
+ * Lets a coordinator see size and type errors before uploading. The API checks
+ * again. Mirrors signals-dpg's `apps/ui/src/lib/support-attachments.ts`; keep
+ * both in sync.
  *
  * @module apps/web/src/lib/support-attachments
  */
 
-/** What the instance allows, as served by `GET /api/support/config`. */
-export interface SupportConfig {
-  enabled: boolean;
-  maxTotalBytes: number;
-  maxFiles: number;
-  allowedTypes: string[];
+import { z } from 'zod';
+
+/** What the instance allows, as served by `GET /api/support/config` (the API's `openapi.json` contract). */
+export const SupportConfigSchema = z.object({
+  enabled: z.boolean(),
+  maxTotalBytes: z.number().int().positive(),
+  maxFiles: z.number().int().positive(),
+  allowedTypes: z.array(z.string()),
   /**
-   * Extensions for the picker's `accept`, served alongside the MIME list because
-   * macOS won't match `.m4a` against `audio/mp4` and greys it out. Optional so a
-   * web build still works against an older API.
+   * Extensions for the picker's `accept`, since macOS does not match some
+   * extensions (e.g. `.m4a`) to their MIME type. Empty when the reply leaves it out.
    */
-  allowedExtensions?: string[];
-}
+  allowedExtensions: z.array(z.string()).default([]),
+});
+
+/** What the instance allows, as parsed by {@link SupportConfigSchema}. */
+export type SupportConfig = z.infer<typeof SupportConfigSchema>;
 
 /** One attachment in the request payload. */
 export interface SupportAttachmentPayload {
@@ -38,9 +42,7 @@ export type AttachmentSelectionResult =
   { ok: true; files: File[] } | ({ ok: false } & AttachmentRejection);
 
 /**
- * Used while the config request is in flight or if it fails: mirrors the API's
- * defaults so the picker stays usable — an over-limit file is still refused
- * server-side with a specific error.
+ * Used while the config loads or if it fails. Matches the API's defaults.
  */
 export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
   enabled: true,
@@ -51,7 +53,7 @@ export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
 };
 
 /**
- * Formats a byte count the same way the API does, so both messages read alike.
+ * Formats a byte count the same way the API does.
  *
  * @param bytes - Size in bytes.
  * @returns e.g. `512 B`, `2.0 KB`, `5.0 MB`.
@@ -63,12 +65,10 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * The `accept` attribute for the picker: MIME types *and* extensions.
+ * Builds the picker's `accept` attribute from MIME types and extensions.
  *
- * Types alone leave real files unselectable — macOS resolves `accept` through
- * its UTI table, which doesn't map `.m4a` (an iPhone voice memo) onto
- * `audio/mp4`, so the file shows up greyed out. Extensions are matched
- * literally, so listing both makes the picker agree with the API.
+ * Extensions are included because macOS does not map some (e.g. `.m4a`) to
+ * their MIME type.
  *
  * @param config - Limits currently served by the API.
  * @returns A comma-separated `accept` value.
@@ -80,8 +80,7 @@ export function pickerAccept(
 }
 
 /**
- * Whether a file's type is accepted. Handles exact types (`image/png`, what the
- * API serves) and `type/*` wildcards (used by the offline fallback).
+ * Whether a file's type is accepted, by exact type or `type/*` wildcard.
  *
  * @param fileType - The browser-reported MIME type.
  * @param allowedTypes - Accepted types, exact or wildcard.
@@ -99,9 +98,9 @@ export function matchesAllowedType(fileType: string, allowedTypes: string[]): bo
 }
 
 /**
- * Validates what the picker would add to the current selection. Checked against
- * the combined list, since the limits are per submission. Order matches the
- * API: count, then type, then total size.
+ * Validates newly picked files against the combined selection.
+ *
+ * Checks count, then type, then total size, in the same order as the API.
  *
  * @param current - Files already chosen.
  * @param incoming - Files just picked.
@@ -129,9 +128,9 @@ export function validateAttachmentSelection(
 }
 
 /**
- * Base64-encodes a file for the JSON body. Chunked because spreading a
- * multi-megabyte byte array into `String.fromCodePoint` arguments overflows the
- * call stack. Every byte is 0–255, so code points and char codes coincide here.
+ * Base64-encodes a file for the JSON body.
+ *
+ * Works in chunks to avoid a call-stack overflow on large files.
  *
  * @param file - The file to encode.
  * @returns Base64 string without a `data:` prefix.
@@ -156,8 +155,7 @@ export async function encodeAttachments(files: File[]): Promise<SupportAttachmen
   return Promise.all(
     files.map(async (file) => ({
       filename: file.name,
-      // Browsers leave `type` empty for some files; the API's allowlist rejects
-      // an empty type, so send something concrete it can judge.
+      // Some browsers leave `type` empty; the API rejects an empty type.
       contentType: file.type || 'application/octet-stream',
       data: await fileToBase64(file),
     })),

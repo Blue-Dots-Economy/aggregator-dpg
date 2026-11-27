@@ -9,7 +9,9 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
-    "lint": {},
+    "lint": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/eslint.config.js"]
+    },
     "test": {
       "dependsOn": ["^build"]
     },

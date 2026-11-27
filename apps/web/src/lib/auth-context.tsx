@@ -3,16 +3,16 @@
 /**
  * Client-side auth context.
  *
- * Hydrated from a server-side `getSession()` snapshot via the `initialUser`
- * prop on the protected layout. The browser never sees access tokens — only
- * the public claims surfaced here.
+ * Filled from the server session through the `initialUser` prop on the
+ * protected layout. The browser gets public claims only, never tokens.
  *
- * `signOut()` redirects to the BFF logout endpoint, which destroys the Redis
- * session, clears the cookie, and bounces through Keycloak's end-session.
+ * `signOut()` goes to the BFF logout endpoint, which ends the session and
+ * signs out of Keycloak.
  */
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import type { User } from '../types';
+import { can as canWith } from './capabilities';
 
 interface AuthContextValue {
   user: User | null;
@@ -20,6 +20,14 @@ interface AuthContextValue {
   isHydrated: boolean;
   signOut: () => Promise<void>;
   supportEnabled: boolean;
+  /** The caller's capabilities; null when access control is off (nothing hidden). */
+  capabilities: readonly string[] | null;
+  /** Whether a feature needing `capability` should be shown. */
+  can: (capability: string) => boolean;
+  /** True when an org owner is using the portal as their own coordinator account. */
+  acting: boolean;
+  /** The acting account's organisation name; null when not acting or not known. */
+  actingOrgName: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -28,24 +36,33 @@ export interface AuthProviderProps {
   children: ReactNode;
   initialUser?: User | null;
   /**
-   * Whether contact-support is available (`SUPPORT_EMAIL` configured
-   * upstream). Fetched server-side by the protected layout via
-   * `GET /v1/support/config`; defaults to `false` so the entry point stays
-   * hidden until proven enabled.
+   * Whether contact-support is available, from `GET /v1/support/config`.
+   * Defaults to `false`.
    */
   supportEnabled?: boolean;
+  /**
+   * The caller's capabilities from `GET /v1/user/read/me`. Null or absent
+   * means access control is off.
+   */
+  capabilities?: readonly string[] | null;
+  /**
+   * Set when an org owner acts as their own coordinator account, with that
+   * account's organisation name (null when not known). Null or absent otherwise.
+   */
+  acting?: { orgName: string | null } | null;
 }
 
 /**
- * Provides the active user to client components. Consumes a session snapshot
- * passed from the server layout — does not fetch on its own.
+ * Provides the active user to client components. Does not fetch.
  *
- * @param props - `children` plus an optional `initialUser` and `supportEnabled` from the server.
+ * @param props - `children` plus optional `initialUser`, `supportEnabled`, `capabilities` and `acting`.
  */
 export function AuthProvider({
   children,
   initialUser = null,
   supportEnabled = false,
+  capabilities = null,
+  acting = null,
 }: AuthProviderProps) {
   const signOut = useCallback(async () => {
     window.location.href = '/api/auth/logout';
@@ -58,8 +75,12 @@ export function AuthProvider({
       isHydrated: true,
       signOut,
       supportEnabled,
+      capabilities,
+      can: (capability: string) => canWith(capabilities, capability),
+      acting: acting !== null,
+      actingOrgName: acting?.orgName ?? null,
     }),
-    [initialUser, signOut, supportEnabled],
+    [initialUser, signOut, supportEnabled, capabilities, acting],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -77,4 +98,17 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return ctx;
+}
+
+/**
+ * Returns the capability check for client components.
+ *
+ * Outside an `AuthProvider`, or with access control off, everything is
+ * allowed. The API still authorises every request.
+ *
+ * @returns `can(capability)`.
+ */
+export function useCan(): (capability: string) => boolean {
+  const ctx = useContext(AuthContext);
+  return ctx ? ctx.can : () => true;
 }

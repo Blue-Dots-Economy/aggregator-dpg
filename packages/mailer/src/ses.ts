@@ -1,18 +1,14 @@
 /**
  * AWS SES v2-backed mailer.
  *
- * Used in deployments where the operator prefers SES over generic SMTP.
- * Authentication uses the standard AWS SDK credential chain (env vars,
- * shared profile, IAM role on EC2/ECS/Lambda).
+ * Authenticates with the standard AWS SDK credential chain.
  */
 
 import { createRequire } from 'node:module';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { MailerAdapter, type MailerResult, type SendInput, type SendOk } from './interface.js';
 
-// MailComposer is nodemailer's MIME builder, reused here rather than
-// hand-rolling multipart boundaries and header encoding. Required through
-// createRequire for the same reason smtp.ts does it: nodemailer ships CJS.
+// nodemailer's MIME builder. Loaded with createRequire because nodemailer is CJS.
 const require = createRequire(import.meta.url);
 type MailComposerCtor = new (options: Record<string, unknown>) => {
   compile(): { build(callback: (err: Error | null, message: Buffer) => void): void };
@@ -20,9 +16,8 @@ type MailComposerCtor = new (options: Record<string, unknown>) => {
 const MailComposer: MailComposerCtor = require('nodemailer/lib/mail-composer');
 
 /**
- * Builds the RFC-5322 message for the raw SES path. Addresses go into the MIME
- * headers as well as SES's `Destination` so the recipient sees a normal
- * To/Cc/Reply-To, not a blind message.
+ * Builds the RFC-5322 message for the raw SES path. Addresses go in the MIME
+ * headers as well as SES's `Destination`.
  */
 async function buildRawMime(input: {
   from: string;
@@ -54,9 +49,8 @@ async function buildRawMime(input: {
 }
 
 /**
- * Normalises a recipient value to a list of individual addresses. Accepts an
- * array, a single address, or a comma-separated string (each entry trimmed,
- * blanks dropped) — SES requires individual addresses, unlike SMTP.
+ * Splits a recipient value into trimmed, non-empty addresses. SES needs
+ * individual addresses.
  *
  * @param value - One address, a comma-separated string, or an array.
  * @returns The individual, trimmed, non-empty addresses.
@@ -89,24 +83,14 @@ export class SesMailer extends MailerAdapter {
   }
 
   async send(input: SendInput): Promise<MailerResult<SendOk>> {
-    // SES expects an array of individual addresses; a comma-joined string
-    // (how the support config surfaces multiple recipients) would otherwise
-    // be treated as one invalid RFC-5321 address and rejected. Normalise
-    // string | string[] to a trimmed list here so multi-recipient TO/CC work.
+    // SES rejects a comma-joined string as one invalid address.
     const ccAddresses = input.cc ? toAddressList(input.cc) : [];
     const from = input.from ?? this.from;
     const toAddresses = toAddressList(input.to);
 
-    // Inside the try, with the send: `buildRawMime` awaits MailComposer, which
-    // can reject on pathological input. Outside, that rejection would escape
-    // `send()` instead of becoming a MailerResult — breaking the "adapters
-    // return Result, never throw across the boundary" rule, and surfacing as a
-    // 500 INTERNAL instead of the 502 SUPPORT_SEND_FAILED the caller expects.
+    // `buildRawMime` can reject; keep it inside the try so send() never throws.
     try {
-      // SES's Simple content has no attachment field at all, so an
-      // attachment-bearing message must be sent as raw MIME (#551). Only that
-      // case takes the raw path; everything else keeps the well-tested Simple
-      // one, since raw MIME means we own header construction.
+      // Simple content has no attachments, so only messages with attachments use raw MIME.
       const content = input.attachments?.length
         ? {
             Raw: { Data: await buildRawMime({ ...input, from, to: toAddresses, cc: ccAddresses }) },
@@ -123,9 +107,7 @@ export class SesMailer extends MailerAdapter {
 
       const command = new SendEmailCommand({
         FromEmailAddress: from,
-        // Kept for the raw path too: SES uses Destination as the envelope
-        // recipients, and relying on the MIME headers alone would drop CCs on
-        // some configurations.
+        // Needed on the raw path too: SES uses Destination as the envelope recipients.
         Destination: {
           ToAddresses: toAddresses,
           ...(ccAddresses.length ? { CcAddresses: ccAddresses } : {}),

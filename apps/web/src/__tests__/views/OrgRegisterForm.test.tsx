@@ -8,7 +8,7 @@
  * dialog with an Accept button, for the same reason RJSF is shimmed — these
  * tests exercise OrgRegisterForm's wiring, not the gate's internals.
  */
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
@@ -82,12 +82,12 @@ const orgSchema = {
   properties: { display_name: { type: 'string', title: 'Display Name' } },
 } as never;
 
-// Present in most tests so the gate has something to show; the
-// "consent copy unavailable" test overrides it back to `undefined`.
 const consentContentFixture = {
   terms: { version: 1, title: 'Terms', content: 'Terms body' },
   privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
 };
+
+const invite = { token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' };
 
 function renderForm(props: Record<string, unknown> = {}) {
   return render(
@@ -96,13 +96,14 @@ function renderForm(props: Record<string, unknown> = {}) {
         schema={orgSchema}
         uiSchema={{}}
         consentContent={consentContentFixture}
+        invite={invite}
         {...props}
       />
     </NextIntlClientProvider>,
   );
 }
 
-/** Opens via submit, then accepts the (shimmed) gate. */
+/** Submits, then accepts the (shimmed) consent gate. */
 async function submitAndAcceptGate() {
   fireEvent.submit(screen.getByTestId('rjsf-shim'));
   await screen.findByRole('dialog');
@@ -112,148 +113,99 @@ async function submitAndAcceptGate() {
 }
 
 describe('<OrgRegisterForm />', () => {
-  let originalFetch: typeof fetch;
+  const originalFetch = globalThis.fetch;
+  const originalLocation = window.location;
+  const assign = vi.fn();
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, assign },
+    });
+  });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
     capturedOnError = undefined;
     capturedGateProps = undefined;
     vi.restoreAllMocks();
+    assign.mockReset();
   });
 
-  it('submits to /api/org/register and shows the success panel with the slug', async () => {
-    originalFetch = globalThis.fetch;
+  function respond(status: number, body: unknown) {
     const calls: { url: string; body: string }[] = [];
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       calls.push({ url: String(input), body: init?.body ?? '' });
-      return new Response(JSON.stringify({ slug: 'enable-india-ab12' }), {
-        status: 200,
+      return new Response(JSON.stringify(body), {
+        status,
         headers: { 'content-type': 'application/json' },
       });
     }) as unknown as typeof fetch;
+    return calls;
+  }
 
+  it('names the inviting org the new org registers under', () => {
+    renderForm();
+    expect(screen.getByText(/Parent Org/)).toBeInTheDocument();
+  });
+
+  it('accepts the invite with consent, then goes to sign-in with the invited email', async () => {
+    const calls = respond(201, { status: 'pending', login_hint: 'ravi@enable.org' });
     renderForm();
     await submitAndAcceptGate();
 
-    await waitFor(() => expect(calls.length).toBe(1));
-    expect(calls[0]!.url).toBe('/api/org/register');
-    const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
-    expect(body['display_name']).toBe('Enable India');
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    expect(calls[0]?.url).toBe('/api/invite/org/accept');
+    const body = JSON.parse(calls[0]?.body ?? '{}') as Record<string, unknown>;
+    expect(body).toMatchObject({ display_name: 'Enable India', invite: 'tok-1' });
     expect(body['consent']).toMatchObject({ value: true });
-
-    expect(await screen.findByText('enable-india-ab12')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.org_success_heading)).toBeInTheDocument();
+    expect(body).not.toHaveProperty('parent_id');
+    expect(assign).toHaveBeenCalledWith(
+      '/api/auth/login?returnTo=%2Fconsole&login_hint=ravi%40enable.org',
+    );
   });
 
-  it('shows the ALREADY-REGISTERED panel when the API reports status active', async () => {
-    // The API returns 200 for both a new pending registration and an
-    // already-approved org whose invite link was re-sent. Rendering "our team
-    // will review your organisation" over the second is simply false.
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ slug: 'org1-2ab4', status: 'active', mail_sent: true }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    ) as unknown as typeof fetch;
-
+  it('shows the error banner on a non-2xx response and stays on the page', async () => {
+    respond(400, { error: { code: 'INVITE_EMAIL_MISMATCH', title: 'Use the invited email' } });
     renderForm();
     await submitAndAcceptGate();
-
-    expect(await screen.findByText(messages.register.org_exists_heading)).toBeInTheDocument();
-    expect(screen.getByText(messages.register.org_exists_link_sent)).toBeInTheDocument();
-    // The pending copy must NOT appear — that was the reported bug.
-    expect(screen.queryByText(messages.register.org_success_review)).not.toBeInTheDocument();
-    expect(screen.queryByText(messages.register.org_success_heading)).not.toBeInTheDocument();
-  });
-
-  it('tells the owner the mail failed rather than claiming it was sent', async () => {
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ slug: 'org1-2ab4', status: 'active', mail_sent: false }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    ) as unknown as typeof fetch;
-
-    renderForm();
-    await submitAndAcceptGate();
-
-    expect(await screen.findByText(messages.register.org_exists_mail_failed)).toBeInTheDocument();
-    expect(screen.queryByText(messages.register.org_exists_link_sent)).not.toBeInTheDocument();
-  });
-
-  it('shows the error banner on a non-2xx response', async () => {
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ error: { title: 'Duplicate', detail: 'Org already exists' } }),
-          { status: 409, headers: { 'content-type': 'application/json' } },
-        ),
-    ) as unknown as typeof fetch;
-
-    renderForm();
-    await submitAndAcceptGate();
-
     expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText('Duplicate')).toBeInTheDocument();
-    expect(screen.getByText('Org already exists')).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('explains a full inviting org in plain words', async () => {
+    respond(409, { error: { code: 'ORG_DEPTH_LIMIT' } });
+    renderForm();
+    await submitAndAcceptGate();
+    expect(await screen.findByText(messages.register.org_error_depth_limit)).toBeInTheDocument();
   });
 
   it('shows a network-error banner when fetch throws', async () => {
-    originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
-
     renderForm();
     await submitAndAcceptGate();
-
     expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText('Network error')).toBeInTheDocument();
-    expect(screen.getByText('offline')).toBeInTheDocument();
   });
 
-  it('surfaces client-side validation errors via onError', async () => {
-    originalFetch = globalThis.fetch;
+  it('leaves field errors to the fields, with no banner', () => {
     globalThis.fetch = vi.fn() as unknown as typeof fetch;
     renderForm();
-
-    // RjsfThemedForm shim captured onError — invoke it directly to simulate
-    // RJSF surfacing a client-validation failure before submit fires.
     act(() => {
       capturedOnError?.([{ property: '.display_name', message: 'is required', name: 'required' }]);
     });
-
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
-  });
-
-  it('passes consentContent through formContext without crashing when omitted', () => {
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
-    renderForm({ consentContent: undefined });
-    expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {
-    originalFetch = globalThis.fetch;
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    // `consentContent: undefined` mirrors loadConsentConfig failing at boot —
-    // `toConsentDocs(undefined)` returns `[]`, so the gate would have nothing
-    // to show. Without the fix this is a dead Submit button: no gate, no
-    // error, no way for the user to tell what happened.
     renderForm({ consentContent: undefined });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
-
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(messages.register.consent.load_failed_title)).toBeInTheDocument();
-    expect(screen.getByText(messages.register.consent.load_failed_detail)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

@@ -1,181 +1,137 @@
 /**
- * Aggregator config read endpoint.
+ * Public config routes of the api app.
  *
  *   GET /v1/aggregator-config
- *     Returns the public surface of the resolved aggregator + network
- *     config. The web app reads this once on mount and threads the
- *     brand + domain labels + url slug through the sidebar, topbar,
- *     dashboard tabs, and tab counts.
+ *     Returns the public part of the aggregator and network config. The web
+ *     app reads it to render brand, domain labels and dashboard settings.
  *
- * No auth required — every value here is operator-controlled and
- * already visible in the page title / sidebar logo / public URL slug.
- * Secrets (signalstack admin key, postgres password) live in env and
- * are intentionally never serialised here.
+ * No auth: every value is already public. Secrets are never included.
  *
  * @module apps/api/routes/aggregator-config
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import type {
-  BrandLogo,
-  BrandPalette,
-  BrandTypography,
-  DashboardBuckets,
-  DashboardTiles,
-  RegistrationMode,
-  StatusRule,
+import {
+  BrandAttributionSchema,
+  BrandLogoSchema,
+  BrandPaletteSchema,
+  BrandTypographySchema,
+  DashboardTileDefSchema,
+  DashboardTilesSchema,
+  DEFAULT_INVITE_ROLE_LABEL,
+  RegistrationModeSchema,
+  StatusRuleSchema,
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { enabledRegistrationModes, signalsUiUrls } from '../config.js';
+import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
+import { OwnerSelfAddModeSchema } from '@aggregator-dpg/shared-primitives/user-org';
+
+// The tile and status-rule schemas come from network-config, which keeps unknown
+// keys. The reply strips them, so it carries only the documented fields.
+
+/** Profile and user tile groups for one domain's dashboard. */
+const DashboardTilesReplySchema = DashboardTilesSchema.extend({
+  profile: z.array(DashboardTileDefSchema.strip()).optional(),
+  user: z.array(DashboardTileDefSchema.strip()).optional(),
+}).strip();
 
 /**
- * Wire shape of a `registration_modes` entry. Distinct from the shared
- * `RegistrationMode` type because `signals_cta` is optional in the YAML
- * schema (it defaults from `submission_shape` when omitted) but is always
- * resolved to a concrete boolean before it reaches the client — the two
- * must not collapse into the same type.
+ * Bucket labels keyed by Signals value.
+ *
+ * Open to any key, so a status the web does not know yet still reaches it.
  */
-type PublicRegistrationMode = RegistrationMode & { signals_cta: boolean };
+const BucketLabelsSchema = z.record(z.string(), z.string());
+
+/** Network-wide label overrides for the dashboard status and action buckets. */
+const DashboardBucketsReplySchema = z.object({
+  by_status: BucketLabelsSchema.optional(),
+  by_initiated_action_status: BucketLabelsSchema.optional(),
+  by_received_action_status: BucketLabelsSchema.optional(),
+});
 
 /**
- * Public-safe projection of the resolved network config. Excludes
- * raw JSON Schema payloads (the form validator endpoint handles
- * those) and the full upstream `network.json` to keep the wire
- * payload small.
+ * Public part of the resolved network config. Leaves out JSON Schemas and the full `network.json`.
+ *
+ * Fastify validates and serialises the reply with this schema, so a key it does
+ * not declare is dropped from the reply.
  */
-interface PublicAggregatorConfig {
-  aggregator: {
-    name: string;
-    legal_name?: string;
-    contact_email?: string;
-  };
-  brand: {
-    short_name: string;
-    long_name: string;
-    tagline?: string;
-    strapline?: string;
-    url_slug: string;
-    primary_color?: string;
-    accent_color?: string;
-    logo_url?: string;
-    favicon_url?: string;
-    palette?: BrandPalette;
-    typography?: BrandTypography;
-    logo?: BrandLogo;
-  };
-  network: {
-    id: string;
-    display_name?: string;
-  };
-  domains: Array<{
-    id: string;
-    label: string;
-    plural_label: string;
-    item_type: string;
-    /** Mirrors network.json — drives the registration birth-year field (#613). */
-    guardian_consent_required: boolean;
-    /** Mirrors network.json — drives the registration consent step (#613). */
-    go_live_required: string[];
-    dashboardTiles?: DashboardTiles;
-    status_rules?: StatusRule[];
-  }>;
-  dashboardBuckets?: DashboardBuckets;
+const AggregatorConfigResponseSchema = z.object({
+  aggregator: z.object({
+    name: z.string(),
+    legal_name: z.string().optional(),
+    contact_email: z.string().optional(),
+  }),
+  brand: z.object({
+    short_name: z.string(),
+    long_name: z.string(),
+    tagline: z.string().optional(),
+    strapline: z.string().optional(),
+    url_slug: z.string(),
+    primary_color: z.string().optional(),
+    accent_color: z.string().optional(),
+    logo_url: z.string().optional(),
+    favicon_url: z.string().optional(),
+    palette: BrandPaletteSchema.optional(),
+    typography: BrandTypographySchema.optional(),
+    logo: BrandLogoSchema.optional(),
+    /** Sent only when the brand declares `attribution`. */
+    attribution: z.array(BrandAttributionSchema).optional(),
+  }),
+  network: z.object({
+    id: z.string(),
+    display_name: z.string().optional(),
+  }),
+  domains: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      plural_label: z.string(),
+      item_type: z.string(),
+      /** From network.json; drives the registration birth-year field. */
+      guardian_consent_required: z.boolean(),
+      /** From network.json; drives the registration consent step. */
+      go_live_required: z.array(z.string()),
+      dashboardTiles: DashboardTilesReplySchema.optional(),
+      status_rules: z.array(StatusRuleSchema.strip()).optional(),
+    }),
+  ),
+  dashboardBuckets: DashboardBucketsReplySchema.optional(),
+  /** Registration modes this deployment offers; the create-link dropdown uses these keys. */
+  registration_modes: z.record(
+    z.string(),
+    RegistrationModeSchema.extend({ signals_cta: z.boolean() }),
+  ),
   /**
-   * Per-link registration modes declared by the network. The web admin form
-   * renders its mode dropdown from these keys (label + optional public hint).
-   */
-  registration_modes: Record<string, PublicRegistrationMode>;
-  /**
-   * Per-domain Signals UI login URLs, keyed by domain id. Empty when the
-   * deployment has not configured any — the public form then shows no Signals
-   * hand-off. Sourced from the SIGNALS_UI_URLS env var, not from the YAML, so
-   * it can be changed at deploy time without an image rebuild.
+   * Per-domain Signals UI login URLs from `SIGNALS_UI_URLS`. Empty when unset.
    *
-   * `Readonly` to match the frozen `signalsUiUrls` export it is assigned from:
-   * every value is a boot-validated absolute http(s) URL and nothing on the
-   * response path has any business adding one that is not.
+   * Checked at boot with `new URL()`. A plain string here, since `z.url()`
+   * could reject a value that boot accepted and cause a 500.
    */
-  signals_ui_urls: Readonly<Record<string, string>>;
-}
+  signals_ui_urls: z.record(z.string(), z.string()),
+  /**
+   * Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`;
+   * `owner_self_add` is `OWNER_SELF_ADD_MODE`.
+   */
+  features: z.object({ custom_roles: z.boolean(), owner_self_add: OwnerSelfAddModeSchema }),
+  /** Largest bulk-upload CSV the api accepts, in bytes (`BULK_UPLOAD_MAX_BYTES`). */
+  bulk_upload_max_bytes: z.number().int().positive(),
+  /** The role name the console shows for an invited organisation. */
+  organisation: z.object({ invite_role_label: z.string() }),
+});
 
-const AggregatorConfigResponseSchema = z
-  .object({
-    aggregator: z
-      .object({
-        name: z.string(),
-        legal_name: z.string().optional(),
-        contact_email: z.string().optional(),
-      })
-      .passthrough(),
-    brand: z
-      .object({
-        short_name: z.string(),
-        long_name: z.string(),
-        tagline: z.string().optional(),
-        strapline: z.string().optional(),
-        url_slug: z.string(),
-        primary_color: z.string().optional(),
-        accent_color: z.string().optional(),
-        logo_url: z.string().optional(),
-        favicon_url: z.string().optional(),
-        attribution: z
-          .array(
-            z.object({
-              label: z.string(),
-              name: z.string(),
-              logo: z.string().optional(),
-              logoLight: z.string().optional(),
-            }),
-          )
-          .optional(),
-      })
-      .passthrough(),
-    network: z
-      .object({
-        id: z.string(),
-        display_name: z.string().optional(),
-      })
-      .passthrough(),
-    domains: z.array(
-      z
-        .object({
-          id: z.string(),
-          label: z.string(),
-          plural_label: z.string(),
-          item_type: z.string(),
-          guardian_consent_required: z.boolean(),
-          go_live_required: z.array(z.string()),
-        })
-        .passthrough(),
-    ),
-    dashboardBuckets: z
-      .object({
-        by_status: z.record(z.string(), z.string()).optional(),
-        by_action_status: z.record(z.string(), z.string()).optional(),
-      })
-      .passthrough()
-      .optional(),
-    registration_modes: z.record(
-      z.string(),
-      z.object({ label: z.string().optional(), signals_cta: z.boolean() }).passthrough(),
-    ),
-    // Values are absolute http(s) URLs (enforced at boot by
-    // `parseSignalsUiUrls`), but kept as a plain string here on purpose:
-    // `z.string().url()` is a *different* predicate from `new URL()`, so a
-    // value that boots fine could fail response serialisation and turn a
-    // working config into a 500. Tightening this needs the two validators
-    // reconciled first — tracked as a follow-up, not done here.
-    signals_ui_urls: z.record(z.string(), z.string()),
-  })
-  .passthrough();
+/** Wire shape of `GET /v1/aggregator-config`. */
+type PublicAggregatorConfig = z.infer<typeof AggregatorConfigResponseSchema>;
 
-export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorConfigRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregator-config',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['aggregator-config'],
         summary: 'Public brand + network config',
@@ -186,9 +142,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
     },
     async (_req, reply) => {
       const cfg = await getNetworkConfig();
-      // Deployment-level narrowing (#637). Derived through the one shared
-      // helper the create-link gate and the boot diagnostics also use, so the
-      // dropdown can never disagree with what creation actually accepts.
+      // Same helper as the create-link check, so the dropdown matches what creation accepts.
       const enabledModes = new Set(
         enabledRegistrationModes(Object.keys(cfg.aggregator.registration_modes ?? {})),
       );
@@ -219,9 +173,6 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
             ? { typography: cfg.aggregator.brand.typography }
             : {}),
           ...(cfg.aggregator.brand.logo ? { logo: cfg.aggregator.brand.logo } : {}),
-          // Opt-in per brand (signals-dpg#720). Only a brand.json that declares
-          // `attribution` sends anything, so every other deployment keeps the
-          // exact payload it had before.
           ...(cfg.aggregator.brand.attribution?.length
             ? { attribution: cfg.aggregator.brand.attribution }
             : {}),
@@ -246,23 +197,24 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         ...(cfg.dashboardBuckets ? { dashboardBuckets: cfg.dashboardBuckets } : {}),
         registration_modes: Object.fromEntries(
           Object.entries(cfg.aggregator.registration_modes ?? {})
-            // A mode the `AGGREGATOR_ONBOARDING_ENABLED` allow-list withholds
-            // is dropped from the wire payload entirely. The admin create-link
-            // dropdown renders these keys verbatim, so filtering here is what
-            // removes the option — no web change involved. Unset ⇒ nothing is
-            // filtered.
+            // Drop modes withheld by `AGGREGATOR_ONBOARDING_ENABLED`.
             .filter(([key]) => enabledModes.has(key))
             .map(([key, mode]) => [
               key,
-              // Resolve the `signals_cta` default here so the client normally
-              // reads a concrete boolean off the wire. The client keeps a
-              // back-compat fallback that re-derives it (for an older api build
-              // that omits the field) — both sides share the one rule in
-              // `@aggregator-dpg/network-config/signals-cta`.
+              // Resolve the `signals_cta` default with the rule shared with the web app.
               { ...mode, signals_cta: signalsCtaEnabled(key, cfg) },
             ]),
         ),
         signals_ui_urls: signalsUiUrls,
+        features: {
+          custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED,
+          owner_self_add: config.OWNER_SELF_ADD_MODE,
+        },
+        bulk_upload_max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+        organisation: {
+          invite_role_label:
+            cfg.aggregator.organisation.invite_role_label ?? DEFAULT_INVITE_ROLE_LABEL,
+        },
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
     },
@@ -271,6 +223,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
   app.get(
     '/v1/participant-consent',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['aggregator-config'],
         summary: 'Participant registration-link consent document',
@@ -279,7 +232,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         response: {
           200: z
             .object({ participant_consent: z.record(z.string(), z.unknown()).nullable() })
-            .passthrough(),
+            .loose(),
           ...errorResponses(500, 503),
         },
       },

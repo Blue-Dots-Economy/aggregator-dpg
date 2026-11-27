@@ -14,9 +14,9 @@ export function useProfile() {
 }
 
 /**
- * Raw API-shape profile (pre-display-mapping). Used by the edit form to
- * pre-populate fields from the canonical Beckn shape instead of guessing
- * back from the display-mapped AggregatorProfile.
+ * Fetches the profile in its raw API shape, before display mapping.
+ *
+ * @returns The React Query result for the raw profile.
  */
 export function useProfileRaw() {
   return useQuery({

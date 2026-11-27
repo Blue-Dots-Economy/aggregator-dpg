@@ -3,10 +3,8 @@
  * Read-only modal dialog showing the versioned Terms of Service or Privacy
  * Policy for a given audience.
  *
- * Opened via the clickable links in {@link ConsentCheckboxWidget}. Renders a
- * fixed full-screen overlay with two tabs (Terms / Privacy) and an accessible
- * close button. The modal traps ESC-key dismissal and is fully keyboard
- * accessible.
+ * Opened from the links in {@link ConsentCheckboxWidget}. Shows a full-screen
+ * overlay with Terms and Privacy tabs. ESC and the close button dismiss it.
  *
  * @module apps/web/src/components/consent/ConsentModal
  */
@@ -35,8 +33,7 @@ export interface ConsentModalProps {
  * Displays a full-screen read-only modal containing the Terms of Service and
  * Privacy Policy, with tab navigation between them.
  *
- * Returns null when `open` is false to avoid mounting the heavy Markdown
- * renderer when the modal is not visible.
+ * Returns null when `open` is false, so the Markdown renderer is not mounted.
  *
  * @param props - Open state, change handler, initial tab, and document content.
  * @returns The modal overlay element, or null when closed.
@@ -47,38 +44,42 @@ export function ConsentModal({
   initialTab,
   content,
 }: ConsentModalProps): JSX.Element | null {
+  if (!open) return null;
+  return <OpenConsentModal onOpenChange={onOpenChange} initialTab={initialTab} content={content} />;
+}
+
+/**
+ * The open modal. It mounts on each opening, so the tab starts at `initialTab`
+ * and the close button takes focus.
+ */
+function OpenConsentModal({
+  onOpenChange,
+  initialTab,
+  content,
+}: Readonly<Omit<ConsentModalProps, 'open'>>): JSX.Element {
   const t = useTranslations('register');
   const [activeTab, setActiveTab] = useState<ConsentTab>(initialTab);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Reset the active tab each time the modal opens.
+  // Focus the close button once the modal is painted.
   useEffect(() => {
-    if (open) {
-      setActiveTab(initialTab);
-      // Move focus to the close button when the modal becomes visible.
-      requestAnimationFrame(() => closeButtonRef.current?.focus());
-    }
-  }, [open, initialTab]);
+    const frame = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   // Dismiss on ESC.
   useEffect(() => {
-    if (!open) return;
     const handleKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onOpenChange(false);
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [open, onOpenChange]);
-
-  if (!open) return null;
+  }, [onOpenChange]);
 
   const activeDoc = activeTab === 'terms' ? content.terms : content.privacy;
 
   return (
-    /* Fixed full-screen overlay — the outer div is the backdrop; the inner div
-       is the accessible dialog. Keyboard dismissal is handled via the ESC
-       useEffect above; backdrop click is handled on the panel container using
-       a button element. */
+    /* Outer div is the backdrop; the inner div is the dialog. */
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       {/* Invisible backdrop button captures click-outside-to-close. */}
       <button
@@ -88,17 +89,14 @@ export function ConsentModal({
         onClick={() => onOpenChange(false)}
         tabIndex={-1}
       />
-      {/* Dialog panel — sizing/layout mirrors the Signals-DPG consent modal
-          (max-w-2xl, max-h-[90vh], flex column, no inner padding on the shell). */}
+      {/* Dialog panel. */}
       <div
         className="relative z-10 w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-label={activeDoc.title}
       >
-        {/* Header — generic eyebrow + title + description; the doc-specific
-            heading comes from the Markdown content's own `##` heading, so it is
-            not echoed here (matches the Signals-DPG consent modal). */}
+        {/* Header. The document heading comes from the Markdown content. */}
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4 shrink-0">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wide text-(--bd-primary)">
@@ -122,7 +120,7 @@ export function ConsentModal({
 
         {/* Tabs + scrollable content region */}
         <div className="flex flex-col flex-1 overflow-hidden px-6 pb-6 gap-4">
-          {/* Pill tab bar — gray track, white active pill (shadcn-style). */}
+          {/* Pill tab bar. */}
           <div className="flex w-full shrink-0 h-11 p-1 gap-1 rounded-lg bg-slate-100">
             {(['privacy', 'terms'] as const).map((tab) => {
               const label = tab === 'terms' ? content.terms.title : content.privacy.title;
@@ -146,7 +144,7 @@ export function ConsentModal({
             })}
           </div>
 
-          {/* Content — scrollable */}
+          {/* Scrollable content. */}
           <div className="flex-1 overflow-y-auto pr-1">
             <MarkdownContent content={activeDoc.content} />
           </div>

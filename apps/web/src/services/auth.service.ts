@@ -1,33 +1,37 @@
 /**
- * Browser-side auth service.
+ * Browser-side auth service for the web app.
  *
- * Talks only to the BFF (`/api/auth/*`). Tokens never reach this layer —
- * they are stored server-side in Redis. This module exists for client
- * components that need to read the active user (e.g. profile menu) when
- * not provided via React context.
+ * Calls only the BFF (`/api/auth/*`). Tokens stay server-side in Redis.
  */
 
+import { z } from 'zod';
+import { parseResponseBody } from '../lib/response-shape-error';
 import type { User } from '../types';
 
-interface MeResponse {
-  user: {
-    sub: string;
-    email?: string;
-    phone?: string;
-    name?: string;
-  };
-}
+const ME_URL = '/api/auth/me';
+
+/** `GET /api/auth/me`: the identity claims of the session. */
+const AuthMeResponseSchema = z.object({
+  user: z.object({
+    sub: z.string(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    name: z.string().optional(),
+  }),
+});
 
 /**
  * Fetches the active user from the BFF.
  *
  * @returns User profile or `null` if unauthenticated.
+ * @throws {Error} When the request fails with a status other than 401.
+ * @throws {ResponseShapeError} When an OK body is not JSON or does not match.
  */
 export async function fetchCurrentUser(): Promise<User | null> {
-  const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
+  const res = await fetch(ME_URL, { credentials: 'include', cache: 'no-store' });
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`auth/me failed: ${res.status}`);
-  const data = (await res.json()) as MeResponse;
+  const data = await parseResponseBody(res, ME_URL, AuthMeResponseSchema);
   return {
     id: data.user.sub,
     name: data.user.name ?? data.user.email ?? data.user.phone ?? data.user.sub,
@@ -35,10 +39,7 @@ export async function fetchCurrentUser(): Promise<User | null> {
   };
 }
 
-/**
- * Triggers BFF logout — destroys session, clears cookie, redirects through
- * Keycloak end-session.
- */
+/** Logs out through the BFF, which ends the session and the Keycloak session. */
 export function logout(): void {
   window.location.href = '/api/auth/logout';
 }

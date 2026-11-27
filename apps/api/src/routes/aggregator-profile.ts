@@ -1,57 +1,60 @@
 /**
- * Aggregator profile endpoints (post-login).
+ * Coordinator profile endpoints in `@aggregator-dpg/api`.
  *
  *   GET /v1/aggregators/profile/me
- *     Returns the `aggregators` row (registration-essential fields) plus an
- *     identity fragment derived from JWT / Keycloak.
+ *     Returns the coordinator row plus identity fields from the token or Keycloak.
  *
  *   PATCH /v1/aggregators/profile/me
- *     Splits writes by destination:
+ *     A contact change writes the phone to Keycloak first, then the contact
+ *     to the database. `name` goes to the database only.
  *
- *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
- *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name / url / locations)
+ *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
+ *     belong to the coordinator's org. A PATCH that changes any of them is
+ *     refused with `409 ORG_DETAILS_READ_ONLY` before any write.
  *
- *     `consent` is read-only: it is recorded once, at registration, in the
- *     append-only consent ledger, and a coordinator cannot rewrite it. A body
- *     that sends it is refused as `SCHEMA_VALIDATION` (the schema is strict).
+ *     `consent` is read-only after registration; a body that sends it is
+ *     refused as `SCHEMA_VALIDATION`. `org_slug` cannot be changed.
  *
- *     `org_slug` is rejected (immutable; DB trigger enforces too).
- *
- * The 1:1 `aggregator_profile` table this pair used to merge in was removed —
- * it was only ever written as an all-defaults stub, and its extensibility goal
- * is served by `aggregators.profile` + `aggregators.profile_ref` (migration
- * 0018). Its six response keys (`contact_name`, `personas`, `services`,
- * `verified_certificate`, `profile_completed_at`, `is_complete`) and the
- * `body.profile` request half went with it.
- *
- * Authorisation: Bearer access token from Keycloak with the custom
- * `aggregator_id` claim mapped from the user attribute.
+ * Requires a Keycloak Bearer token carrying the `user_id` claim. The GET
+ * also accepts an org owner acting as its own coordinator account
+ * (`x-acting-account`); the PATCH does not, because it writes the login's
+ * Keycloak contact attributes.
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ConsentRecordSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import {
+  authenticate,
+  authenticateAllowingActing,
+  type AuthContext,
+  type AuthResult,
+} from '../services/auth/access-token.js';
+import { throwIfActingError } from '../services/auth/acting.js';
+import type { Coordinator } from '../services/user-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
 const AggregatorPatchSchema = z
   .object({
     name: z.string().min(2).max(200).optional(),
-    url: z.string().url().max(2048).nullable().optional(),
+    url: z.url().max(2048).nullable().optional(),
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
   })
+  // Strict: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION.
   .strict();
 
 const ProfileUpdateBodySchema = z
@@ -72,22 +75,21 @@ const ProfileIdentitySchema = z
     phone_verified: z.boolean(),
     active: z.boolean(),
   })
-  .passthrough();
+  .loose();
 
-// PII response sub-objects are declared with the canonical entity schemas
-// (the same ones the writes are validated against) rather than empty
-// `z.object({}).passthrough()`. This (a) field-whitelists the serialized
-// PII so undeclared keys can never leak, and (b) renders the real shapes in
-// the Scalar reference instead of empty objects.
+// PII sub-objects use the full entity schemas so undeclared keys are never serialized.
 const ProfileCommonResponseShape = {
-  aggregator_id: z.string(),
+  user_id: z.string(),
   org_slug: z.string(),
   actor_type: z.string(),
   type: z.string().nullable(),
+  // The profile types served; empty means none. `type` is its first entry.
+  serves: z.array(z.string()),
   url: z.string().nullable(),
   contact: BecknContactSchema,
   locations: z.array(BecknLocationSchema),
-  consent: ConsentRecordSchema,
+  // The newest registration consent from the ledger; null when there is none.
+  consent: ConsentRecordSchema.nullable(),
   status: z.string(),
   updated_at: z.string(),
 };
@@ -99,19 +101,21 @@ const ProfileReadResponseSchema = z
     identity: ProfileIdentitySchema,
     created_at: z.string(),
   })
-  .passthrough();
+  .loose();
 
 const ProfileUpdateResponseSchema = z
   .object({
     ...ProfileCommonResponseShape,
     name: z.string(),
   })
-  .passthrough();
+  .loose();
 
-export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
+export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregators/profile/me',
     {
+      config: { rbac: { access: 'self' } },
       schema: {
         tags: ['aggregator-profile'],
         summary: 'Read the caller aggregator profile',
@@ -125,13 +129,13 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
+      const auth = await requireAuth(req, { allowActing: true });
+      const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.subject });
       const start = Date.now();
 
-      const aggregatorStore = getAggregatorStore();
+      const userStore = getUserStore();
 
-      const aggregator = await aggregatorStore.findById(auth.aggregatorId);
+      const aggregator = await userStore.findById(auth.userId);
       if (!aggregator.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(aggregator.error.message) });
       }
@@ -139,40 +143,43 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         throw httpError('NOT_FOUND', { detail: 'Aggregator record not found.' });
       }
 
-      const kcUser = await fetchKcUserSafe(auth, log);
+      // An acting owner's Keycloak user is the owner's login, not this account.
+      const kcUser = auth.acting ? null : await fetchKcUserSafe(auth, log);
 
       log.info(
-        { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.aggregatorId },
+        { status: 'success', latency_ms: Date.now() - start, aggregator_id: auth.userId },
         'profile read',
       );
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
-        // aggregator.name is now authoritative for display. Fall back to slug
-        // only on the (impossible) empty-string edge case.
+        // Falls back to the slug only when the name is empty.
         org_name: aggregator.value.name || aggregator.value.orgSlug,
         actor_type: aggregator.value.actorType,
         type: aggregator.value.type,
+        serves: aggregator.value.serves,
         url: aggregator.value.url,
         contact: aggregator.value.contact,
         locations: aggregator.value.locations,
         consent: aggregator.value.consent,
         status: aggregator.value.status,
-        // Identity (from JWT claim / KC fallback)
-        identity: {
-          first_name: auth.firstName ?? kcUser?.firstName ?? null,
-          last_name: auth.lastName ?? kcUser?.lastName ?? null,
-          email: auth.email ?? kcUser?.email ?? aggregator.value.contact.email,
-          email_verified: auth.emailVerified ?? false,
-          phone:
-            auth.phoneNumber ??
-            pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ??
-            aggregator.value.contact.phone,
-          phone_verified:
-            auth.phoneNumberVerified ?? pickAttribute(kcUser, 'phoneNumberVerified') === 'true',
-          active: kcUser?.enabled ?? aggregator.value.status === 'active',
-        },
+        identity: auth.acting
+          ? actingIdentity(auth, aggregator.value)
+          : // From the token, falling back to Keycloak.
+            {
+              first_name: auth.firstName ?? kcUser?.firstName ?? null,
+              last_name: auth.lastName ?? kcUser?.lastName ?? null,
+              email: auth.email ?? kcUser?.email ?? aggregator.value.contact.email,
+              email_verified: auth.emailVerified ?? false,
+              phone:
+                auth.phoneNumber ??
+                pickAttribute(kcUser, KC_ATTR.PHONE_NUMBER) ??
+                aggregator.value.contact.phone,
+              phone_verified:
+                auth.phoneNumberVerified ?? pickAttribute(kcUser, 'phoneNumberVerified') === 'true',
+              active: kcUser?.enabled ?? aggregator.value.status === 'active',
+            },
         created_at: aggregator.value.createdAt.toISOString(),
         updated_at: aggregator.value.updatedAt.toISOString(),
       });
@@ -182,11 +189,12 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/aggregators/profile/me',
     {
+      config: { rbac: { access: 'self' } },
       schema: {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          'Partial update of the caller aggregator (name / url / contact / locations). Contact phone + email are mirrored to Keycloak before the DB write. `consent` is read-only (recorded at registration) and is rejected here.',
+          "Partial update of the caller aggregator (name / contact). Consent is read-only after registration: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION. Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
@@ -197,47 +205,42 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
+      const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.subject });
       const start = Date.now();
 
-      // `schema.body` already validated against `ProfileUpdateBodySchema`
-      // (the zod validator compiler replaces `req.body` with the parse
-      // output), so the typed body can be consumed directly here.
-      const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
+      // Already validated and parsed by the route schema.
+      const body = req.body;
 
-      const aggregatorStore = getAggregatorStore();
+      const userStore = getUserStore();
 
-      // ─── 1. Mirror phone/email to Keycloak FIRST (authoritative). ──────────
-      // If KC fails, abort before touching the DB so we never have the DB
-      // ahead of Keycloak.
+      // A change to org details is refused before any write.
+      await assertOrgDetailsUnchanged(userStore, auth.userId, body.aggregator);
+
+      // ─── 1. Write the phone to Keycloak first. ─────────────────────────────
+      // A Keycloak failure aborts before the database write.
       let normalisedContact: BecknContact | undefined;
-      // The coordinator's stored phone before this request (what Keycloak
-      // mirrors), written back to Keycloak if the DB write fails.
+      // The stored phone, restored in Keycloak if the database write fails.
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
-        const phoneR = normalisePhone(raw.phone);
+        const phoneR = await checkedPhone(userStore, auth.userId, raw.phone);
         if (!phoneR.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneR.error.message,
-            // Key it `phone` (not `input`) so the logger's `*.phone` redact
-            // path masks the raw number if this error is ever logged.
+            // Keyed `phone` so the logger redacts it.
             fields: { phone: raw.phone },
           });
         }
         normalisedContact = { ...raw, phone: phoneR.value };
 
-        // One phone and one email per person across coordinators and org
-        // owners (the phone is the OTP login key; `contact`, migration 0025).
-        // Checked before the Keycloak write so a clash never leaves Keycloak
-        // ahead of the DB.
-        previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
+        // One phone and one email per person. Checked before the Keycloak write.
+        previousPhone = await assertContactChangeAllowed(auth.userId, {
           email: raw.email,
           phone: phoneR.value,
         });
 
         const idp = getIdpAdmin();
-        const kcWrite = await idp.setAttributes(auth.userId, {
+        const kcWrite = await idp.setAttributes(auth.subject, {
           [KC_ATTR.PHONE_NUMBER]: phoneR.value,
         });
         if (!kcWrite.ok) {
@@ -254,32 +257,16 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         }
       }
 
-      // ─── 2. Aggregator-table updates ──────────────────────────────────────
-      const patch: Parameters<typeof aggregatorStore.update>[1] = {
-        updatedBy: auth.userId,
+      // ─── 2. Coordinator-table updates ──────────────────────────────────────
+      const patch: Parameters<typeof userStore.update>[1] = {
+        updatedBy: auth.subject,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
-      if (body.aggregator.url !== undefined) patch.url = body.aggregator.url;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
-      if (body.aggregator.locations !== undefined) patch.locations = body.aggregator.locations;
 
-      const result = await aggregatorStore.update(auth.aggregatorId, patch);
+      const result = await userStore.update(auth.userId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
-        // Keycloak was written first; put it back so it never runs ahead of
-        // the database. Best-effort — logged if it fails.
-        const revert = await getIdpAdmin().setAttributes(auth.userId, {
-          [KC_ATTR.PHONE_NUMBER]: previousPhone,
-        });
-        if (!revert.ok) {
-          log.error(
-            {
-              status: 'failure',
-              sub_operation: 'idp.setAttributes.revert',
-              code: revert.error.code,
-            },
-            'DB update failed and the Keycloak phone could not be restored',
-          );
-        }
+        await restoreKcPhone(auth.subject, previousPhone, log);
       }
       if (!result.ok) {
         throw httpError(mapAggregatorUpdateError(result.error.code), {
@@ -291,23 +278,24 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         {
           status: 'success',
           latency_ms: Date.now() - start,
-          aggregator_id: auth.aggregatorId,
+          aggregator_id: auth.userId,
         },
         'profile updated',
       );
 
-      // Echo the post-write row so the client doesn't need an extra GET.
-      const aggregator = await aggregatorStore.findById(auth.aggregatorId);
+      // Return the updated row.
+      const aggregator = await userStore.findById(auth.userId);
       if (!aggregator.ok || !aggregator.value) {
         throw httpError('INTERNAL', { detail: 'Post-write read failed.' });
       }
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         org_slug: aggregator.value.orgSlug,
         name: aggregator.value.name,
         actor_type: aggregator.value.actorType,
         type: aggregator.value.type,
+        serves: aggregator.value.serves,
         url: aggregator.value.url,
         contact: aggregator.value.contact,
         locations: aggregator.value.locations,
@@ -319,9 +307,84 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   );
 }
 
+/**
+ * Refuses a change to org details, which belong to the coordinator's
+ * organisation. Sending back the current values is not a change.
+ *
+ * @param userStore - The coordinator store.
+ * @param userId - The caller's coordinator id.
+ * @param patch - The validated `aggregator` patch.
+ * @throws 409 ORG_DETAILS_READ_ONLY when a sent org detail differs from the stored one.
+ */
+async function assertOrgDetailsUnchanged(
+  userStore: ReturnType<typeof getUserStore>,
+  userId: string,
+  patch: z.infer<typeof AggregatorPatchSchema>,
+): Promise<void> {
+  const sentOrgDetails =
+    patch.url !== undefined ||
+    patch.locations !== undefined ||
+    patch.contact?.company !== undefined ||
+    patch.contact?.gstNumber !== undefined;
+  if (!sentOrgDetails) return;
+  const current = await userStore.findById(userId);
+  if (!current.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(current.error.message),
+      fields: { sub_operation: 'userStore.findById' },
+    });
+  }
+  const now = current.value;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const changed = [
+    ...(patch.url !== undefined && !same(patch.url, now?.url) ? ['url'] : []),
+    ...(patch.locations !== undefined && !same(patch.locations, now?.locations)
+      ? ['locations']
+      : []),
+    ...(patch.contact?.company !== undefined && !same(patch.contact.company, now?.contact.company)
+      ? ['contact.company']
+      : []),
+    ...(patch.contact?.gstNumber !== undefined &&
+    !same(patch.contact.gstNumber, now?.contact.gstNumber)
+      ? ['contact.gstNumber']
+      : []),
+  ];
+  if (changed.length > 0) {
+    throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: changed } });
+  }
+}
+
+/**
+ * Restores the Keycloak phone after a failed database write. Best effort;
+ * logged on failure.
+ *
+ * @param userId - The caller's Keycloak user id.
+ * @param previousPhone - The phone stored before the request.
+ * @param log - The request logger.
+ */
+async function restoreKcPhone(
+  userId: string,
+  previousPhone: string,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  const revert = await getIdpAdmin().setAttributes(userId, {
+    [KC_ATTR.PHONE_NUMBER]: previousPhone,
+  });
+  if (!revert.ok) {
+    log.error(
+      {
+        status: 'failure',
+        sub_operation: 'idp.setAttributes.revert',
+        code: revert.error.code,
+      },
+      'DB update failed and the Keycloak phone could not be restored',
+    );
+  }
+}
+
 async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promise<IdpUser | null> {
   try {
-    const result = await getIdpAdmin().findById(auth.userId);
+    const result = await getIdpAdmin().findById(auth.subject);
     if (result.ok) return result.value ?? null;
     log.warn(
       { sub_operation: 'fetchKcUser', code: result.error.code, hint: result.error.message },
@@ -332,7 +395,7 @@ async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promi
     log.warn(
       {
         sub_operation: 'fetchKcUser',
-        cause: err instanceof Error ? err.message : String(err),
+        cause: errorMessage(err),
       },
       'failed to load KC user (threw)',
     );
@@ -346,10 +409,49 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
   return undefined;
 }
 
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+/**
+ * The identity of an acting owner's coordinator account, from the coordinator
+ * row: the token belongs to the owner's login. A verified flag holds only when
+ * the token's value is the row's.
+ *
+ * @param auth - The acting context.
+ * @param row - The coordinator row.
+ * @returns The `identity` block of the profile read.
+ */
+function actingIdentity(auth: AuthContext, row: Coordinator) {
+  const { email, phone, name } = row.contact;
+  return {
+    first_name: name,
+    last_name: null,
+    email,
+    email_verified: auth.emailVerified === true && auth.email?.toLowerCase() === email,
+    phone,
+    phone_verified: auth.phoneNumberVerified === true && auth.phoneNumber === phone,
+    active: row.status === 'active',
+  };
+}
+
+/**
+ * Authenticates a profile request and records a coordinator's login.
+ *
+ * @param req - The request.
+ * @param opts.allowActing - Accept an owner acting as its coordinator account.
+ * @returns The auth context.
+ * @throws {HttpError} 401, 403 or 503 when the caller is refused.
+ */
+async function requireAuth(
+  req: FastifyRequest,
+  opts: { allowActing?: boolean } = {},
+): Promise<AuthContext> {
+  const result: AuthResult = opts.allowActing
+    ? await authenticateAllowingActing(req)
+    : await authenticate(req);
+  if (result.ok) {
+    await recordRouteCaller(req, callerFromAuth(result.context));
+    return result.context;
+  }
+  throwIfActingError(result.error);
+  const code = result.error.code === 'MISSING_USER_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,
     fields: { reason: result.error.code },
@@ -364,6 +466,7 @@ function mapAggregatorUpdateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): Parameters<typeof httpError>[0] {
   switch (code) {
@@ -377,8 +480,7 @@ function mapAggregatorUpdateError(
       return 'SCHEMA_VALIDATION';
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
-    // An unrecognised unique violation is a real conflict, but not one this
-    // layer can name — don't dress it up as a taken slug (#718 review).
+    // An unknown unique violation is a generic conflict.
     case 'DUPLICATE':
       return 'CONFLICT';
     default:
@@ -387,15 +489,38 @@ function mapAggregatorUpdateError(
 }
 
 /**
- * Checks a coordinator's requested contact change BEFORE anything is written
- * (Keycloak is written first, so a late refusal would leave it ahead of the
- * database):
- *   - the phone or email already belongs to another person (another
- *     coordinator, or an org owner whose contact is not this coordinator's own)
- *     → PHONE_EXISTS / USER_EXISTS;
- *   - this coordinator's contact is shared with an org-owner role (one person,
- *     two roles) and the email or phone would change → CONFLICT (not supported
- *     until accounts are modelled separately, in a later phase).
+ * The phone to save: a value equal to the stored one is kept as it is, so a
+ * number saved before the current rule never blocks an unrelated edit; a new
+ * value must pass {@link parseMobilePhone}.
+ *
+ * @param store - The user store.
+ * @param selfId - The caller's coordinator id.
+ * @param sent - The phone in the request.
+ * @throws {HttpError} DB_UNAVAILABLE when the stored record cannot be read.
+ */
+async function checkedPhone(
+  store: ReturnType<typeof getUserStore>,
+  selfId: string,
+  sent: string,
+): Promise<ReturnType<typeof parseMobilePhone>> {
+  const current = await store.findById(selfId);
+  if (!current.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(current.error.message),
+      fields: { sub_operation: 'userStore.findById' },
+    });
+  }
+  const stored = current.value?.contactPhone;
+  if (stored && sent.replace(/[^\d+]/g, '') === stored) return { ok: true, value: stored };
+  return parseMobilePhone(sent);
+}
+
+/**
+ * Checks a coordinator's requested contact change before anything is written.
+ *
+ * - Phone or email held by another person: PHONE_EXISTS / USER_EXISTS.
+ * - Contact shared with an org-owner role and the email or phone changes: CONFLICT.
+ *
  * Identity is compared on stored contact ids, never on the submitted email.
  *
  * @param selfId - The caller's own `aggregators.id`.
@@ -407,10 +532,10 @@ async function assertContactChangeAllowed(
   selfId: string,
   next: { email: string; phone: string },
 ): Promise<string> {
-  const aggregators = getAggregatorStore();
-  const orgs = getAggregatorOrgStore();
+  const aggregators = getUserStore();
+  const orgs = getOrganisationStore();
 
-  const me = valueOrUnavailable('aggregatorStore.findById', await aggregators.findById(selfId));
+  const me = valueOrUnavailable('userStore.findById', await aggregators.findById(selfId));
   if (!me) throw httpError('NOT_FOUND');
   const email = next.email.trim().toLowerCase();
   const phoneClash = () => httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
@@ -422,11 +547,11 @@ async function assertContactChangeAllowed(
     !!o && o.contactId !== me.contactId;
 
   const byPhone = await aggregators.findByContactPhone(next.phone);
-  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactPhone', byPhone))) {
+  if (otherCoordinator(valueOrUnavailable('userStore.findByContactPhone', byPhone))) {
     throw phoneClash();
   }
   const byEmail = await aggregators.findByContactEmail(email);
-  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactEmail', byEmail))) {
+  if (otherCoordinator(valueOrUnavailable('userStore.findByContactEmail', byEmail))) {
     throw emailClash();
   }
   const ownerByPhone = await orgs.findByOwnerPhone(next.phone);

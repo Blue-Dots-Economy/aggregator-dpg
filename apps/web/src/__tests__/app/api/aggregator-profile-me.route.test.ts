@@ -29,7 +29,7 @@ describe('GET /api/aggregator/profile/me', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('forwards the upstream profile payload', async () => {
-    mockCallApi.mockResolvedValue(jsonResponse(200, { aggregator_id: 'a1', name: 'Jane' }));
+    mockCallApi.mockResolvedValue(jsonResponse(200, { user_id: 'a1', name: 'Jane' }));
     const res = await GET();
     expect(res.status).toBe(200);
     const body = (await res.json()) as { name?: string };

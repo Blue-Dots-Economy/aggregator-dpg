@@ -1,12 +1,10 @@
 /**
  * Google Places (New) autocomplete provider.
  *
- * Loads the Maps JS API on first use via a single shared <script> tag, then
- * resolves each prediction to its coordinate + address components.
+ * Loads the Maps JS API once via a shared <script> tag, then resolves each
+ * prediction to coordinates and address components.
  *
- * Ported from Signals-DPG `apps/ui/src/lib/geo/google-places.ts`, with the
- * address-component mapping lifted out of the prediction loop into
- * `toGeoComponents` — see the note there.
+ * Matches Signals-DPG `apps/ui/src/lib/geo/google-places.ts`.
  *
  * @module apps/web/lib/geo/google-places
  */
@@ -62,12 +60,8 @@ type AddressComponent = { types: string[]; longText: string; shortText: string }
 /**
  * Maps Google's flat address-component list onto our `GeoComponents` shape.
  *
- * Extracted from the prediction loop it is called from, where it sat as a
- * closure inside a closure inside a `.map()` — six levels of nesting, which
- * Sonar flags (S2004) and which made the component-priority rules below hard to
- * see. Priority matters: Google returns several components that could each be
- * called "the locality", and picking the wrong one puts a neighbourhood label
- * where a city belongs.
+ * The lookup order matters: Google returns several locality-like components,
+ * and the wrong pick puts a neighbourhood where the city belongs.
  *
  * @param components - `addressComponents` from a resolved Place.
  * @returns The mapped components; any field Google did not supply is absent.
@@ -100,12 +94,9 @@ function isInCountry(components: AddressComponent[], country: string): boolean {
 /**
  * Google Places autocomplete provider.
  *
- * `country` (upper-case ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to
- * that country (signals-dpg#785). `includedRegionCodes` is a hard filter: "Only
- * include results in the specified regions". `region` would only bias the
- * ranking, and `locationRestriction` is a rectangle (India's contains
- * Bangladesh), so neither stops a larger foreign place with the same name being
- * suggested. Each suggestion's own country is also checked, as a backstop.
+ * `country` (e.g. `IN`) restricts suggestions to that country through
+ * `includedRegionCodes`, a hard filter. Each suggestion's country is also
+ * checked.
  *
  * @param apiKey - Browser Maps JS API key.
  * @param country - Optional country restriction.

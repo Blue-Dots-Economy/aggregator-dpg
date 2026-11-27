@@ -183,7 +183,8 @@ describe('owner-name backfill database helpers', () => {
     await expect(listOwnerNameCandidatesFromDb()).resolves.toEqual([
       { orgId: 'o1', contactId: 'c1', ownerKcSub: 'kc-1' },
     ]);
-    expect(calls).toEqual(['select', 'from', 'innerJoin', 'where']);
+    // org → owner account → contact → IdP login (0027).
+    expect(calls).toEqual(['select', 'from', 'innerJoin', 'innerJoin', 'innerJoin', 'where']);
   });
 
   it('reports whether the name was written (only while it is still NULL)', async () => {

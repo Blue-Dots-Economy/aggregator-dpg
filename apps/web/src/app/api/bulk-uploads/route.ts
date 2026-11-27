@@ -1,5 +1,5 @@
 /**
- * BFF proxy: create a bulk upload (returns presigned PUT URL).
+ * BFF proxy: create a bulk upload (returns signed upload instructions).
  *   POST /api/bulk-uploads → API POST /v1/bulk-uploads
  */
 

@@ -1,8 +1,7 @@
 /**
- * In-memory session store. Dev/test fallback when Redis is unavailable.
+ * In-memory session store, used for tests and dev without Redis.
  *
- * Not safe for multi-process deployments — every Node instance has its own
- * Map, so sessions created on one will not be visible on another.
+ * Not for multi-process deployments: each process has its own sessions.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,6 +21,7 @@ export interface MemorySessionStoreOptions {
  */
 export class MemorySessionStore extends SessionStoreBase {
   private readonly store = new Map<string, Entry>();
+  private readonly signIns = new Map<string, { browser: string; expiresAt: number }>();
   private readonly ttlSec: number;
 
   constructor(opts: MemorySessionStoreOptions = {}) {
@@ -77,12 +77,36 @@ export class MemorySessionStore extends SessionStoreBase {
     this.store.delete(sid);
   }
 
+  async destroyByIdpSession(idpSid: string): Promise<number> {
+    let ended = 0;
+    for (const [sid, entry] of this.store) {
+      if (entry.data.idpSid === idpSid) {
+        this.store.delete(sid);
+        ended += 1;
+      }
+    }
+    return ended;
+  }
+
   async close(): Promise<void> {
     this.store.clear();
+    this.signIns.clear();
+  }
+
+  async rememberSignIn(state: string, browser: string, ttlSec: number): Promise<void> {
+    if (!state || !browser) return;
+    this.signIns.set(state, { browser, expiresAt: Date.now() + ttlSec * 1000 });
+  }
+
+  async takeSignIn(state: string): Promise<string | null> {
+    const entry = this.signIns.get(state);
+    this.signIns.delete(state);
+    return entry && entry.expiresAt >= Date.now() ? entry.browser : null;
   }
 
   /** Test helper — wipes the store. */
   _reset(): void {
     this.store.clear();
+    this.signIns.clear();
   }
 }

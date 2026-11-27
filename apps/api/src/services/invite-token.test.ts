@@ -5,7 +5,8 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mintInviteToken, verifyInviteToken, _resetInviteTokenKey } from './invite-token.js';
-import { mintApprovalToken, _resetTokenKey } from './approval-token.js';
+import { SignJWT } from 'jose';
+import { TOKEN_ALG, TOKEN_ISSUER, getTokenKey } from './token-common.js';
 
 const JTI = '11111111-1111-1111-1111-111111111111';
 const ORG = '22222222-2222-2222-2222-222222222222';
@@ -14,7 +15,6 @@ const EMAIL = 'coord@org.example';
 describe('invite-token', () => {
   beforeEach(() => {
     _resetInviteTokenKey();
-    _resetTokenKey();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
   });
 
@@ -28,6 +28,17 @@ describe('invite-token', () => {
     expect(res.org).toBe(ORG);
     expect(res.email).toBe(EMAIL);
     expect(res.role).toBe('coordinator');
+  });
+
+  it('carries the org_owner role through a round trip', async () => {
+    const { token } = await mintInviteToken({
+      jti: JTI,
+      role: 'org_owner',
+      org: ORG,
+      email: EMAIL,
+    });
+    const res = await verifyInviteToken(token);
+    expect(res.ok && res.role).toBe('org_owner');
   });
 
   it('defaults to a 14-day expiry', async () => {
@@ -62,10 +73,15 @@ describe('invite-token', () => {
     expect(res.error.code).toBe('EXPIRED');
   });
 
-  it('rejects a token minted for a different audience (approval token replayed)', async () => {
-    // Same secret, different audience (aggregator-admin) — must not verify as an
-    // invite. This is the cross-token-replay guard.
-    const { token } = await mintApprovalToken({ aggregatorId: JTI, intent: 'approve' });
+  it('rejects a token signed with the same key for another audience', async () => {
+    const token = await new SignJWT({ role: 'coordinator', org: ORG, email: EMAIL })
+      .setProtectedHeader({ alg: TOKEN_ALG })
+      .setSubject(JTI)
+      .setIssuer(TOKEN_ISSUER)
+      .setAudience('aggregator-admin')
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(getTokenKey());
     const res = await verifyInviteToken(token);
     expect(res.ok).toBe(false);
     if (res.ok) return;

@@ -1,18 +1,19 @@
 /**
- * Keycloak client-credentials token provider for signals' service-auth
- * bearer path (Phase C of the aggregator-keycloak-integration plan).
+ * Keycloak client-credentials token provider for bearer auth to Signals.
  *
- * Mirrors `apps/web/src/lib/service-token.ts` (in-process cache, ~30s
- * refresh lead) but is shared here so both `apps/api` and `apps/worker` — the
- * two processes that construct {@link HttpSignalStackWriter} — get the same
- * implementation instead of duplicating the client-credentials grant.
+ * Part of the signalstack-writer package. Used by `apps/api` and
+ * `apps/worker` when they build {@link HttpSignalStackWriter}. Tokens are
+ * cached in process and refreshed about 30s before expiry.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { z } from 'zod';
+import { UpstreamError, toError } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { SignalStackTokenProviderBase } from './interface.js';
+import { readJsonBody, responseIssues } from './signals-responses.js';
+import { isTimeout } from './thrown.js';
 
 const REFRESH_LEAD_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -20,46 +21,29 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 export interface KeycloakTokenProviderConfig {
   /** Keycloak base URL, e.g. `http://keycloak:8080`. No trailing slash. */
   baseUrl: string;
-  /** Realm holding the service client (the combined realm both DPGs share). */
+  /** Realm holding the service client. */
   realm: string;
   /**
-   * Confidential client id. Signals maps client id → `organization.slug`, so
-   * this must equal the aggregator's slug there; the callers assert that at
-   * boot via `SIGNALSTACK_ORG_SLUG`.
+   * Confidential client id. Must equal the aggregator's Signals
+   * `organization.slug`; callers check this at boot.
    */
   clientId: string;
   clientSecret: string;
-  /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
+  /** Optional fetch override; defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Per-attempt request timeout in ms. Default 10s. */
   timeoutMs?: number;
 }
 
+/** The fields of the OAuth token response that the provider reads. */
+const TokenResponseSchema = z.object({
+  access_token: z.string(),
+  expires_in: z.number(),
+});
+
 interface CachedToken {
   accessToken: string;
   expiresAt: number;
-}
-
-/**
- * True when a thrown fetch error represents a client-side deadline rather than
- * a connection-level failure.
- *
- * `AbortSignal.timeout()` rejects with a `DOMException` named
- * **`TimeoutError`** (not `AbortError`, and with no `cause`), while a manual
- * `AbortController.abort()` — the shape `http.ts` produces — rejects with
- * `AbortError`. Undici also nests either name under `cause` on some paths.
- * All of them mean "we gave up waiting", so all of them must map to
- * `SIGNALSTACK_TIMEOUT`; classifying only `AbortError` mislabels a real
- * Keycloak token-endpoint timeout as a transport failure.
- *
- * @param e - The value thrown by `fetch`.
- * @returns `true` when the failure was a timeout/abort.
- */
-function _isTimeout(e: unknown): boolean {
-  const names = new Set(['TimeoutError', 'AbortError']);
-  const outer = (e as Error | undefined)?.name;
-  const inner = ((e as { cause?: unknown } | undefined)?.cause as Error | undefined)?.name;
-  return (!!outer && names.has(outer)) || (!!inner && names.has(inner));
 }
 
 export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProviderBase {
@@ -70,11 +54,8 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
   private readonly timeoutMs: number;
   private cached: CachedToken | null = null;
   /**
-   * In-flight mint, shared by every concurrent caller (single-flight). Without
-   * it, N concurrent calls on a cold/expired cache each POST their own
-   * client-credentials grant — a thundering herd at Keycloak on worker
-   * start-up or after an expiry. Cleared as soon as the mint settles, so a
-   * failed grant is never cached as a pending promise.
+   * The running token request, shared by concurrent callers so only one grant
+   * is sent at a time. Cleared when it settles, so a failure is not cached.
    */
   private inFlight: Promise<Result<string, BaseError>> | null = null;
 
@@ -110,13 +91,10 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
   }
 
   /**
-   * Discards the cached token so the next {@link getToken} call mints a fresh
-   * one.
+   * Discards the cached token so the next {@link getToken} call fetches a new one.
    *
-   * Called by {@link HttpSignalStackWriter} when signals rejects a bearer
-   * token with 401 — e.g. after a Keycloak realm signing-key rotation, where
-   * the cached token is still inside its `expires_in` window but no longer
-   * verifiable.
+   * Called by {@link HttpSignalStackWriter} when signals rejects a token with
+   * 401, for example after a realm key rotation.
    */
   override invalidate(): void {
     this.cached = null;
@@ -139,11 +117,7 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        // A 503 here means Keycloak itself was unreachable when signals (or,
-        // here, us minting our own token) tried to talk to it — the
-        // credential was never judged. Distinguish from a genuine bad
-        // client id/secret (4xx) so callers don't treat it as an auth
-        // failure requiring different credentials.
+        // 5xx means Keycloak was unavailable, not that the credentials are wrong.
         const code =
           res.status >= 500 ? 'IDENTITY_PROVIDER_UNAVAILABLE' : 'SIGNALSTACK_AUTH_FAILED';
         return err(
@@ -154,22 +128,26 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
         );
       }
 
-      const body = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
-      if (typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
+      const json = await readJsonBody(res, 'signalstack token grant');
+      if (!json.success) return json;
+      const parsed = TokenResponseSchema.safeParse(json.value);
+      if (!parsed.success) {
+        // Paths and codes only: the body can carry the access token.
         return err(
           new UpstreamError('signalstack token grant returned an unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { issues: responseIssues(parsed.error) },
           }),
         );
       }
       this.cached = {
-        accessToken: body.access_token,
-        expiresAt: Date.now() + body.expires_in * 1000,
+        accessToken: parsed.data.access_token,
+        expiresAt: Date.now() + parsed.data.expires_in * 1000,
       };
       return ok(this.cached.accessToken);
     } catch (e) {
-      const cause = e as Error;
-      const timedOut = _isTimeout(e);
+      const cause = toError(e);
+      const timedOut = isTimeout(e);
       return err(
         new UpstreamError(
           timedOut
@@ -181,7 +159,7 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
     }
   }
 
-  /** Test helper — force the next `getToken()` call to bypass the cache. */
+  /** Test helper. Makes the next `getToken()` call skip the cache. */
   _resetCache(): void {
     this.cached = null;
   }

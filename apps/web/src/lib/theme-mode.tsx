@@ -7,8 +7,10 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { subscribeNever } from '@/lib/subscribe-never';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -21,53 +23,61 @@ interface ThemeModeContextValue {
 const ThemeModeContext = createContext<ThemeModeContextValue | null>(null);
 
 /**
- * localStorage key for the user's chosen theme. Read by the inline
- * no-flash script in `app/layout.tsx` BEFORE React hydrates so the
- * initial paint matches the stored preference without a flash of
- * light theme on a dark-preferring user.
+ * localStorage key for the user's chosen theme.
+ *
+ * Also read by the inline script in `app/layout.tsx` before hydration, so the
+ * first paint uses the stored theme.
  */
 export const THEME_STORAGE_KEY = 'bd:theme-mode';
 
 /**
- * Applies the chosen mode to `<html>` (`class="dark"` or no class) and
- * persists the choice to localStorage. Provides `useThemeMode()` to
- * any client component that needs to read or toggle the active theme.
+ * Reads the stored theme choice.
  *
- * Default: `light`. Honours a previously-stored preference on mount.
+ * @returns The stored mode, or `null` when none is stored, it is not a mode, or storage is unavailable.
+ */
+function readStoredMode(): ThemeMode | null {
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : null;
+  } catch {
+    // Storage may be unavailable; the default applies.
+    return null;
+  }
+}
+
+/**
+ * Applies the light/dark mode to `<html>` and saves the user's choice to localStorage.
+ *
+ * Defaults to `light`; reads a stored preference after hydration. Storage is
+ * written only when the user picks a theme.
+ *
+ * @param children - Subtree that may call `useThemeMode`.
  */
 export function ThemeModeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>('light');
+  // Server markup is always light; the client reads the stored choice.
+  const stored = useSyncExternalStore(subscribeNever, readStoredMode, () => null);
+  const [chosen, setChosen] = useState<ThemeMode | null>(null);
+  const mode: ThemeMode = chosen ?? stored ?? 'light';
 
-  // Hydrate from localStorage on first client render. SSR markup is
-  // always light to match the static no-flash script's default — once
-  // we hit the client, sync with the persisted choice.
+  // Mirror the mode onto `<html>`. While neither a choice nor a stored value
+  // is known (the hydration render), leave the class the inline script set.
+  const known = chosen !== null || stored !== null;
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light') {
-      setModeState(stored);
+    if (!known) return;
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+  }, [known, mode]);
+
+  /** Applies and saves a theme the user picked. */
+  const choose = useCallback((next: ThemeMode) => {
+    setChosen(next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Storage may be unavailable; the theme still applies for this session.
     }
   }, []);
-
-  // Mirror the active mode into a class on <html> + persist.
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    if (mode === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, mode);
-    } catch {
-      // Storage may be disabled (private mode, quota). Theme still
-      // applies in-memory for the session; we just can't persist it.
-    }
-  }, [mode]);
-
-  const setMode = useCallback((next: ThemeMode) => setModeState(next), []);
-  const toggle = useCallback(
-    () => setModeState((prev) => (prev === 'light' ? 'dark' : 'light')),
-    [],
-  );
+  const setMode = choose;
+  const toggle = useCallback(() => choose(mode === 'light' ? 'dark' : 'light'), [choose, mode]);
 
   const value = useMemo(() => ({ mode, setMode, toggle }), [mode, setMode, toggle]);
 
@@ -75,8 +85,10 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Read or change the active light/dark theme. Throws if used outside
- * the {@link ThemeModeProvider}.
+ * Reads or changes the active light/dark theme.
+ *
+ * @returns The mode and its setters.
+ * @throws {Error} If used outside {@link ThemeModeProvider}.
  */
 export function useThemeMode(): ThemeModeContextValue {
   const ctx = useContext(ThemeModeContext);

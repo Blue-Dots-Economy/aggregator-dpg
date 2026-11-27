@@ -8,11 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -57,11 +53,11 @@ describe('POST /v1/campaign/email', () => {
 
     // The shared submit flow resolves `requested_by` from the aggregator (and
     // requires it to be active), so it has to exist for any 2xx path.
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
@@ -70,7 +66,7 @@ describe('POST /v1/campaign/email', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'campaign-manager',
           email: 'user@sanketika.in',
@@ -85,7 +81,7 @@ describe('POST /v1/campaign/email', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
     _setCampaignAuditWriter(null);
   });
@@ -169,11 +165,11 @@ describe('POST /v1/campaign/email', () => {
   it('returns 403 AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
     // Inherited from the shared submit flow: all three channels refuse to
     // create work for an aggregator that is no longer active.
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
     const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.fields.reason).toBe('AGGREGATOR_INACTIVE');
@@ -256,7 +252,7 @@ describe('POST /v1/campaign/email', () => {
   it('returns 429 CAMPAIGN_ACTIVE_LIMIT when the org already has the max active email jobs', async () => {
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: ORG,
         channel: 'email',
         metadata: [],
@@ -274,7 +270,7 @@ describe('POST /v1/campaign/email', () => {
   it('does not count another channel’s active jobs against the email cap', async () => {
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: ORG,
         channel: 'export',
         metadata: [],
@@ -292,7 +288,7 @@ describe('POST /v1/campaign/email', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'aggregator-portal',
         };
@@ -316,7 +312,7 @@ describe('POST /v1/campaign/email', () => {
 
   it('returns 403 when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
+      if (token === 'good') return { sub: 'u1', user_id: 'agg-1', azp: 'campaign-manager' };
       throw new Error('invalid');
     });
     const res = await post({ item_ids: [VALID_UUID], content: CONTENT });
@@ -382,11 +378,11 @@ describe('GET /v1/campaign/email/{job_id}', () => {
   beforeEach(async () => {
     store = new InMemoryCampaignJobStore();
     _setCampaignJobStore(store);
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'aggregator';
@@ -394,7 +390,7 @@ describe('GET /v1/campaign/email/{job_id}', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: ORG,
           azp: 'campaign-manager',
         };
@@ -407,13 +403,13 @@ describe('GET /v1/campaign/email/{job_id}', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
   });
 
   async function seedJob(channel: 'email' | 'export') {
     const created = await store.createJob({
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       signalstackOrgId: ORG,
       channel,
       metadata: [],

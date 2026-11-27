@@ -2,14 +2,12 @@
  * Tests for the approval gate + signalstack login-time backfill.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { requireApproved, _setAccessTokenVerifier, _resetJwks } from './access-token.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../aggregator-store/index.js';
+import { getIdentityStore } from '../identity-store/index.js';
+import type { IdentityStoreFake } from '../identity-store/testing.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../idp-admin/index.js';
 import { _setSignalStackWriter } from '../signalstack.js';
 import { _setNetworkConfig } from '../network-config.js';
@@ -19,7 +17,7 @@ import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interf
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 
-const aggregatorId = '11111111-1111-1111-1111-111111111111';
+const userId = '11111111-1111-1111-1111-111111111111';
 
 function makeReq(claims: Record<string, unknown>): FastifyRequest {
   _setAccessTokenVerifier(async () => claims);
@@ -29,7 +27,7 @@ function makeReq(claims: Record<string, unknown>): FastifyRequest {
 }
 
 describe('requireApproved + signalstack backfill', () => {
-  let store: AggregatorStoreFake;
+  let store: UserStoreFake;
   let idp: IdpAdminFake;
   let writer: SignalStackWriterFake;
   let kcUserId: string;
@@ -42,22 +40,22 @@ describe('requireApproved + signalstack backfill', () => {
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
 
-    store = new AggregatorStoreFake();
+    store = new UserStoreFake();
     store.seed([
-      buildAggregator({
-        id: aggregatorId,
+      buildCoordinator({
+        id: userId,
         orgSlug: 'trrain-abcd',
         name: 'TRRAIN',
         status: 'active',
       }),
     ]);
-    _setAggregatorStore(store);
+    _setUserStore(store);
 
     idp = new IdpAdminFake();
     const created = await idp.createUser({
       email: 'asha@trrain.org',
       attributes: {
-        aggregator_id: aggregatorId,
+        user_id: userId,
         decision_made: 'approved',
       },
       enabled: true,
@@ -76,7 +74,7 @@ describe('requireApproved + signalstack backfill', () => {
   });
 
   afterEach(() => {
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setSignalStackWriter(null);
     _setAccessTokenVerifier(null);
@@ -86,7 +84,7 @@ describe('requireApproved + signalstack backfill', () => {
   it('passes through when signalstack_org_id claim already present (no upsert)', async () => {
     const req = makeReq({
       sub: kcUserId,
-      aggregator_id: aggregatorId,
+      user_id: userId,
       decision_made: 'approved',
       signalstack_org_id: 'org_existing',
     });
@@ -102,7 +100,7 @@ describe('requireApproved + signalstack backfill', () => {
   it('rejects with NOT_APPROVED when decision_made is pending (no upsert)', async () => {
     const req = makeReq({
       sub: kcUserId,
-      aggregator_id: aggregatorId,
+      user_id: userId,
       decision_made: 'pending',
     });
 
@@ -115,16 +113,21 @@ describe('requireApproved + signalstack backfill', () => {
   it('backfills signalstack_org_id when approved + claim missing', async () => {
     const req = makeReq({
       sub: kcUserId,
-      aggregator_id: aggregatorId,
+      user_id: userId,
       decision_made: 'approved',
     });
 
     const result = await requireApproved(req);
     expect(result.ok).toBe(true);
+    // 0027: the first approved request records the coordinator's IdP login.
+    const identities = getIdentityStore() as IdentityStoreFake;
+    expect(identities.all()).toEqual([
+      { userId: userId, userType: 'coordinator', provider: 'keycloak', subject: kcUserId },
+    ]);
 
     const aggregators = writer.listAggregators();
     expect(aggregators).toHaveLength(1);
-    expect(aggregators[0]?.external_id).toBe(aggregatorId);
+    expect(aggregators[0]?.external_id).toBe(userId);
     expect(aggregators[0]?.name).toBe('TRRAIN');
     expect(aggregators[0]?.slug).toBe('trrain-abcd');
 
@@ -136,7 +139,7 @@ describe('requireApproved + signalstack backfill', () => {
 
     // DB mirror is dual-written alongside the KC attribute so the worker
     // and anonymous public-link path can resolve the org id offline.
-    const dbAfter = await store.findById(aggregatorId);
+    const dbAfter = await store.findById(userId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.signalstackOrgId).toBe(aggregators[0]?.org_id);
     }
@@ -144,6 +147,88 @@ describe('requireApproved + signalstack backfill', () => {
     if (result.ok) {
       expect(result.context.signalstackOrgId).toBe(aggregators[0]?.org_id);
     }
+  });
+
+  /** Re-seeds the coordinator so it serves `serves`; `type` is its first entry, as stored. */
+  function seedServes(serves: string[]): void {
+    store.seed([
+      buildCoordinator({
+        id: userId,
+        orgSlug: 'trrain-abcd',
+        name: 'TRRAIN',
+        status: 'active',
+        type: serves[0] ?? null,
+        serves,
+      }),
+    ]);
+  }
+
+  /** Runs one approved request without the org claim and returns the domains sent. */
+  async function backfilledDomains(): Promise<string[] | undefined> {
+    const spy = vi.spyOn(writer, 'upsertAggregator');
+    await requireApproved(makeReq({ sub: kcUserId, user_id: userId, decision_made: 'approved' }));
+    return spy.mock.calls[0]?.[0].domains;
+  }
+
+  it('backfill sends every served domain of a multi-domain coordinator', async () => {
+    seedServes(['seeker', 'provider']);
+    expect(await backfilledDomains()).toEqual(['seeker', 'provider']);
+  });
+
+  it('backfill sends the one domain a single-domain coordinator serves', async () => {
+    seedServes(['provider']);
+    expect(await backfilledDomains()).toEqual(['provider']);
+  });
+
+  it('backfill sends no domains when the coordinator serves no profile type', async () => {
+    seedServes([]);
+    expect(await backfilledDomains()).toBeUndefined();
+  });
+
+  it('backfill sends no domains when no stored profile type is in the network', async () => {
+    seedServes(['retired']);
+    expect(await backfilledDomains()).toBeUndefined();
+  });
+
+  it('reads a multivalued aggregator_type claim into serves', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        user_id: userId,
+        aggregator_type: ['seeker', 'provider', 'seeker', ''],
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual(['seeker', 'provider']);
+  });
+
+  it('reads a single-string aggregator_type claim as a one-item list', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        user_id: userId,
+        aggregator_type: 'seeker',
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual(['seeker']);
+  });
+
+  it('reads a missing aggregator_type claim as no profile type', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        user_id: userId,
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual([]);
   });
 
   it('soft-fails when signalstack upsert returns an error', async () => {
@@ -175,7 +260,7 @@ describe('requireApproved + signalstack backfill', () => {
 
     const req = makeReq({
       sub: kcUserId,
-      aggregator_id: aggregatorId,
+      user_id: userId,
       decision_made: 'approved',
     });
 
@@ -194,7 +279,7 @@ describe('requireApproved + signalstack backfill', () => {
 
     const req = makeReq({
       sub: kcUserId,
-      aggregator_id: aggregatorId,
+      user_id: userId,
       decision_made: 'approved',
     });
 

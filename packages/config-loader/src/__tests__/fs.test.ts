@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FsConfigService } from '../fs/index.js';
 
+/** Absolute URL of zod, so fixture modules written to a temp dir can import it. */
+const ZOD_URL = import.meta.resolve('zod');
+
+/** Fixture source lines declaring a real Zod configSchema that accepts any slice. */
+const ZOD_SCHEMA_LINES = `import { z } from ${JSON.stringify(ZOD_URL)};\nexport const configSchema = z.unknown();`;
+
 /**
  * Builds a minimal repo root with a packages/ directory and optional env YAML.
  */
@@ -50,7 +56,7 @@ function makeRepo(
       join(distDir, 'config.schema.js'),
       [
         `export const configKey = ${JSON.stringify(pkg.configKey)};`,
-        `export const configSchema = { parse: () => ({}) };`,
+        ZOD_SCHEMA_LINES,
         defaultsLine,
       ].join('\n'),
       'utf8',

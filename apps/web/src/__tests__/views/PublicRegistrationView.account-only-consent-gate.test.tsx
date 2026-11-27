@@ -136,14 +136,16 @@ describe('<PublicRegistrationView /> account-only consent gate', () => {
     expect(screen.queryByTestId('consent-node-profile')).not.toBeInTheDocument();
   });
 
-  it('keeps the call-permission checkbox and still blocks submit when it is unticked', () => {
+  it('keeps the call-permission checkbox and refuses a submit with it unticked, saying why', () => {
     renderView({ showConsent: true });
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane Doe' } });
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     expect(
       screen.getByRole('checkbox', { name: /permit the aggregator to trigger the call/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /submit/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    expect(screen.getByText('Call consent is required.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('never opens the gate for a minor', async () => {

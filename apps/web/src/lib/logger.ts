@@ -1,13 +1,9 @@
 /**
- * Shared pino logger for the Next.js BFF (server side only).
+ * Shared pino logger for the Next.js BFF. Server-only.
  *
- * Usage:
+ * Usage: `logger.child({ reqId, route }).info({ status: 'success' }, 'msg')`.
  *
- *   import { logger } from '@/lib/logger';
- *   const log = logger.child({ reqId, route: '/api/aggregator/register' });
- *   log.info({ status: 'success', latency_ms }, 'short message');
- *
- * Edge runtime cannot load pino. BFF routes that use this logger must
+ * Pino does not run on the Edge runtime. Routes using this logger must
  * declare `export const runtime = 'nodejs'`.
  */
 
@@ -28,8 +24,7 @@ export const logger = pino({
       '*.token',
       '*.access_token',
       '*.refresh_token',
-      // Participant PII — never log email/phone (registration/proxy paths carry
-      // them in bodies and error fields). Cover the common one/two-level nestings.
+      // Never log participant email or phone, at up to two levels of nesting.
       'email',
       'phone',
       '*.email',
@@ -55,9 +50,12 @@ export const logger = pino({
 });
 
 /**
- * Generates or extracts a request id, returning the value to forward to the
- * API and to log against. Reuses an inbound `x-request-id` header when
- * present (preserves trace continuity), otherwise mints a fresh one.
+ * Returns the request id to log and forward to the API.
+ *
+ * Reuses an inbound `x-request-id` (up to 128 chars), otherwise creates one.
+ *
+ * @param headers - The inbound request headers.
+ * @returns The request id.
  */
 export function pickRequestId(headers: Headers): string {
   const incoming = headers.get('x-request-id');

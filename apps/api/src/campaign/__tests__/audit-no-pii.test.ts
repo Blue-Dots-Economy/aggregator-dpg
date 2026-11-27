@@ -21,7 +21,7 @@
  * values into the `requested` row — `itemCount` (a count, not a value) and
  * `purpose` (a metadata value, deliberately plumbed through). Everything else
  * on the row is either fixed deployment config (`piiFields`) or derived from
- * the verified token (`actorUserId`/`actorOrgId`/`actorAzp`). The realistic
+ * the verified token (`actorUserId`/`actorSignalstackOrgId`/`actorAzp`). The realistic
  * regression this test catches is a future change that widens that surface —
  * e.g. spreading `content` or the full `metadata` array into the audit input
  * instead of just the field names/counts/purpose it's contracted to carry.
@@ -58,11 +58,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../../services/auth/access-token.js';
 import { _setNetworkConfig } from '../../services/network-config.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -97,7 +93,7 @@ const { headObjectMock, signDownloadUrlMock } = vi.hoisted(() => ({
   headObjectMock: vi.fn(),
   signDownloadUrlMock: vi.fn(),
 }));
-vi.mock('../../services/object-storage/index.js', () => ({
+vi.mock('../../services/object-storage/dump-storage.js', () => ({
   headObject: headObjectMock,
   signDownloadUrl: signDownloadUrlMock,
   signBulkUploadUrl: vi.fn(),
@@ -125,11 +121,11 @@ describe('audit rows never contain a participant PII value (#617)', () => {
 
     _setCampaignJobStore(new InMemoryCampaignJobStore());
 
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     audit = new CampaignAuditWriterFake();
     _setCampaignAuditWriter(audit);
@@ -144,7 +140,7 @@ describe('audit rows never contain a participant PII value (#617)', () => {
         case 'coordinator':
           return {
             sub: 'u1',
-            aggregator_id: 'agg-1',
+            user_id: 'agg-1',
             signalstack_org_id: 'org_5d3b7fa4-x',
             azp: 'campaign-manager',
           };
@@ -165,7 +161,7 @@ describe('audit rows never contain a participant PII value (#617)', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
     _setCampaignAuditWriter(null);
     _setNetworkConfig(null);
@@ -264,9 +260,13 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     assertNoPii(audit.rows);
 
     const details = (rows[0] as { details?: Record<string, unknown> }).details;
-    expect(details && Object.keys(details).sort()).toEqual(['bytes', 'files', 'missing']);
-    expect(typeof details?.files).toBe('number');
+    expect(details && Object.keys(details).sort((a, b) => a.localeCompare(b))).toEqual([
+      'bytes',
+      'files',
+      'missing',
+    ]);
     expect(typeof details?.missing).toBe('number');
+    expect(typeof details?.files).toBe('number');
     expect(typeof details?.bytes).toBe('number');
   });
 

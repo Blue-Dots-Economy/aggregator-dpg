@@ -2,13 +2,15 @@
  * BFF proxy for a single registration link.
  *   PATCH /api/links/:id → API PATCH /v1/links/:id
  *
- * Only drafts are editable upstream; the API surfaces a 409 for live or
- * retired rows and we pass that through verbatim.
+ * Only drafts are editable; the API's 409 for other rows is passed through.
+ *
+ * An id Postgres cannot read as a UUID answers 404 without calling the API.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { callApi } from '../../../../lib/upstream-client';
-import { passthrough, proxyFailureResponse } from '../../../../lib/bff-proxy';
+import { callApi } from '@/lib/upstream-client';
+import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
+import { invalidIdResponse, isPostgresUuid } from '@/lib/bff-input';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +19,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await params;
+  if (!isPostgresUuid(id)) return invalidIdResponse();
   let body: unknown;
   try {
     body = await req.json();

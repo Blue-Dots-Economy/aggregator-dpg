@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { contactId, ContactSchema, CONTACT_PHONE_REGEX } from '../contact/index.js';
-import { normalisePhone } from '../phone/index.js';
+import { parsePhone } from '../phone/index.js';
 
 /**
  * Golden vectors — computed independently by Postgres 16:
@@ -52,9 +52,9 @@ describe('contactId', () => {
     );
   });
 
-  it('accepts exactly what normalisePhone produces', () => {
-    for (const raw of ['9876543210', '+91 98765 43210', '0091-9876543210', '+14155550123']) {
-      const n = normalisePhone(raw);
+  it('accepts exactly what parsePhone produces', () => {
+    for (const raw of ['9876543210', '+91 98765 43210', '0091-9876543210', '+12025550123']) {
+      const n = parsePhone(raw, { countries: ['IN', 'US'], kind: 'mobile' });
       expect(n.ok).toBe(true);
       if (n.ok) expect(CONTACT_PHONE_REGEX.test(n.value)).toBe(true);
     }

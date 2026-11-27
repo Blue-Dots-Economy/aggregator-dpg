@@ -1,0 +1,168 @@
+/**
+ * Capability checks for the portal and the console (`apps/web`).
+ *
+ * Capabilities come from `GET /v1/user/read/me`. `null` means access control
+ * is off, so nothing is hidden. Hiding is for convenience only; the API
+ * authorises every request.
+ *
+ * @module apps/web/src/lib/capabilities
+ */
+
+/**
+ * Whether the caller may use something that needs `capability`.
+ *
+ * @param capabilities - The caller's capabilities, or null / undefined when
+ *   access control is off.
+ * @param capability - The capability the feature needs.
+ * @returns True when the feature should be shown.
+ */
+export function can(
+  capabilities: readonly string[] | null | undefined,
+  capability: string,
+): boolean {
+  return capabilities == null || capabilities.includes(capability);
+}
+
+/** The parts of `read/me` {@link canManageOrg} reads. */
+interface ManageScopeSource {
+  capabilities?: readonly string[] | null | undefined;
+  orgs: ReadonlyArray<{
+    id: string;
+    org_type: string;
+    is_default?: boolean | undefined;
+    capabilities?: readonly string[] | null | undefined;
+  }>;
+}
+
+/**
+ * Whether the caller may manage an organisation's coordinators (invite,
+ * decide, edit): `org.manage` in that organisation, or in the root, which
+ * applies to every organisation (#873). With access control off: the network
+ * admin, or the organisation's owner. An organisation only viewed from above
+ * is never managed. Mirrors the API's manage scope.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @param orgId - The organisation.
+ * @returns True when the organisation should be offered.
+ */
+export function canManageOrg(me: ManageScopeSource, orgId: string): boolean {
+  const isRootOwner = me.orgs.some((o) => o.org_type === 'network_facilitator');
+  if (me.capabilities == null) return isRootOwner || me.orgs.some((o) => o.id === orgId);
+  const holds = (o: ManageScopeSource['orgs'][number] | undefined) =>
+    o?.capabilities?.includes('org.manage') ?? false;
+  if (holds(me.orgs.find((o) => o.org_type === 'network_facilitator'))) return true;
+  return holds(me.orgs.find((o) => o.id === orgId));
+}
+
+/**
+ * Whether the caller can invite coordinators anywhere: it manages an
+ * organisation that takes invites (never the Default org), or holds
+ * `org.manage` in the root (#873).
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns True when the console should offer inviting.
+ */
+export function canInvite(me: ManageScopeSource): boolean {
+  if (me.capabilities == null) return true;
+  return me.orgs.some(
+    (o) =>
+      (o.org_type === 'network_facilitator' || (o.org_type === 'aggregator' && !o.is_default)) &&
+      (o.capabilities?.includes('org.manage') ?? false),
+  );
+}
+
+/**
+ * Whether an organisation the caller owns can take organisation invites from it: the network,
+ * or a non-Default aggregator organisation, where the caller holds `orgs.onboard`.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @param org - One of the caller's organisations.
+ * @returns True when that organisation should be offered as the parent.
+ */
+export function canOnboardOrgsUnder(
+  me: Pick<ManageScopeSource, 'capabilities'>,
+  org: ManageScopeSource['orgs'][number],
+): boolean {
+  const takesInvites =
+    org.org_type === 'network_facilitator' || (org.org_type === 'aggregator' && !org.is_default);
+  if (!takesInvites) return false;
+  return me.capabilities == null || (org.capabilities?.includes('orgs.onboard') ?? false);
+}
+
+/**
+ * Whether the caller can see coordinators: an organisation's admin
+ * (`org.manage`). The network admin has no users page, since it sees the
+ * users of no organisation it does not own.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns True when the console should list coordinators.
+ */
+export function canViewCoordinators(
+  me: ManageScopeSource & { is_network_admin?: boolean | undefined },
+): boolean {
+  if (me.is_network_admin) return false;
+  return can(me.capabilities, 'org.manage');
+}
+
+/**
+ * The organisation shown as the caller's profile: the one non-Default
+ * organisation an owner owns. `null` for the network admin, or an owner of several.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The organisation id, or `null`.
+ */
+export function ownProfileOrgId(
+  me: ManageScopeSource & { is_network_admin: boolean },
+): string | null {
+  if (me.is_network_admin) return null;
+  const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
+  return owned.length === 1 ? (owned[0]?.id ?? null) : null;
+}
+
+/** The console home page. */
+export const CONSOLE_HOME_HREF = '/console';
+const COORDINATORS_LIST_HREF = '/console/coordinators';
+
+/**
+ * Where the caller's coordinator list lives. An owner of one organisation sees
+ * it on the console home; everyone else uses the coordinators page.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The page that lists the caller's coordinators.
+ */
+export function coordinatorsHref(me: ManageScopeSource & { is_network_admin: boolean }): string {
+  if (me.is_network_admin) return COORDINATORS_LIST_HREF;
+  const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
+  return owned.length === 1 ? CONSOLE_HOME_HREF : COORDINATORS_LIST_HREF;
+}
+
+/** The parts of `read/me` {@link selfAddOrgs} reads. */
+interface SelfAddSource extends ManageScopeSource {
+  kind: 'admin' | 'coordinator';
+  is_network_admin: boolean;
+  own_coordinator_account_id?: string | null | undefined;
+  orgs: ReadonlyArray<ManageScopeSource['orgs'][number] & { name: string; role: string }>;
+}
+
+/**
+ * The organisations an owner may add their own coordinator account to: those
+ * they own and manage, aggregator organisations other than Default. Empty for
+ * the network admin, an owner of the root, a coordinator, and an owner who
+ * already has a coordinator account. Mirrors the API's self-add checks.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The organisations to offer, in `read/me` order.
+ */
+export function selfAddOrgs(me: SelfAddSource): Array<{ id: string; name: string }> {
+  if (me.kind !== 'admin' || me.is_network_admin || me.own_coordinator_account_id) return [];
+  if (me.orgs.some((o) => o.org_type === 'network_facilitator' && o.role === 'owner')) return [];
+  return me.orgs
+    .filter(
+      (o) =>
+        o.role === 'owner' &&
+        o.org_type === 'aggregator' &&
+        !o.is_default &&
+        canManageOrg(me, o.id),
+    )
+    .map((o) => ({ id: o.id, name: o.name }));
+}

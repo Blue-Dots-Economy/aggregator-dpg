@@ -8,7 +8,7 @@
  *
  * @module @aggregator-dpg/api
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   InMemoryRegistrationInvitesStore,
   RegistrationInvitesStoreFake,
@@ -16,6 +16,7 @@ import {
   PostgresRegistrationInvitesStore,
 } from '../index.js';
 import { _setDbClients } from '../../../db/client.js';
+import { logger } from '../../../logger.js';
 
 const ORG = '00000000-0000-0000-0000-0000000000aa';
 
@@ -47,6 +48,15 @@ describe('InMemoryRegistrationInvitesStore', () => {
     expect(dup.error.code).toBe('DUPLICATE_PENDING');
   });
 
+  it('keeps a coordinator and an org-owner invite for the same (org, email) apart', async () => {
+    const s = new InMemoryRegistrationInvitesStore();
+    expect((await s.create(input)).ok).toBe(true);
+    const owner = await s.create({ ...input, role: 'org_owner' });
+    expect(owner.ok).toBe(true);
+    const hit = await s.findPendingByOrgAndEmail(ORG, 'org_owner', 'a@x.org');
+    expect(hit.ok && hit.value?.role).toBe('org_owner');
+  });
+
   it('allows a new invite once the prior one is consumed (partial-unique is pending-only)', async () => {
     const s = new InMemoryRegistrationInvitesStore();
     const first = await s.create(input);
@@ -60,10 +70,10 @@ describe('InMemoryRegistrationInvitesStore', () => {
     const s = new InMemoryRegistrationInvitesStore();
     const c = await s.create(input);
     if (!c.ok) throw new Error('seed');
-    let hit = await s.findPendingByOrgAndEmail(ORG, 'a@x.org');
+    let hit = await s.findPendingByOrgAndEmail(ORG, 'coordinator', 'a@x.org');
     expect(hit.ok && hit.value?.jti).toBe(c.value.jti);
     await s.consume(c.value.jti);
-    hit = await s.findPendingByOrgAndEmail(ORG, 'a@x.org');
+    hit = await s.findPendingByOrgAndEmail(ORG, 'coordinator', 'a@x.org');
     expect(hit.ok && hit.value).toBeNull();
   });
 
@@ -210,6 +220,33 @@ describe('PostgresRegistrationInvitesStore error mapping', () => {
     expect(res.error.code).toBe('DB_UNAVAILABLE');
   });
 
+  it('never returns or logs the driver message, which holds query parameters', async () => {
+    const errorLog = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const db = makeFakeDb(() => {
+      const pgErr = Object.assign(new Error('value too long'), { code: '22001' });
+      throw Object.assign(
+        new Error('Failed query: insert into "registration_invites" params: asha@x.org'),
+        { cause: pgErr },
+      );
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresRegistrationInvitesStore();
+    const res = await store.create({
+      parentOrgId: ORG,
+      email: 'asha@x.org',
+      expiresAt: new Date('2027-01-01'),
+      createdBy: 'owner',
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toEqual({ code: 'DB_UNAVAILABLE', message: 'database error 22001' });
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain('asha@x.org');
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'inviteStore.create', error_type: 'Error' }),
+    );
+    errorLog.mockRestore();
+  });
+
   // A raw `registration_invites` row as Drizzle's inferSelect returns it.
   function rawRow(overrides: Record<string, unknown> = {}) {
     return {
@@ -266,7 +303,11 @@ describe('PostgresRegistrationInvitesStore error mapping', () => {
   });
 
   it('findPendingByOrgAndEmail maps a found row', async () => {
-    const res = await withDb(() => [rawRow()]).findPendingByOrgAndEmail(ORG, 'a@x.org');
+    const res = await withDb(() => [rawRow()]).findPendingByOrgAndEmail(
+      ORG,
+      'coordinator',
+      'a@x.org',
+    );
     expect(res.ok && res.value?.email).toBe('a@x.org');
   });
 

@@ -138,3 +138,37 @@ export class DomainError extends BaseError {
     super(options?.code ?? 'DOMAIN_ERROR', message, options);
   }
 }
+
+/**
+ * Narrows a caught value to an `Error`.
+ *
+ * @param e - Any value from a `catch` clause or a rejected promise.
+ * @returns `e` when it is an `Error`; otherwise a new `Error` with `e` as its `cause`. Its message is the string `message` field of `e` when there is one, else `String(e)`.
+ */
+export function toError(e: unknown): Error {
+  if (e instanceof Error) return e;
+  const message =
+    typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string'
+      ? e.message
+      : String(e);
+  return new Error(message, { cause: e });
+}
+
+/**
+ * Message of a caught value, for logs and structured failures.
+ *
+ * @param e - Any value from a `catch` clause or a rejected promise.
+ */
+export function errorMessage(e: unknown): string {
+  return toError(e).message;
+}
+
+/**
+ * Class name of a caught `Error`, for the `error_type` log field.
+ *
+ * @param e - Any value from a `catch` clause or a rejected promise.
+ * @returns The constructor name of an `Error`, or `'unknown'` for any other value.
+ */
+export function errorType(e: unknown): string {
+  return e instanceof Error ? e.constructor.name : 'unknown';
+}

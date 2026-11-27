@@ -24,21 +24,18 @@ interface Dot {
 
 /**
  * Animated brand panel rendering the Blue Dots particle network on a canvas.
- * Shared by the public login and register pages so both have an identical
- * left-side hero.
+ * Used by the public login and register pages as the left-side hero.
  *
  * @returns Brand panel React element with hero copy and stats.
  */
 export function BrandPanel(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Brand palette drives the hero gradient + canvas particle colors.
+  // Brand palette sets the hero gradient and particle colours.
   const primary = cfg.brand.primary_color ?? '#2563EB';
   const accent = cfg.brand.accent_color ?? primary;
-  // Hero gradient — darken primary toward black for richness while
-  // keeping the brand hue dominant. Lighter mix than before so warm
-  // brand colours (e.g. orange #ff7a00) don't read as brown when
-  // pushed 70 % toward black.
+  // Hero gradient: primary mixed toward black, light enough that warm brand
+  // colours do not turn brown.
   const heroGradient = `linear-gradient(135deg, ${mix(primary, '#000000', 0.4)} 0%, ${mix(primary, '#000000', 0.2)} 45%, ${primary} 100%)`;
   const radialOverlay =
     `radial-gradient(700px 500px at 75% 25%, ${hexToRgba(accent, 0.18)} 0%, ${hexToRgba(accent, 0)} 60%),` +
@@ -218,8 +215,8 @@ export function BrandPanel(): JSX.Element {
 }
 
 /**
- * `#rrggbb` → `rgba(r,g,b,alpha)`. Returns the original input when the
- * hex form does not parse (defensive against malformed config).
+ * `#rrggbb` to `rgba(r,g,b,alpha)`. Returns the input unchanged when it does
+ * not parse.
  */
 function hexToRgba(hex: string, alpha: number): string {
   const c = parseHex(hex);
@@ -227,7 +224,7 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
 }
 
-/** `#rrggbb` → `rgba(r,g,b,` (the canvas gradient code appends the alpha + `)`). */
+/** `#rrggbb` to `rgba(r,g,b,` (the caller appends the alpha and `)`). */
 function hexToRgbaPrefix(hex: string): string {
   const c = parseHex(hex);
   if (!c) return 'rgba(255,255,255,';
@@ -235,9 +232,8 @@ function hexToRgbaPrefix(hex: string): string {
 }
 
 /**
- * Replaces the trailing alpha of an `rgba(...)` string with the
- * supplied opacity multiplied by the original. Lets the per-link
- * connection-line fade respect the brand's base alpha.
+ * Multiplies the trailing alpha of an `rgba(...)` string by `opacity`, so
+ * link lines fade from the brand's base alpha.
  */
 function applyAlpha(rgba: string, opacity: number): string {
   return rgba.replace(/,\s*([0-9.]+)\)\s*$/, (_, a) => `,${Number(a) * opacity})`);

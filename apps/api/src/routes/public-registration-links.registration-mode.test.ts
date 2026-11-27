@@ -25,11 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -125,9 +121,10 @@ function buildFakeDb(submissionId: string): unknown {
 }
 
 const baseLink = {
-  aggregatorId: AGG_ID,
+  userId: AGG_ID,
   domain: 'seeker' as const,
   context: {},
+  voiceBotKey: null,
   qrObjectKey: null,
   status: 'live' as const,
   expiresAt: null,
@@ -148,9 +145,9 @@ async function bootApp(): Promise<{
   process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
   _setNetworkConfig(buildBlueDotConfig());
 
-  const aggStore = new AggregatorStoreFake();
+  const aggStore = new UserStoreFake();
   aggStore.seed([
-    buildAggregator({
+    buildCoordinator({
       id: AGG_ID,
       orgSlug: ORG_SLUG,
       name: 'Acme',
@@ -158,7 +155,7 @@ async function bootApp(): Promise<{
       signalstackOrgId: ORG_ID,
     }),
   ]);
-  _setAggregatorStore(aggStore);
+  _setUserStore(aggStore);
 
   const signalstack = new SignalStackWriterFake();
   _setSignalStackWriter(signalstack);
@@ -185,7 +182,7 @@ async function bootApp(): Promise<{
 async function teardown(app: FastifyInstance | undefined): Promise<void> {
   await app?.close();
   _setSignalStackWriter(null);
-  _setAggregatorStore(null);
+  _setUserStore(null);
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
   _setDbClients(null, null);
@@ -747,10 +744,11 @@ describe('schema validation failure branches (account_and_profile)', () => {
         keyword: string;
         params?: { missingProperty?: string };
       }>;
-      expect(issues.map((i) => i.params?.missingProperty).sort()).toEqual([
-        'licence_number',
-        'licence_type',
-      ]);
+      expect(
+        issues
+          .map((i) => i.params?.missingProperty)
+          .sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+      ).toEqual(['licence_number', 'licence_type']);
       expect(issues.some((i) => i.keyword === 'if')).toBe(false);
     });
 
@@ -783,6 +781,40 @@ describe('schema validation failure branches (account_and_profile)', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
     expect(r.json().error.fields?.missing).toContain('name');
+  });
+
+  it.each([
+    ['^\\+[1-9][0-9]{9,14}$', 'E.164'],
+    ['^[0-9]{10}$', 'bare digits'],
+  ])('cleans a spaced phone before the schema check (%s, %s)', async (pattern) => {
+    const cfg = buildBlueDotConfig();
+    _setNetworkConfig({
+      ...cfg,
+      domains: {
+        ...cfg.domains,
+        seeker: {
+          ...cfg.domains.seeker,
+          schema: {
+            type: 'object',
+            properties: { name: { type: 'string' }, phone: { type: 'string', pattern } },
+            required: ['name'],
+          },
+        },
+      },
+    } as ResolvedNetworkConfig);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+      payload: {
+        name: 'A. User',
+        phone: '+91 98765 43210',
+        consent_terms: true,
+        consent_privacy: true,
+        consent_profile: true,
+        year_of_birth: 1990,
+      },
+    });
+    expect(r.json().error?.code).not.toBe('SCHEMA_VALIDATION');
   });
 
   it('400s (INVALID_PHONE) when the phone value fails E.164 normalisation', async () => {

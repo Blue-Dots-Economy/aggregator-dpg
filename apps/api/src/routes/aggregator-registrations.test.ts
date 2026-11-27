@@ -1,20 +1,30 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  OrganisationStoreFake,
+  _setOrganisationStore,
+  buildOrganisation,
+} from '../services/organisation-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+import { NO_CONSENT_WRITE } from '../services/consent-ledger/hook.js';
+import { randomUUID } from 'node:crypto';
+import {
+  RegistrationInvitesStoreFake,
+  buildRegistrationInvite,
+  _setRegistrationInvitesStore,
+} from '../services/registration-invites-store/index.js';
+import { mintInviteToken, _resetInviteTokenKey } from '../services/invite-token.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -23,24 +33,55 @@ vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
 });
 
 const SERVICE_BEARER = 'service-token';
+const INVITING_ORG = '00000000-0000-4000-8000-0000000000c1';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
-describe('POST /v1/aggregator-registrations/create', () => {
+describe('POST /v1/user/invite/accept', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
+  let invites: RegistrationInvitesStoreFake;
+
+  /** Accepts a coordinator invite for the body's email into the inviting org. */
+  async function acceptInvite(payload: Record<string, unknown>) {
+    const contact = payload['contact'];
+    const email =
+      typeof contact === 'object' &&
+      contact !== null &&
+      'email' in contact &&
+      typeof contact.email === 'string'
+        ? contact.email.toLowerCase()
+        : 'nobody@example.org';
+    const jti = randomUUID();
+    invites.seed([
+      buildRegistrationInvite({
+        jti,
+        parentOrgId: INVITING_ORG,
+        email,
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 86_400_000),
+      }),
+    ]);
+    const { token } = await mintInviteToken({ jti, org: INVITING_ORG, email });
+    return app.inject({
+      method: 'POST',
+      url: '/v1/user/invite/accept',
+      headers: AUTH_HEADER,
+      payload: { ...payload, invite: token },
+    });
+  }
   let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
-    _resetTokenKey();
+    _resetInviteTokenKey();
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.ADMIN_EMAILS = 'reviewer@bluedots.local';
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
+    userStore = new UserStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
@@ -56,8 +97,21 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // the one `(ip, email)` bucket and exhausts it mid-run. Cases that DO
     // assert a 429 override this per test.
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setNetworkConfig(buildBlueDotConfig());
 
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
+    const orgStore = new OrganisationStoreFake();
+    orgStore.seed([
+      buildOrganisation({
+        id: INVITING_ORG,
+        slug: 'inviting',
+        status: 'active',
+        ownerEmail: 'owner@o.org',
+      }),
+    ]);
+    _setOrganisationStore(orgStore);
+    invites = new RegistrationInvitesStoreFake();
+    _setRegistrationInvitesStore(invites);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -74,7 +128,9 @@ describe('POST /v1/aggregator-registrations/create', () => {
   afterAll(async () => {
     await app?.close();
     _setSubmitRateChecker(null);
-    _setAggregatorStore(null);
+    _setNetworkConfig(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setConsentLedger(null);
@@ -92,58 +148,48 @@ describe('POST /v1/aggregator-registrations/create', () => {
     consent: {
       value: true,
       given_at: '2026-01-15T10:00:00Z',
-      valid_till: '2027-01-15T10:00:00Z',
+      valid_till: '2099-01-15T10:00:00Z',
     },
   };
 
-  it('creates an aggregator + disabled KC user on valid payload', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+  it('creates a pending coordinator with an enabled, unverified, invited Keycloak user on valid payload', async () => {
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
     const body = res.json() as {
-      aggregator_id: string;
+      user_id: string;
       org_slug: string;
       message: string;
     };
-    expect(body.aggregator_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.user_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.org_slug).toMatch(/^trrain-[0-9a-f]{4}$/);
-    expect(body.message).toContain('Registration submitted');
+    expect(body.message).toContain('Registration received');
 
-    const stored = await aggregatorStore.findById(body.aggregator_id);
+    const stored = await userStore.findById(body.user_id);
     if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
 
     const kcUser = await idp.findByEmail(validBody.contact.email);
+    expect(kcUser.ok && kcUser.value).toBeTruthy();
     if (kcUser.ok && kcUser.value) {
-      expect(kcUser.value.enabled).toBe(false);
-      expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.enabled).toBe(true);
+      expect(kcUser.value.emailVerified).toBe(false);
+      expect(kcUser.value.attributes?.aggregator_id).toBeUndefined();
+      expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.user_id);
       expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
-      expect(kcUser.value.attributes?.decision_made?.[0]).toBe('pending');
+      expect(kcUser.value.attributes?.decision_made?.[0]).toBe('invited');
       // Removed attributes per the new flow:
       expect(kcUser.value.attributes?.org_slug).toBeUndefined();
       expect(kcUser.value.attributes?.association).toBeUndefined();
     }
 
-    const sent = mailer.outbox;
-    expect(sent.length).toBe(1);
-    const first = sent[0];
-    if (!first) throw new Error('no mail captured');
-    expect(first.to).toEqual(['reviewer@bluedots.local']);
-    expect(first.subject).toContain('TRRAIN');
-    // One review link (no per-intent URLs) → the read page carries both actions.
-    expect(first.html).toContain('/admin/v1/aggregator-registrations/read/');
-    expect(first.html).not.toContain('intent=');
+    expect(mailer.outbox).toHaveLength(0);
 
     // Consent ledger should have one row for the aggregator
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
-    expect(consentRow?.subjectType).toBe('aggregator');
-    expect(consentRow?.subjectId).toBe(body.aggregator_id);
+    expect(consentRow?.subjectType).toBe('user');
+    expect(consentRow?.subjectId).toBe(body.user_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.source).toBe('registration');
@@ -153,34 +199,62 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
   });
 
-  it('records aggregator consent in the ledger on successful registration', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
+  it.each([['+91 98765 43210'], ['987-654-3210'], ['(987) 654 3210'], ['098765 43210']])(
+    'stores a phone typed as %j as +919876543210',
+    async (typed) => {
+      const res = await acceptInvite({
+        ...validBody,
+        contact: { ...validBody.contact, phone: typed },
+      });
+      expect(res.statusCode).toBe(201);
+      const { user_id } = res.json() as { user_id: string };
+      const stored = await userStore.findById(user_id);
+      expect(stored.ok && stored.value?.contactPhone).toBe('+919876543210');
+      const kcUser = await idp.findByEmail(validBody.contact.email);
+      expect(kcUser.ok && kcUser.value?.attributes?.phoneNumber?.[0]).toBe('+919876543210');
+    },
+  );
+
+  it('400 INVALID_PHONE with the reason for a number outside the deployment countries', async () => {
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, phone: '+44 7911 123456' },
     });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INVALID_PHONE');
+    expect(body.error.detail).toBe('phone numbers starting +44 are not accepted');
+  });
+
+  it('rejects a type that is not one of the network domains (400)', async () => {
+    const res = await acceptInvite({ ...validBody, type: 'both' });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; fields?: Record<string, unknown> } };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.fields).toMatchObject({ type: 'invalid' });
+    // Nothing was created.
+    const all = await userStore.list({ status: 'pending', limit: 10, offset: 0 });
+    expect(all.ok && all.value.rows.length).toBe(0);
+  });
+
+  it('records aggregator consent in the ledger on successful registration', async () => {
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const { user_id } = res.json() as { user_id: string };
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
-    expect(ledgerRows[0]?.subjectType).toBe('aggregator');
-    expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
+    expect(ledgerRows[0]?.subjectType).toBe('user');
+    expect(ledgerRows[0]?.subjectId).toBe(user_id);
   });
 
   it('records the resolved AGGREGATOR_NETWORK and AGGREGATOR_BRAND in the consent ledger', async () => {
     process.env.AGGREGATOR_NETWORK = 'orange_dot';
     process.env.AGGREGATOR_BRAND = 'onetac';
     try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/aggregator-registrations/create',
-        headers: AUTH_HEADER,
-        payload: {
-          ...validBody,
-          contact: { ...validBody.contact, email: 'brand@test.org', phone: '+919999999999' },
-        },
+      const res = await acceptInvite({
+        ...validBody,
+        contact: { ...validBody.contact, email: 'brand@test.org', phone: '+919999999999' },
       });
       expect(res.statusCode).toBe(201);
       const ledgerRows = consentLedger.list();
@@ -203,23 +277,24 @@ describe('POST /v1/aggregator-registrations/create', () => {
       }) as BaseError,
     });
 
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { ...validBody, contact: { ...validBody.contact, email: 'ledger-fail@trrain.org' } },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'ledger-fail@trrain.org' },
     });
     // Fail-closed: no consent recorded → the registration is rolled back, not 201.
     expect(res.statusCode).toBe(500);
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
+    // One transaction (0029): the row never existed, so nothing is left behind.
+    const found = await userStore.findByContactEmail('ledger-fail@trrain.org');
+    expect(found.ok && found.value).toBeNull();
   });
 
   it('returns 401 when Bearer is missing', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      payload: validBody,
+      url: '/v1/user/invite/accept',
+      payload: { ...validBody, invite: 'tok' },
     });
     expect(res.statusCode).toBe(401);
   });
@@ -227,20 +302,15 @@ describe('POST /v1/aggregator-registrations/create', () => {
   it('returns 401 when Bearer is invalid', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/aggregator-registrations/create',
+      url: '/v1/user/invite/accept',
       headers: { authorization: 'Bearer junk' },
-      payload: validBody,
+      payload: { ...validBody, invite: 'tok' },
     });
     expect(res.statusCode).toBe(401);
   });
 
   it('rejects payload missing required fields', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { name: 'X' },
-    });
+    const res = await acceptInvite({ name: 'X' });
     expect(res.statusCode).toBe(400);
     const body = res.json() as { error: { code: string; title: string; requestId: string } };
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
@@ -249,23 +319,16 @@ describe('POST /v1/aggregator-registrations/create', () => {
   });
 
   it('rejects malformed email', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { ...validBody, contact: { ...validBody.contact, email: 'not-an-email' } },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'not-an-email' },
     });
     expect(res.statusCode).toBe(400);
   });
 
   it('returns 409 when the email already exists in Keycloak', async () => {
     await idp.createUser({ email: validBody.contact.email });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; detail: string } };
     expect(body.error.code).toBe('USER_EXISTS');
@@ -277,16 +340,11 @@ describe('POST /v1/aggregator-registrations/create', () => {
     await idp.createUser({
       email: 'someone-else@trrain.org',
       phone: '+919876543210',
-      attributes: { aggregator_id: 'other-agg' },
+      attributes: { user_id: 'other-agg' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
-      },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'asha2@trrain.org' },
     });
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: { code: string; title: string; requestId: string } };
@@ -303,24 +361,34 @@ describe('POST /v1/aggregator-registrations/create', () => {
       error: { code: 'IDP_UNAVAILABLE' as const, message: 'kc down' },
     });
 
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'asha2@trrain.org' },
-      },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'asha2@trrain.org' },
     });
     expect(res.statusCode).toBe(503);
 
     // No aggregator row should remain — the route rolls it back when KC
     // creation fails.
     const allByPrefix = await Promise.all(
-      ['trrain-0001', 'trrain-0002', 'trrain-0003'].map((s) => aggregatorStore.findBySlug(s)),
+      ['trrain-0001', 'trrain-0002', 'trrain-0003'].map((s) => userStore.findBySlug(s)),
     );
     for (const r of allByPrefix) if (r.ok) expect(r.value).toBeNull();
 
+    idp.createUser = originalCreate;
+  });
+
+  it('400 NAME_INVALID_CHARACTERS, row rolled back, when the IdP refuses the name', async () => {
+    const originalCreate = idp.createUser.bind(idp);
+    idp.createUser = async () => ({
+      ok: false as const,
+      error: { code: 'INVALID_NAME' as const, message: 'name has a refused character' },
+    });
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, name: 'Asha (Field)', email: 'asha3@trrain.org' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('NAME_INVALID_CHARACTERS');
     idp.createUser = originalCreate;
   });
 
@@ -328,18 +396,17 @@ describe('POST /v1/aggregator-registrations/create', () => {
     status?: 'pending' | 'inactive' | 'active';
     rejectedAt?: Date;
   }) {
-    const created = await aggregatorStore.create({
+    const created = await userStore.create({
+      recordConsent: NO_CONSENT_WRITE,
       orgSlug: 'trrain-aaaa',
-      actorType: 'aggregator',
       name: 'TRRAIN',
       type: 'seeker',
-      url: null,
+      orgId: '00000000-0000-0000-0000-0000000000d0',
       contact: {
         name: 'Asha Kumari',
         phone: '+919876543210',
         email: 'asha@trrain.org',
       },
-      locations: [],
       consent: validBody.consent,
       createdBy: 'self',
       updatedBy: 'self',
@@ -348,20 +415,20 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const id = created.value.id;
     if (overrides?.status === 'inactive') {
       // Mirror the reject path: stamp write-once rejected_at (#726).
-      await aggregatorStore.update(id, {
+      await userStore.update(id, {
         status: 'inactive',
         rejectedAt: overrides.rejectedAt ?? new Date(),
         updatedBy: 'admin',
       });
     } else if (overrides?.status && overrides.status !== 'pending') {
-      await aggregatorStore.updateStatus(id, overrides.status, 'admin');
+      await userStore.updateStatus(id, overrides.status, 'admin');
     }
     await idp.createUser({
       email: 'asha@trrain.org',
       phone: '+919876543210',
       enabled: false,
       attributes: {
-        aggregator_id: id,
+        user_id: id,
         aggregator_type: 'seeker',
         phoneNumber: '+919876543210',
         decision_made: overrides?.status === 'inactive' ? 'rejected' : 'pending',
@@ -370,144 +437,35 @@ describe('POST /v1/aggregator-registrations/create', () => {
     return id;
   }
 
-  it('refreshes a pending registration on resubmit instead of 409', async () => {
-    const id = await seedPending();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { aggregator_id: string; status: string };
-    expect(body.aggregator_id).toBe(id);
-    expect(body.status).toBe('pending');
-    // A fresh admin-review email was re-sent.
-    expect(mailer.outbox.length).toBe(1);
-    expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');
-  });
-
-  it('returns 409 REGISTRATION_COOLING for a rejected registration inside the cooling window', async () => {
-    const id = await seedPending({ status: 'inactive' });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
-    // Just-rejected → still cooling (#726): blocked with a retry_after hint.
-    expect(res.statusCode).toBe(409);
-    const err = res.json() as { error: { code: string; fields?: { retry_after?: string } } };
-    expect(err.error.code).toBe('REGISTRATION_COOLING');
-    expect(err.error.fields?.retry_after).toBeTruthy();
-    // Row untouched — no revive, no email.
-    const stored = await aggregatorStore.findById(id);
-    if (stored.ok) expect(stored.value?.status).toBe('inactive');
-    expect(mailer.outbox.length).toBe(0);
-  });
-
-  it('revives a rejected registration once the cooling window has elapsed', async () => {
-    const elapsed = new Date(Date.now() - 13 * 60 * 60 * 1000); // 13h ago > 12h default
-    const id = await seedPending({ status: 'inactive', rejectedAt: elapsed });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
-    // Cooling elapsed → the SAME row is revived to pending and the review link
-    // re-sent (reuse, not delete). rejected_at is cleared.
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { aggregator_id: string; status: string };
-    expect(body.aggregator_id).toBe(id);
-    expect(body.status).toBe('pending');
-    const stored = await aggregatorStore.findById(id);
-    if (stored.ok) {
-      expect(stored.value?.status).toBe('pending');
-      expect(stored.value?.rejectedAt).toBeNull();
-    }
-    expect(mailer.outbox.length).toBe(1);
-    expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');
-  });
-
   it('still returns 409 when the email belongs to an active aggregator', async () => {
     await seedPending({ status: 'active' });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
   });
 
-  it('re-mint on a pending record does NOT overwrite the on-file identity (no takeover)', async () => {
-    const id = await seedPending(); // asha@trrain.org / +919876543210, pending
-    // A stranger resubmits the victim's email with their OWN phone + name.
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        name: 'Attacker Org',
-        contact: { ...validBody.contact, name: 'Attacker', phone: '+919999999999' },
-      },
-    });
-    expect(res.statusCode).toBe(200);
-    // The on-file record is unchanged — the submitted phone/name are ignored.
-    const stored = await aggregatorStore.findById(id);
-    if (stored.ok && stored.value) {
-      expect(stored.value.contact.phone).toBe('+919876543210');
-      expect(stored.value.name).toBe('TRRAIN');
-    }
-    // KC OTP identity (phoneNumber) is unchanged too.
-    const kc = await idp.findByEmail('asha@trrain.org');
-    if (kc.ok && kc.value) {
-      expect(kc.value.attributes?.phoneNumber?.[0]).toBe('+919876543210');
-    }
-    // The review link was re-sent (to the reviewer, not the caller).
-    expect(mailer.outbox.length).toBe(1);
-  });
-
   it('400 SCHEMA_VALIDATION when `type` is not a domain declared by the active network (Ajv)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { ...validBody, type: 'not-a-real-domain' },
-    });
+    const res = await acceptInvite({ ...validBody, type: 'not-a-real-domain' });
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
   });
 
   it('503 DB_UNAVAILABLE when findByContactEmail fails', async () => {
-    aggregatorStore.findByContactEmail = async () => ({
+    userStore.findByContactEmail = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
 
   it('503 DB_UNAVAILABLE when findByContactPhone fails', async () => {
-    aggregatorStore.findByContactPhone = async () => ({
+    userStore.findByContactPhone = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
@@ -516,20 +474,15 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // A prior aggregator row already holds this phone (e.g. KC user was
     // separately cleaned up but the DB row remains) — the DB-level phone
     // uniqueness check must still catch it before any KC calls happen.
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         id: '33333333-3333-3333-3333-333333333333',
         orgSlug: 'other-org',
         contact: { name: 'Other', phone: '+919876543210', email: 'other@other.org' },
         status: 'pending',
       }),
     ]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody, // same phone +919876543210, different email
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('PHONE_EXISTS');
   });
@@ -539,12 +492,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
   });
@@ -554,12 +502,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
   });
@@ -571,38 +514,25 @@ describe('POST /v1/aggregator-registrations/create', () => {
     ['CHECK_VIOLATION', 400, 'SCHEMA_VALIDATION'],
     ['DB_UNAVAILABLE', 503, 'DB_UNAVAILABLE'],
     ['NOT_FOUND', 503, 'DB_UNAVAILABLE'],
-  ] as const)(
-    'maps aggregatorStore.create error %s to %d %s',
-    async (storeCode, status, errCode) => {
-      aggregatorStore.create = async () => ({
-        ok: false,
-        error: { code: storeCode, message: 'store error' },
-      });
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/aggregator-registrations/create',
-        headers: AUTH_HEADER,
-        payload: validBody,
-      });
-      expect(res.statusCode).toBe(status);
-      expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
-    },
-  );
+  ] as const)('maps userStore.create error %s to %d %s', async (storeCode, status, errCode) => {
+    userStore.create = async () => ({
+      ok: false,
+      error: { code: storeCode, message: 'store error' },
+    });
+    const res = await acceptInvite(validBody);
+    expect(res.statusCode).toBe(status);
+    expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
+  });
 
   it('500 CONSENT_WRITE_FAILED (rolled back) when the consent config fails to load', async () => {
     loadConsentConfigMock.mockRejectedValueOnce(new Error('disk error'));
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'consent-fail@trrain.org' },
-      },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'consent-fail@trrain.org' },
     });
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_WRITE_FAILED');
-    const found = await aggregatorStore.findByContactEmail('consent-fail@trrain.org');
+    const found = await userStore.findByContactEmail('consent-fail@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 
@@ -611,56 +541,68 @@ describe('POST /v1/aggregator-registrations/create', () => {
       ok: false,
       error: { code: 'USER_EXISTS', message: 'race: user created concurrently' },
     });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: { ...validBody, contact: { ...validBody.contact, email: 'race@trrain.org' } },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'race@trrain.org' },
     });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
-    const found = await aggregatorStore.findByContactEmail('race@trrain.org');
+    const found = await userStore.findByContactEmail('race@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 
   it('clamps a consent valid_till far beyond the max validity window to the server ceiling', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'long-consent@trrain.org' },
-        consent: {
-          value: true,
-          given_at: '2026-01-15T10:00:00Z',
-          valid_till: '2099-01-15T10:00:00Z',
-        },
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'long-consent@trrain.org' },
+      consent: {
+        value: true,
+        given_at: '2026-01-15T10:00:00Z',
+        valid_till: '2099-01-15T10:00:00Z',
       },
     });
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
-    const stored = await aggregatorStore.findById(aggregator_id);
+    const { user_id } = res.json() as { user_id: string };
+    const stored = await userStore.findById(user_id);
     if (stored.ok && stored.value) {
-      const validTill = new Date(stored.value.consent.valid_till).getTime();
+      const validTill = new Date(stored.value.consent?.valid_till ?? 0).getTime();
       const now = Date.now();
       const fiveYearsMs = 5 * 365 * 24 * 60 * 60 * 1000;
       // Clamped well under the requested 2099 date, at ~5 years from now.
       expect(validTill).toBeLessThan(now + fiveYearsMs + 60_000);
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
+    // What the ledger row itself stores (0029: the only home of consent).
+    const row = consentLedger.list().find((r) => r.subjectId === user_id);
+    const ledgerTill = row?.validTill?.getTime() ?? 0;
+    const fiveYears = 5 * 365 * 24 * 60 * 60 * 1000;
+    expect(ledgerTill).toBeGreaterThan(Date.now() + fiveYears - 60_000);
+    expect(ledgerTill).toBeLessThan(Date.now() + fiveYears + 60_000);
+  });
+
+  it('400 SCHEMA_VALIDATION for a consent that is already expired; nothing is created', async () => {
+    const before = consentLedger.list().length;
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, email: 'expired-consent@trrain.org' },
+      consent: {
+        value: true,
+        given_at: '2020-01-15T10:00:00Z',
+        valid_till: '2020-02-15T10:00:00Z',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    const found = await userStore.findByContactEmail('expired-consent@trrain.org');
+    expect(found.ok && found.value).toBeNull();
+    expect(consentLedger.list()).toHaveLength(before);
   });
   it('throttles a submit when the rate checker denies, with the org hierarchy off (429)', async () => {
     // The limiter used to sit inside the `orgHierarchyEnabled()` branch, so a
     // flat-mode deployment — the shape this whole file exercises — accepted
     // unlimited submissions on a route that provisions a KC user and sends mail.
     _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 42 }));
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(429);
     expect((res.json() as { error: { code: string } }).error.code).toBe('RATE_LIMITED');
     expect(res.headers['retry-after']).toBe('42');
@@ -668,12 +610,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
   it('creates nothing when the submit limiter denies', async () => {
     _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 1 }));
-    await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: validBody,
-    });
+    await acceptInvite(validBody);
     // Throttled before any provisioning — no KC user and no mail.
     const kcUser = await idp.findByEmail(validBody.contact.email);
     expect(kcUser.ok && kcUser.value).toBeNull();

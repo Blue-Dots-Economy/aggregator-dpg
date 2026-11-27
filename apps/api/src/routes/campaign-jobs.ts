@@ -1,20 +1,15 @@
 /**
- * Campaign job status endpoints (aggregator-dpg#579).
+ * Campaign job status endpoints.
  *
  *   GET /v1/campaign/{channel}/{job_id} → one job's detail + per-item status
  *   GET /v1/campaign/{channel}          → the org's jobs, newest first
  *
- * Per the contract spec §5 the poll pair is **per channel**, so this module
- * exports a factory: `registerCampaignJobRoutes(app, 'export')` mounts
- * `/v1/campaign/export*`, and #578/#577 mount `/email*` and `/voice*` the same
- * way. The routes are scoped BOTH ways — a job belonging to another org *or*
- * to another channel is a 403, never returned and never confirmed to exist.
- *
- * Counts are derived from the item rows (never a stored counter). Auth is the
- * shared campaign-manager Bearer gate. These back the caller's poll-for-status
- * flow after a `202` from the submit route. Belongs to `@aggregator-dpg/api`.
+ * Registered once per channel. A job of another org or another channel
+ * answers 403. Counts are derived from the item rows. Auth is the
+ * campaign-manager Bearer token. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
 import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
@@ -48,7 +43,7 @@ const itemStatusSchema = z.enum([
 const metadataSchema = z.array(z.object({ key: z.string(), value: z.string() }));
 
 const jobSummarySchema = z.object({
-  job_id: z.string().uuid(),
+  job_id: z.guid(),
   channel: channelSchema,
   status: jobStatusSchema,
   counts: countsSchema,
@@ -67,33 +62,31 @@ export type CampaignRouteChannel = z.infer<typeof channelSchema>;
  *   `/v1/campaign/export/{id}` never returns an email or voice job.
  */
 export async function registerCampaignJobRoutes(
-  app: FastifyInstance,
+  base: FastifyInstance,
   channel: CampaignRouteChannel,
 ): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     `/v1/campaign/${channel}/:job_id`,
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['campaign'],
         summary: `Get one ${channel} job's status and per-item outcomes`,
         description: `Returns the job status (derived from item counts) and each item id with its status, provider ref and skip/error reason. Scoped to this org and to the ${channel} channel — a job belonging to another org or channel returns 403.`,
         security: [{ bearerAuth: [] }],
-        params: z.object({ job_id: z.string().uuid() }),
+        params: z.object({ job_id: z.guid() }),
         response: {
           200: jobSummarySchema.extend({
             metadata: metadataSchema,
-            // Raw provider payload captured for the campaign manager (voice:
-            // the Raya create+start response). Curated to a PII-safe field
-            // whitelist by the writer — safe to return as-is.
-            provider_response: z.unknown().nullable(),
+            // Provider response, already reduced to PII-safe fields by the writer.
+            provider_response: z.unknown().nullish(),
             items: z.array(
               z.object({
                 item_id: z.string(),
                 status: itemStatusSchema,
                 provider_ref: z.string().nullable(),
-                // Provider-generic field (voice: the Raya batch id this item
-                // was submitted under). Persisted in the `raya_batch_id`
-                // column — a storage detail, not part of this public contract.
+                // Provider batch id (voice: the Raya batch id).
                 provider_batch_ref: z.string().nullable(),
                 skip_reason: z.string().nullable(),
                 error_reason: z.string().nullable(),
@@ -107,14 +100,12 @@ export async function registerCampaignJobRoutes(
     async (req) => {
       const auth = await requireCampaignAuth(req);
       const orgId = requireOrgId(auth);
-      const { job_id: jobId } = req.params as { job_id: string };
+      const { job_id: jobId } = req.params;
 
       const store = getCampaignJobStore();
       const job = await store.getJob(jobId, orgId);
       if (!job.ok) throw httpError('INTERNAL', { detail: 'could not read campaign job' });
-      // Spec §5: another org's job is a 403, not a 404. A job on a different
-      // channel is the same answer — this path only serves `channel`, and
-      // saying "wrong channel" would confirm the id exists.
+      // Another org's or another channel's job answers 403, not 404.
       if (job.value?.channel !== channel) throw httpError('CAMPAIGN_JOB_FORBIDDEN');
 
       const items = await store.getJobItems(jobId, orgId);
@@ -144,6 +135,7 @@ export async function registerCampaignJobRoutes(
   app.get(
     `/v1/campaign/${channel}`,
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['campaign'],
         summary: `List the org's ${channel} jobs (newest first)`,
@@ -166,7 +158,7 @@ export async function registerCampaignJobRoutes(
     async (req) => {
       const auth = await requireCampaignAuth(req);
       const orgId = requireOrgId(auth);
-      const query = req.query as { limit?: number; cursor?: string };
+      const query = req.query;
 
       const store = getCampaignJobStore();
       const result = await store.listJobs(orgId, {

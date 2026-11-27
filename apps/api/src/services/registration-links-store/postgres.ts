@@ -1,14 +1,14 @@
 /**
- * Postgres adapter for the registration links store.
+ * Postgres registration-links store (`@aggregator-dpg/api`).
  *
- * Wraps Drizzle queries against `registration_links`. Driver-specific errors
- * are mapped to abstract `StoreError` codes — callers reason in domain terms.
+ * Queries `registration_links` and maps driver errors to `StoreError` codes.
  */
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
-import { aggregators, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
+import { users, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   RegistrationLinksStoreBase,
   type CreateRegistrationLinkInput,
@@ -19,24 +19,7 @@ import {
   type StoreResult,
   type UpdateDraftInput,
 } from './interface.js';
-
-const PG_UNIQUE_VIOLATION = '23505';
-
-/**
- * Extracts the Postgres SQLSTATE from a thrown error. Drizzle wraps driver
- * errors in a `DrizzleQueryError`, so the `code` lives on `.cause` (or deeper),
- * not the top-level error — walk the cause chain so a unique-violation is
- * recognised as SLUG_COLLISION instead of masquerading as DB_UNAVAILABLE.
- */
-function pgErrorCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
@@ -45,12 +28,13 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .insert(registrationLinks)
         .values({
-          aggregatorId: input.aggregatorId,
+          userId: input.userId,
           slug: input.slug,
           domain: input.domain,
           context: input.context,
           status: input.status ?? 'draft',
           registrationMode: input.registrationMode ?? 'form',
+          voiceBotKey: input.voiceBotKey ?? null,
           expiresAt: input.expiresAt ?? null,
           createdBy: input.createdBy,
         })
@@ -64,7 +48,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         status: 'success',
         latency_ms: Date.now() - start,
         link_id: row.id,
-        aggregator_id: row.aggregatorId,
+        aggregator_id: row.userId,
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
@@ -78,11 +62,11 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.create',
         status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
+        error: errorMessage(err),
+        error_type: errorType(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -99,9 +83,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findBySlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -113,8 +97,8 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .select({ link: registrationLinks })
         .from(registrationLinks)
-        .innerJoin(aggregators, eq(registrationLinks.aggregatorId, aggregators.id))
-        .where(and(eq(aggregators.orgSlug, orgSlug), eq(registrationLinks.slug, slug)))
+        .innerJoin(users, eq(registrationLinks.userId, users.id))
+        .where(and(eq(users.signalstackOrgSlug, orgSlug), eq(registrationLinks.slug, slug)))
         .limit(1);
       const row = rows[0]?.link;
       return { ok: true, value: row ? toDomain(row) : null };
@@ -122,18 +106,18 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findByOrgAndSlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>> {
     try {
       const rows = await getDb()
         .select()
         .from(registrationLinks)
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, userId)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -141,23 +125,20 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findById',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<ListRegistrationLinksResult>> {
     try {
       const where = options.status
-        ? and(
-            eq(registrationLinks.aggregatorId, aggregatorId),
-            eq(registrationLinks.status, options.status),
-          )
-        : eq(registrationLinks.aggregatorId, aggregatorId);
+        ? and(eq(registrationLinks.userId, userId), eq(registrationLinks.status, options.status))
+        : eq(registrationLinks.userId, userId);
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()
@@ -180,15 +161,15 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.list',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
   async updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>> {
     const start = Date.now();
@@ -203,10 +184,8 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         .where(
           and(
             eq(registrationLinks.id, id),
-            eq(registrationLinks.aggregatorId, aggregatorId),
-            // Only drafts are mutable — live rows have already published the
-            // QR + public URL; mutating them in-place would invalidate the
-            // posters in the field. Live → retire → recreate is the right flow.
+            eq(registrationLinks.userId, userId),
+            // Only drafts are editable; live rows have published their QR and public URL.
             eq(registrationLinks.status, 'draft'),
           ),
         )
@@ -223,7 +202,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         status: 'success',
         latency_ms: Date.now() - start,
         link_id: row.id,
-        aggregator_id: row.aggregatorId,
+        aggregator_id: row.userId,
         slug_changed: patch.slug !== undefined,
       });
       return { ok: true, value: toDomain(row) };
@@ -238,23 +217,23 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateDraft',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
   async updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>> {
     try {
       const rows = await getDb()
         .update(registrationLinks)
         .set({ status: nextStatus, updatedAt: new Date() })
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, userId)))
         .returning();
       const row = rows[0];
       if (!row) {
@@ -265,9 +244,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateStatus',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 }
@@ -275,11 +254,12 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
 function toDomain(row: RegistrationLinkRow): RegistrationLink {
   return {
     id: row.id,
-    aggregatorId: row.aggregatorId,
+    userId: row.userId,
     slug: row.slug,
     domain: row.domain,
     context: row.context,
     registrationMode: typeof row.registrationMode === 'string' ? row.registrationMode : 'form',
+    voiceBotKey: row.voiceBotKey,
     qrObjectKey: row.qrObjectKey,
     status: row.status,
     expiresAt: row.expiresAt,

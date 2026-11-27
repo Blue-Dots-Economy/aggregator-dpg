@@ -4,9 +4,16 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
+import type { JSX } from 'react';
+import type { z } from 'zod';
 import { resolveSchemaRoot } from '@/lib/config-paths';
+import { parseJsonObject, readJsonSchema } from '@/lib/json-object';
+import { logger } from '@/lib/logger';
 import { loadParticipantConsent } from '@/lib/participant-consent.server';
-import { PublicRegistrationView } from './PublicRegistrationView';
+import { summariseIssues } from '@/lib/response-shape-error';
+import { ResolveResponseSchema } from '@/lib/registration-link';
+import { PublicRegistrationView, type PublicRegistrationViewProps } from './PublicRegistrationView';
+import { VoiceOrFormView } from './VoiceOrFormView';
 
 export const metadata: Metadata = {
   title: 'Register',
@@ -14,150 +21,170 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-interface ResolveResponse {
-  slug: string;
-  // Active signalstack network id (e.g. 'blue_dot' / 'orange_dot').
-  // Optional in the type for back-compat with older API builds; the
-  // lookup BFF gracefully no-ops when missing.
-  network?: string;
-  // Domain id is whatever the active network declares (e.g. 'seeker' /
-  // 'provider' on blue/purple, 'tourist' / 'practitioner' on orange_dot).
-  // No client-side allowlist — the API only returns domains it knows.
-  domain: string;
-  context: Record<string, unknown>;
-  schema_id: string | null;
-  schema_version: string | null;
-  // JSON Schema for the link's domain, sourced from the network config
-  // (signalstack network.json item_schemas). Inlined so the public page
-  // renders the form without a second fetch and without reading from
-  // disk — aggregator no longer keeps per-domain schema files.
-  // `null` when the resolved `submission_shape === 'account_only'`: the
-  // link is locked to identity-only capture and the form does not render
-  // the RJSF profile tree.
-  schema: RJSFSchema | null;
-  // Identity field selectors for the domain. Used to relax required-field
-  // validation for the account-only form. Optional for back-compat.
-  identity?: { name?: string; phone?: string; email?: string };
-  // Per-link admin-facing registration mode key (e.g. `voice`, `form`).
-  registration_mode?: string;
-  // Resolved form shape (from network config). Optional for back-compat
-  // with older API builds — absent means `'account_and_profile'`.
-  submission_shape?: 'account_only' | 'account_and_profile';
-  // Optional i18n key for a hint rendered beneath the public form.
-  public_hint_i18n_key?: string | null;
-  expires_at: string | null;
-}
+/** The schema an `account_only` link passes to the view, which does not read it. */
+const EMPTY_SCHEMA: RJSFSchema = {};
 
 interface PageProps {
   params: Promise<{ org: string; slug: string }>;
 }
 
-/**
- * Public anonymous registration page. The `(org, slug)` pair is the access
- * token — `org` is the aggregator's `org_slug`, `slug` is the per-link slug.
- * Resolves the link metadata against the public API, loads the matching
- * participant JSON Schema from disk, and hands both to the client renderer.
- */
-export default async function PublicRegistrationPage({ params }: PageProps) {
-  const { org, slug } = await params;
+/** The resolved link, or the error page to render instead. */
+type ResolveOutcome = { ok: true; link: ResolvedLink } | { ok: false; page: JSX.Element };
 
-  // 1. Resolve link metadata via the public API.
+/** A registration link as the public API resolves it. */
+type ResolvedLink = z.infer<typeof ResolveResponseSchema>;
+
+/**
+ * Resolves a registration link through the public API.
+ *
+ * Calls `notFound()` when the API answers 404.
+ *
+ * @param org - The aggregator's `org_slug`.
+ * @param slug - The link slug.
+ * @returns The checked link, or an error page for an unreachable API or a bad response.
+ */
+async function resolveLink(org: string, slug: string): Promise<ResolveOutcome> {
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  let resolved: ResolveResponse;
+  // Only the fetch is inside the try. `notFound()` throws, so it must be
+  // called outside the try or the catch would swallow it.
+  let res: Response;
   try {
-    const res = await fetch(
+    res = await fetch(
       `${apiBase}/public/v1/aggregators/${encodeURIComponent(org)}/links/${encodeURIComponent(slug)}`,
       { cache: 'no-store' },
     );
-    if (res.status === 404) notFound();
-    if (!res.ok) {
-      return (
+  } catch (err) {
+    return {
+      ok: false,
+      page: (
+        <ErrorShell
+          title="Cannot reach registration service"
+          message={err instanceof Error ? err.message : 'Network error.'}
+        />
+      ),
+    };
+  }
+  if (res.status === 404) notFound();
+  if (!res.ok) {
+    return {
+      ok: false,
+      page: (
         <ErrorShell
           title="Link unavailable"
           message={`The registration link is not currently active (HTTP ${res.status}).`}
         />
-      );
-    }
-    resolved = (await res.json()) as ResolveResponse;
+      ),
+    };
+  }
+  let body: unknown;
+  try {
+    body = await res.json();
   } catch (err) {
+    return {
+      ok: false,
+      page: (
+        <ErrorShell
+          title="Cannot reach registration service"
+          message={err instanceof Error ? err.message : 'Malformed response.'}
+        />
+      ),
+    };
+  }
+  const parsedLink = ResolveResponseSchema.safeParse(body);
+  if (!parsedLink.success) {
+    logger.error({
+      operation: 'publicRegistrationPage.resolve',
+      status: 'failure',
+      error: 'unexpected response shape',
+      issues: summariseIssues(parsedLink.error.issues),
+    });
+    return {
+      ok: false,
+      page: <ErrorShell title="Link unavailable" message="Malformed response." />,
+    };
+  }
+  return { ok: true, link: parsedLink.data };
+}
+
+/**
+ * Reads the optional UI schema for a domain from config/<network>/schemas/participant/.
+ *
+ * @param domain - The link's domain, already checked against the safe-name pattern.
+ * @returns The UI schema, or `{}` when the file is missing or not a JSON object.
+ */
+async function loadUiSchema(domain: string): Promise<Record<string, unknown>> {
+  try {
+    return parseJsonObject(
+      await readFile(resolveParticipantSchemaPath(`${domain}.v1.ui.json`), 'utf8'),
+    );
+  } catch {
+    // UI schema is optional.
+    return {};
+  }
+}
+
+/**
+ * Public anonymous registration page for a registration link.
+ *
+ * `org` is the aggregator's `org_slug` and `slug` is the link slug. Resolves the
+ * link through the public API, loads the optional UI schema, and renders the
+ * client view: the two-option view when the link offers voice and has a bot,
+ * else the registration form view.
+ */
+export default async function PublicRegistrationPage({ params }: Readonly<PageProps>) {
+  const { org, slug } = await params;
+
+  // 1. Resolve link metadata via the public API.
+  const outcome = await resolveLink(org, slug);
+  if (!outcome.ok) return outcome.page;
+  const resolved = outcome.link;
+
+  // 2. The schema comes in the resolve response. It must be an object unless
+  // the link is `account_only`, where `null` is valid.
+  const submissionShape = resolved.submission_shape ?? 'account_and_profile';
+  const accountOnly = submissionShape === 'account_only';
+  const linkSchema = readJsonSchema(resolved.schema);
+  if (!accountOnly && !linkSchema) {
     return (
       <ErrorShell
-        title="Cannot reach registration service"
-        message={err instanceof Error ? err.message : 'Network error.'}
+        title="Form unavailable"
+        message={`Registration schema for "${resolved.domain}" is missing.`}
       />
     );
-  }
-
-  // 2. Schema arrives inlined in the resolve response (sourced from the
-  // network config). Aggregator no longer keeps per-domain schema files
-  // on disk — signalstack network.json is the single source of truth.
-  // Defence in depth: bail if the API returned a non-null but non-object
-  // schema (malformed). `null` is valid for `account_only` links and
-  // means the MinimalIdentityForm renders instead of the RJSF tree.
-  const submissionShape = resolved.submission_shape ?? 'account_and_profile';
-  const hintKey = resolved.public_hint_i18n_key ?? null;
-  if (submissionShape !== 'account_only') {
-    if (!resolved.schema || typeof resolved.schema !== 'object') {
-      return (
-        <ErrorShell
-          title="Form unavailable"
-          message={`Registration schema for "${resolved.domain}" is missing.`}
-        />
-      );
-    }
   }
   if (!/^[a-z0-9_-]+$/i.test(resolved.domain)) {
     notFound();
   }
-  // `schema` is null for account_only links — the RJSF form is not
-  // rendered in that path. Cast to satisfy the view prop's RJSFSchema
-  // type; the view ignores it when submissionShape === 'account_only'.
-  const schema: RJSFSchema = resolved.schema ?? ({} as RJSFSchema);
-  // Aggregator-side optional UI schema overlay (e.g. widget hints,
-  // ordering). Lives under config/<network>/schemas/participant/.
-  // Optional — RJSF renders defaults when absent. Skip the disk read
-  // entirely for account_only links since no RJSF form is rendered.
-  let uiSchema: Record<string, unknown> = {};
-  if (submissionShape !== 'account_only') {
-    const uiFile = `${resolved.domain}.v1.ui.json`;
-    try {
-      uiSchema = JSON.parse(await readFile(resolveParticipantSchemaPath(uiFile), 'utf8')) as Record<
-        string,
-        unknown
-      >;
-    } catch {
-      // UI schema is optional — RJSF renders defaults without it.
-    }
-  }
+  // The view ignores `schema` and the UI schema for account_only links.
+  const schema = linkSchema ?? EMPTY_SCHEMA;
+  const uiSchema = accountOnly ? {} : await loadUiSchema(resolved.domain);
 
-  // Participant Terms/Privacy copy for the consent modal (interim: read from
-  // the Signals-copied config file; later the Signals /consent/active API).
+  // Participant Terms/Privacy content for the consent modal, read from config.
   const participantConsent = await loadParticipantConsent();
 
-  return (
-    <PublicRegistrationView
-      org={org}
-      slug={slug}
-      network={resolved.network ?? ''}
-      domain={resolved.domain}
-      context={resolved.context}
-      schema={schema}
-      uiSchema={uiSchema}
-      identity={resolved.identity}
-      submissionShape={submissionShape}
-      publicHintI18nKey={hintKey}
-      registrationMode={resolved.registration_mode ?? null}
-      consentContent={participantConsent}
-    />
-  );
+  const viewProps: PublicRegistrationViewProps = {
+    org,
+    slug,
+    network: resolved.network ?? '',
+    domain: resolved.domain,
+    context: resolved.context,
+    schema,
+    uiSchema,
+    identity: resolved.identity,
+    submissionShape,
+    publicHintI18nKey: resolved.public_hint_i18n_key ?? null,
+    registrationMode: resolved.registration_mode ?? null,
+    consentContent: participantConsent,
+  };
+  if (resolved.offers.includes('voice') && resolved.voice_bot) {
+    return <VoiceOrFormView {...viewProps} voiceBot={resolved.voice_bot} />;
+  }
+  return <PublicRegistrationView {...viewProps} />;
 }
 
 function resolveParticipantSchemaPath(file: string): string {
-  // Walk a small set of plausible roots so the same code works in dev
-  // (`pnpm --filter web dev`, cwd = apps/web) and in the docker standalone
-  // build (cwd = /app, config copied via Dockerfile). Derives the schema
-  // root from AGGREGATOR_NETWORK/AGGREGATOR_BRAND (or explicit SCHEMA_ROOT_DIR
-  // override) via resolveSchemaRoot() so only two brand vars are needed.
+  // Try several roots so this works in dev (cwd = apps/web) and in Docker
+  // (cwd = /app). The first root comes from resolveSchemaRoot().
   const root = resolveSchemaRoot();
   const candidates = [
     path.resolve(root, 'participant', file),
@@ -171,7 +198,7 @@ function resolveParticipantSchemaPath(file: string): string {
   return candidates[0]!;
 }
 
-function ErrorShell({ title, message }: { title: string; message: string }) {
+function ErrorShell({ title, message }: Readonly<{ title: string; message: string }>) {
   return (
     <div className="min-h-screen flex items-center justify-center px-6 bg-[#FBFCFE]">
       <div className="max-w-md text-center">

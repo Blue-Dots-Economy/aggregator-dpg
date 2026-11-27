@@ -1,151 +1,240 @@
 /**
- * Onboarding service — calls the BFF proxies for the link + bulk-upload
- * pipelines. Lives in the browser, so it never sees API tokens directly;
- * the BFF attaches the bearer header.
+ * Onboarding service for the web app: registration links and bulk uploads.
+ *
+ * Runs in the browser and calls the BFF, which attaches the bearer token.
  */
 
-import { jsonFetch } from './http';
+import { z } from 'zod';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { HttpError, jsonFetch } from './http';
 
-export interface ApiRegistrationLink {
-  link_id: string;
-  slug: string;
-  domain: string;
-  status: 'draft' | 'live' | 'retired';
-  /**
-   * Per-link admin-facing registration mode key (e.g. `voice`, `form`),
-   * set at create time and immutable thereafter. The mode → form-shape
-   * mapping lives in network config; the admin UI sources its dropdown
-   * from the live config. Optional for back-compat with older API builds.
-   */
-  registration_mode?: string;
-  context: Record<string, unknown>;
-  expires_at: string | null;
-  /**
-   * `null` while the link is still a draft (or after retirement). The
-   * public URL + QR are minted only at activation, so a draft response
-   * deliberately omits both — the API returns nulls and the UI hides the
-   * artifacts.
-   */
-  public_url: string | null;
-  qr_url: string | null;
-  qr_expires_at: string | null;
-  /**
-   * Optional rollup counters surfaced by the listing endpoint. Defaults
-   * to zeros when the link has no submissions yet.
-   */
-  metrics?: {
-    total: number;
-    passed: number;
-    failed: number;
-    skipped: number;
-  };
-  created_at: string;
-  updated_at: string;
-}
+/** Submitted, passed, failed and skipped counts. */
+const OutcomeCountsSchema = z.object({
+  total: z.number(),
+  passed: z.number(),
+  failed: z.number(),
+  skipped: z.number(),
+});
 
-export interface ListLinksResponse {
-  items: ApiRegistrationLink[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+/** A voice bot a link can point callers to. */
+export const VoiceBotSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  phone: z.string(),
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+export type VoiceBotOption = z.infer<typeof VoiceBotSchema>;
+
+/** Response of `GET /api/links/voice-bots`. */
+export const ListVoiceBotsResponseSchema = z.object({
+  voice_bots: z.array(VoiceBotSchema),
+  default_voice_bot_key: z.string().nullable(),
+});
+export type ListVoiceBotsResponse = z.infer<typeof ListVoiceBotsResponseSchema>;
+
+export const ApiRegistrationLinkSchema = z.object({
+  link_id: z.string(),
+  slug: z.string(),
+  domain: z.string(),
+  status: z.enum(['draft', 'live', 'retired']),
+  /**
+   * Registration mode key (e.g. `voice`, `form`), set at creation and
+   * immutable. The network config maps modes to form shapes.
+   */
+  registration_mode: z.string().optional(),
+  /** Key of the voice bot the link points to. Absent in older API responses. */
+  voice_bot_key: z.string().nullable().optional(),
+  /** The voice bot's details, `null` when the link has none. Absent in older API responses. */
+  voice_bot: VoiceBotSchema.nullable().optional(),
+  context: z.record(z.string(), z.unknown()),
+  expires_at: z.string().nullable(),
+  /** Set only while the link is live; `null` for drafts and retired links. */
+  public_url: z.string().nullable(),
+  qr_url: z.string().nullable(),
+  qr_expires_at: z.string().nullable(),
+  /** Submission counters from the listing endpoint. Zero when there are none. */
+  metrics: OutcomeCountsSchema.optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ApiRegistrationLink = z.infer<typeof ApiRegistrationLinkSchema>;
+
+export const ListLinksResponseSchema = z.object({
+  items: z.array(ApiRegistrationLinkSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+export type ListLinksResponse = z.infer<typeof ListLinksResponseSchema>;
 
 export interface CreateLinkInput {
   domain: string;
   /** Optional human-readable slug. Server falls back to random when omitted. */
   slug?: string;
-  /**
-   * Free-form display label rendered as the card title (e.g.
-   * "Dharwad Field Drive — Apr 2026"). Stored on `context.title`.
-   */
+  /** Display label shown as the card title. Stored on `context.title`. */
   title?: string;
   context?: Record<string, unknown>;
   status?: 'draft' | 'live';
   /**
-   * Per-link admin-facing registration mode key (e.g. `voice`, `form`).
-   * Validated against the live network config by the API. Omitted defaults
-   * to the network's `form` mode. Immutable after creation.
+   * Registration mode key (e.g. `voice`, `form`), checked by the API against
+   * the network config. Defaults to `form`. Immutable after creation.
    */
   registration_mode?: string;
+  /** Key of the voice bot the link points to, checked by the API against the domain's list. */
+  voice_bot_key?: string;
   expires_at?: string | null;
 }
 
-/**
- * Patch shape for `PATCH /api/links/:id`. Server only honours these on
- * drafts; live + retired rows return 409.
- */
+/** Patch for `PATCH /api/links/:id`. Applies to drafts only; other links return 409. */
 export interface UpdateLinkInput {
   slug?: string;
   context?: Record<string, unknown>;
   expires_at?: string | null;
 }
 
-export interface OnboardingSummary {
-  aggregator_id: string;
-  from: string | null;
-  to: string | null;
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
+export const OnboardingSummarySchema = OutcomeCountsSchema.extend({
+  user_id: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+});
+export type OnboardingSummary = z.infer<typeof OnboardingSummarySchema>;
+
+/** One entry-source slice of the onboarding rollup (`source` is `bulk` or `link`). */
+export const OnboardingSourceSliceSchema = OutcomeCountsSchema.extend({ source: z.string() });
+export type OnboardingSourceSlice = z.infer<typeof OnboardingSourceSliceSchema>;
+
+export const OnboardingBySourceSchema = z.object({
+  user_id: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  by_source: z.array(OnboardingSourceSliceSchema),
+});
+export type OnboardingBySource = z.infer<typeof OnboardingBySourceSchema>;
+
+export const BulkUploadCreateResponseSchema = z.object({
+  upload_id: z.string(),
+  upload: z
+    .object({
+      method: z.enum(['PUT', 'POST']),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()),
+      form_fields: z.record(z.string(), z.string()),
+    })
+    .optional(),
+  upload_url: z.string(),
+  s3_key: z.string(),
+  expires_at: z.string(),
+  content_type: z.string(),
+  max_bytes: z.number(),
+  schema_id: z.string(),
+  schema_version: z.string(),
+  status: z.string(),
+});
+export type BulkUploadCreateResponse = z.infer<typeof BulkUploadCreateResponseSchema>;
+
+/** Row outcome counts of a bulk upload; `total_rows` is null until the file is parsed. */
+const UploadRowCountsSchema = OutcomeCountsSchema.omit({ total: true }).extend({
+  total_rows: z.number().nullable(),
+});
+
+export const BulkUploadStatusSchema = UploadRowCountsSchema.extend({
+  upload_id: z.string(),
+  status: z.string(),
+  status_reason: z.string().nullable(),
+  participant_type: z.string(),
+  errors_csv_s3_key: z.string().nullable(),
+  schema_id: z.string(),
+  schema_version: z.string(),
+  created_at: z.string(),
+  completed_at: z.string().nullable(),
+});
+export type BulkUploadStatus = z.infer<typeof BulkUploadStatusSchema>;
+
+/** Response of `POST /api/bulk-uploads/:id/start`; `duplicate` and `message` are set for a repeat upload. */
+export const BulkUploadStartResultSchema = BulkUploadStatusSchema.extend({
+  duplicate: z.boolean().optional(),
+  message: z.string().optional(),
+});
+export type BulkUploadStartResult = z.infer<typeof BulkUploadStartResultSchema>;
+
+export const BulkUploadListSchema = z.object({
+  items: z.array(BulkUploadStatusSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+export type BulkUploadList = z.infer<typeof BulkUploadListSchema>;
+
+export const BulkUploadErrorsResponseSchema = z.object({
+  upload_id: z.string(),
+  url: z.string(),
+  s3_key: z.string(),
+  expires_at: z.string(),
+  content_type: z.string(),
+  counts: UploadRowCountsSchema,
+});
+export type BulkUploadErrorsResponse = z.infer<typeof BulkUploadErrorsResponseSchema>;
+
+/** Appends `params` as a query string when there are any. */
+function withQuery(path: string, params: URLSearchParams): string {
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
 }
 
-/** One entry-source slice of the onboarding rollup (`source` is the API's `onboarding_source` enum — `bulk` | `link` today). */
-export interface OnboardingSourceSlice {
-  source: string;
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
+/** Thrown when the file is larger than the limit the api reported for the upload. */
+export class BulkUploadTooLargeError extends Error {
+  override readonly name = 'BulkUploadTooLargeError';
+
+  /** @param maxBytes - The largest file the api accepts. */
+  constructor(readonly maxBytes: number) {
+    super(`file is larger than ${maxBytes} bytes`);
+  }
 }
 
-export interface OnboardingBySource {
-  aggregator_id: string;
-  from: string | null;
-  to: string | null;
-  by_source: OnboardingSourceSlice[];
+/** Thrown when the file has no content. */
+export class BulkUploadEmptyError extends Error {
+  override readonly name = 'BulkUploadEmptyError';
+
+  constructor() {
+    super('file is empty');
+  }
 }
 
-export interface BulkUploadCreateResponse {
-  upload_id: string;
-  upload_url: string;
-  s3_key: string;
-  expires_at: string;
-  content_type: string;
-  max_bytes: number;
-  schema_id: string;
-  schema_version: string;
-  status: string;
+/**
+ * Thrown when `/start` answered OK with an unreadable body and the upload's
+ * status could not be read again either.
+ *
+ * The upload was started, so the caller must not offer a plain retry: that
+ * would upload the same file twice.
+ */
+export class BulkUploadStartUnreadError extends Error {
+  override readonly name = 'BulkUploadStartUnreadError';
+
+  /**
+   * @param uploadId - The upload that was started.
+   * @param options - The error that stopped the re-read, as `cause`.
+   */
+  constructor(
+    readonly uploadId: string,
+    options?: ErrorOptions,
+  ) {
+    super(`bulk upload ${uploadId} started, but its status could not be read`, options);
+  }
 }
 
-export interface BulkUploadStatus {
-  upload_id: string;
-  status: string;
-  status_reason: string | null;
-  participant_type: string;
-  total_rows: number | null;
-  passed: number;
-  failed: number;
-  skipped: number;
-  errors_csv_s3_key: string | null;
-  schema_id: string;
-  schema_version: string;
-  created_at: string;
-  completed_at: string | null;
-}
-
-export interface BulkUploadErrorsResponse {
-  upload_id: string;
-  url: string;
-  s3_key: string;
-  expires_at: string;
-  content_type: string;
-  counts: {
-    total_rows: number | null;
-    passed: number;
-    failed: number;
-    skipped: number;
-  };
+/**
+ * The error for a failed presigned PUT. Storage answers 413 for a file over its
+ * limit and 403 for an expired or mismatched link; both need a fresh upload, not a wait.
+ *
+ * @param status - The storage response status.
+ */
+function storageUploadError(status: number): HttpError {
+  if (status === 413) return new HttpError(413, { code: 'STORAGE_UPLOAD_TOO_LARGE' });
+  if (status === 400 || status === 403) {
+    return new HttpError(status, { code: 'STORAGE_UPLOAD_LINK_EXPIRED' });
+  }
+  return new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
 }
 
 export const onboardingService = {
@@ -161,8 +250,7 @@ export const onboardingService = {
     if (opts.status) params.set('status', opts.status);
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    const data = await jsonFetch<ListLinksResponse>(`/api/links${qs ? `?${qs}` : ''}`);
+    const data = await jsonFetch(withQuery('/api/links', params), ListLinksResponseSchema);
     if (opts.domain) {
       return { ...data, items: data.items.filter((it) => it.domain === opts.domain) };
     }
@@ -170,116 +258,140 @@ export const onboardingService = {
   },
 
   async createLink(input: CreateLinkInput): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>('/api/links', {
+    return jsonFetch('/api/links', ApiRegistrationLinkSchema, {
       method: 'POST',
       body: JSON.stringify(input),
     });
   },
 
+  async listVoiceBots(domain: string): Promise<ListVoiceBotsResponse> {
+    const params = new URLSearchParams({ domain });
+    return jsonFetch(withQuery('/api/links/voice-bots', params), ListVoiceBotsResponseSchema);
+  },
+
   async updateLink(id: string, patch: UpdateLinkInput): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}`, ApiRegistrationLinkSchema, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
   },
 
   async activateLink(id: string): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/activate`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}/activate`, ApiRegistrationLinkSchema, {
       method: 'POST',
     });
   },
 
   async deactivateLink(id: string): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/deactivate`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}/deactivate`, ApiRegistrationLinkSchema, {
       method: 'POST',
     });
   },
 
-  async summary(opts: { from?: string; to?: string } = {}): Promise<OnboardingSummary> {
+  async summary(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingSummary> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
+    if (opts.domain) params.set('domain', opts.domain);
+    return jsonFetch(withQuery('/api/onboarding/summary', params), OnboardingSummarySchema);
   },
 
-  async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
+  async bySource(
+    opts: { from?: string; to?: string; domain?: string } = {},
+  ): Promise<OnboardingBySource> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch<OnboardingBySource>(`/api/onboarding/by-source${qs ? `?${qs}` : ''}`);
+    if (opts.domain) params.set('domain', opts.domain);
+    return jsonFetch(withQuery('/api/onboarding/by-source', params), OnboardingBySourceSchema);
   },
 
   async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {
-    return jsonFetch<BulkUploadCreateResponse>('/api/bulk-uploads', {
+    return jsonFetch('/api/bulk-uploads', BulkUploadCreateResponseSchema, {
       method: 'POST',
       body: JSON.stringify({ participant_type: participantType }),
     });
   },
 
-  async startBulkUpload(uploadId: string, attestation: boolean): Promise<BulkUploadStatus> {
-    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attestation }),
-    });
+  async startBulkUpload(uploadId: string, attestation: boolean): Promise<BulkUploadStartResult> {
+    return jsonFetch(
+      `/api/bulk-uploads/${encodeURIComponent(uploadId)}/start`,
+      BulkUploadStartResultSchema,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attestation }),
+      },
+    );
   },
 
   async readBulkUpload(uploadId: string): Promise<BulkUploadStatus> {
-    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}`);
+    return jsonFetch(`/api/bulk-uploads/${encodeURIComponent(uploadId)}`, BulkUploadStatusSchema);
   },
 
-  async listBulkUploads(opts: { limit?: number; offset?: number } = {}): Promise<{
-    items: BulkUploadStatus[];
-    total: number;
-    limit: number;
-    offset: number;
-  }> {
+  async listBulkUploads(opts: { limit?: number; offset?: number } = {}): Promise<BulkUploadList> {
     const params = new URLSearchParams();
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    return jsonFetch(`/api/bulk-uploads/list${qs ? `?${qs}` : ''}`);
+    return jsonFetch(withQuery('/api/bulk-uploads/list', params), BulkUploadListSchema);
   },
 
   async errorsCsvUrl(uploadId: string): Promise<BulkUploadErrorsResponse> {
-    return jsonFetch<BulkUploadErrorsResponse>(
+    return jsonFetch(
       `/api/bulk-uploads/${encodeURIComponent(uploadId)}/errors`,
+      BulkUploadErrorsResponseSchema,
     );
   },
 
   /**
-   * Full bulk upload flow: presign → PUT to S3 → start → poll status.
-   * `duplicate=true` when the CSV bytes match a prior upload — backend
-   * surfaces the existing run instead of creating a fresh one.
+   * Runs a bulk upload: presign, upload to storage, then start.
+   *
+   * `duplicate` is true when the file matches a prior upload; the existing run is returned.
+   * When `/start` accepts the upload but its reply cannot be read, the status
+   * is read again, so the caller does not upload the same file twice.
+   *
+   * @param file - The CSV file.
+   * @param participantType - Domain of the rows.
+   * @param attestation - Whether the coordinator accepted the attestation.
+   * @param maxBytes - The size limit from the aggregator config; when unknown, the limit in the api's upload reply applies.
+   * @returns The upload id and status.
+   * @throws {BulkUploadEmptyError} If the file is empty.
+   * @throws {BulkUploadTooLargeError} If the file is larger than the limit.
+   * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
+   * @throws {HttpError} If the storage upload or an API call fails.
    */
   async uploadCsv(
     file: File,
     participantType: string,
     attestation: boolean,
+    maxBytes?: number,
   ): Promise<{
     uploadId: string;
     status: BulkUploadStatus;
     duplicate?: boolean;
     message?: string;
   }> {
+    if (file.size === 0) throw new BulkUploadEmptyError();
+    if (maxBytes !== undefined && file.size > maxBytes) throw new BulkUploadTooLargeError(maxBytes);
     const presigned = await this.createBulkUpload(participantType);
-    const put = await fetch(presigned.upload_url, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': presigned.content_type },
-    });
-    if (!put.ok) {
-      throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
+    if (file.size > presigned.max_bytes) throw new BulkUploadTooLargeError(presigned.max_bytes);
+    await uploadFile(file, presigned);
+    let status: BulkUploadStartResult;
+    try {
+      status = await this.startBulkUpload(presigned.upload_id, attestation);
+    } catch (err) {
+      if (!(err instanceof ResponseShapeError)) throw err;
+      console.error('[bulk-upload] unexpected /start reply; reading the status again', {
+        url: err.url,
+        issues: err.issueSummary(),
+      });
+      return {
+        uploadId: presigned.upload_id,
+        status: await rereadStarted(presigned.upload_id),
+      };
     }
-    const status = (await this.startBulkUpload(
-      presigned.upload_id,
-      attestation,
-    )) as BulkUploadStatus & {
-      duplicate?: boolean;
-      message?: string;
-    };
     const out: {
       uploadId: string;
       status: BulkUploadStatus;
@@ -294,3 +406,85 @@ export const onboardingService = {
     return out;
   },
 };
+
+/**
+ * Sends the file as the api's upload instructions say, or to `upload_url` on older api builds.
+ *
+ * A form POST the browser cannot send (storage without POST in its CORS rules
+ * blocks it) is retried once as the signed PUT in `upload_url`. The file size
+ * was already checked against `max_bytes`, and `/start` checks it again.
+ *
+ * @throws {HttpError} With a `STORAGE_UPLOAD_*` code if storage refuses or cannot be reached.
+ */
+async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
+  const { upload } = created;
+  let res: Response;
+  if (!upload) {
+    res = await sendToStorage(created.upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': created.content_type },
+    });
+  } else if (upload.method === 'POST') {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(upload.form_fields)) form.append(name, value);
+    form.append('file', file);
+    try {
+      res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+    } catch (err) {
+      console.warn('[bulk-upload] form upload to storage failed; retrying as a signed PUT', {
+        error: describeError(err),
+      });
+      res = await sendToStorage(created.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': created.content_type },
+      });
+    }
+  } else {
+    res = await sendToStorage(upload.url, { method: 'PUT', body: file, headers: upload.headers });
+  }
+  if (!res.ok) throw storageUploadError(res.status);
+}
+
+/**
+ * Sends one request to storage.
+ *
+ * The api answered just before this call, so a request that never gets a
+ * response is a storage problem (CORS, network path to storage), not a lost
+ * connection, and is reported as one.
+ *
+ * @throws {HttpError} `STORAGE_UPLOAD_FAILED` if no response arrives.
+ */
+async function sendToStorage(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    console.error('[bulk-upload] upload to storage failed', {
+      method: init.method,
+      error: describeError(err),
+    });
+    throw new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
+  }
+}
+
+/** The name and message of a thrown value, for a log line; never the request or file. */
+function describeError(err: unknown): { name: string; message: string } {
+  if (err instanceof Error) return { name: err.name, message: err.message };
+  return { name: typeof err, message: String(err) };
+}
+
+/**
+ * Reads the status of an upload that `/start` accepted.
+ *
+ * @param uploadId - The started upload.
+ * @returns The upload's status.
+ * @throws {BulkUploadStartUnreadError} If the status cannot be read.
+ */
+async function rereadStarted(uploadId: string): Promise<BulkUploadStatus> {
+  try {
+    return await onboardingService.readBulkUpload(uploadId);
+  } catch (err) {
+    throw new BulkUploadStartUnreadError(uploadId, { cause: err });
+  }
+}

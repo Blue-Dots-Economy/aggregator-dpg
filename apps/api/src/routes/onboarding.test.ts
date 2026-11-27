@@ -3,7 +3,7 @@
  * (`GET /v1/onboarding/summary`, `GET /v1/onboarding/by-source`).
  *
  * Both routes are thin aggregation reads over the `onboarding` rollup table,
- * scoped to the caller's `aggregator_id` and optionally date-bounded by
+ * scoped to the caller's `user_id` and optionally date-bounded by
  * `?from=&to=`. Covers the auth wrapper, the date-range query validation,
  * and both aggregation shapes.
  *
@@ -14,6 +14,18 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import { is, SQL } from 'drizzle-orm';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
+import {
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 
 interface SummaryRow {
   total: number;
@@ -66,10 +78,29 @@ describe('onboarding routes', () => {
 
     _setAccessTokenVerifier(async (token) => {
       if (token === 'approved') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'approved' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'approved' };
       }
       if (token === 'pending') {
-        return { sub: 'kc-1', aggregator_id: AGG_A, decision_made: 'pending' };
+        return { sub: 'kc-1', user_id: AGG_A, decision_made: 'pending' };
+      }
+      if (token === 'serves-both') {
+        return {
+          sub: 'kc-1',
+          user_id: AGG_A,
+          decision_made: 'approved',
+          aggregator_type: ['seeker', 'provider'],
+        };
+      }
+      if (token === 'serves-seeker') {
+        return {
+          sub: 'kc-1',
+          user_id: AGG_A,
+          decision_made: 'approved',
+          aggregator_type: ['seeker'],
+        };
+      }
+      if (token === 'owner') {
+        return { sub: 'kc-owner', email: 'owner@example.org' };
       }
       if (token === 'no-agg-id') {
         return { sub: 'kc-2', decision_made: 'approved' };
@@ -77,12 +108,16 @@ describe('onboarding routes', () => {
       throw new Error('invalid token');
     });
 
+    _setNetworkConfig(buildBlueDotConfig());
     app = await buildApp();
   });
 
   afterAll(async () => {
     await app?.close();
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setAccessTokenVerifier(null);
+    _setNetworkConfig(null);
   });
 
   const AUTH = (token: string) => ({ authorization: `Bearer ${token}` });
@@ -93,7 +128,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/onboarding/summary',
@@ -141,7 +176,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(200);
       const body = res.json() as Record<string, unknown>;
       expect(body).toMatchObject({
-        aggregator_id: AGG_A,
+        user_id: AGG_A,
         from: null,
         to: null,
         total: 0,
@@ -189,7 +224,7 @@ describe('onboarding routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('401s when the token has no aggregator_id claim', async () => {
+    it('401s when the token has no user_id claim', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/onboarding/by-source',
@@ -240,10 +275,10 @@ describe('onboarding routes', () => {
       });
       expect(res.statusCode).toBe(200);
       const body = res.json() as {
-        aggregator_id: string;
+        user_id: string;
         by_source: Array<{ source: string; total: number }>;
       };
-      expect(body.aggregator_id).toBe(AGG_A);
+      expect(body.user_id).toBe(AGG_A);
       expect(body.by_source).toHaveLength(2);
       expect(body.by_source.find((r) => r.source === 'bulk')?.total).toBe(10);
       expect(body.by_source.find((r) => r.source === 'link')?.total).toBe(5);
@@ -261,6 +296,119 @@ describe('onboarding routes', () => {
       const body = res.json() as { from: string; to: string | null };
       expect(body.from).toBe(from);
       expect(body.to).toBeNull();
+    });
+  });
+
+  describe('?domain= profile type filter', () => {
+    /** The where clause of the last query, rendered as Postgres SQL. */
+    const lastWhereSql = (): { sql: string; params: unknown[] } => {
+      if (!is(lastWhereCondition, SQL)) throw new Error('no query ran');
+      return new PgDialect().sqlToQuery(lastWhereCondition);
+    };
+
+    for (const path of ['/v1/onboarding/summary', '/v1/onboarding/by-source']) {
+      it(`${path} counts only the requested type's uploads and links`, async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `${path}?domain=provider`,
+          headers: AUTH('serves-both'),
+        });
+        expect(res.statusCode).toBe(200);
+        const where = lastWhereSql();
+        expect(where.sql).toContain('"bulk_uploads"."participant_type" = $');
+        expect(where.sql).toContain('"registration_links"."domain" = $');
+        expect(where.params).toContain('provider');
+      });
+
+      it(`${path} counts every type when no domain is given`, async () => {
+        const res = await app.inject({ method: 'GET', url: path, headers: AUTH('serves-both') });
+        expect(res.statusCode).toBe(200);
+        expect(lastWhereSql().sql).not.toContain('bulk_uploads');
+      });
+    }
+
+    it('does not filter when the coordinator serves only the requested type', async () => {
+      summaryRows = [{ total: 4, passed: 3, failed: 1, skipped: 0 }];
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary?domain=seeker',
+        headers: AUTH('serves-seeker'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ total: 4, passed: 3 });
+      expect(lastWhereSql().sql).not.toContain('bulk_uploads');
+    });
+
+    it('403 DOMAIN_NOT_SERVED for a type the coordinator does not serve', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/by-source?domain=provider',
+        headers: AUTH('serves-seeker'),
+      });
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
+      expect(lastWhereCondition).toBeUndefined();
+    });
+
+    it('400 SCHEMA_VALIDATION for a domain the network does not have', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary?domain=astronaut',
+        headers: AUTH('serves-both'),
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    });
+  });
+
+  describe("acting as the owner's own coordinator account", () => {
+    const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+    const OWN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const ORG = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+    beforeEach(async () => {
+      const users = new UserStoreFake();
+      users.seed([
+        buildCoordinator({ id: OWN, status: 'active', parentOrgId: ORG, signalstackOrgId: 'o1' }),
+        // A second coordinator in the same org, whose counts must not be read.
+        buildCoordinator({ id: AGG_A, status: 'active', parentOrgId: ORG, signalstackOrgId: 'o2' }),
+      ]);
+      _setUserStore(users);
+      const orgs = new OrganisationStoreFake();
+      orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+      _setOrganisationStore(orgs);
+      const identities = getIdentityStore();
+      await identities.link(ADMIN, 'keycloak', 'kc-owner', 'admin');
+      await identities.link(OWN, 'keycloak', 'kc-owner', 'coordinator');
+      await identities.link(AGG_A, 'keycloak', 'kc-1', 'coordinator');
+    });
+
+    it('GET /v1/onboarding/summary counts only the acting coordinator', async () => {
+      summaryRows = [{ total: 5, passed: 4, failed: 1, skipped: 0 }];
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary',
+        headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: OWN },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ user_id: OWN, total: 5 });
+      if (!is(lastWhereCondition, SQL)) throw new Error('no query ran');
+      const where = new PgDialect().sqlToQuery(lastWhereCondition);
+      expect(where.params).toContain(OWN);
+      expect(where.params).not.toContain(AGG_A);
+    });
+
+    it('403 ACTING_ACCOUNT_INVALID for the other coordinator of the org', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/onboarding/summary',
+        headers: { ...AUTH('owner'), [ACTING_ACCOUNT_HEADER]: AGG_A },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({
+        error: { code: 'ACTING_ACCOUNT_INVALID', detail: 'acting account not usable' },
+      });
+      expect(lastWhereCondition).toBeUndefined();
     });
   });
 });

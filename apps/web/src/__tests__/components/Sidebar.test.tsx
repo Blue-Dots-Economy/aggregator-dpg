@@ -2,7 +2,7 @@
  * Unit tests for Sidebar.
  *
  * Covers: nav item rendering + active-route highlighting, the participants
- * badge sourced from the dashboard rollup for the active domain, the
+ * badge, the total of the dashboard rollups across served domains, the
  * brand-logo vs BlueDotsLogo fallback (and its dark/light swap), the
  * conditional "Contact support" entry gated by `supportEnabled`, and the
  * sign-out control, plus the mobile menu bar + navigation drawer (#793): open /
@@ -12,19 +12,42 @@
  * Sidebar's own composition logic is under test here.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
+import { makeQueryClient } from '@/__tests__/test-utils';
 
-const { useAuth, useThemeMode, useAggregatorConfig, useDashboard, useProfileRaw, usePathname } =
-  vi.hoisted(() => ({
-    useAuth: vi.fn(),
-    useThemeMode: vi.fn(),
-    useAggregatorConfig: vi.fn(),
-    useDashboard: vi.fn(),
-    useProfileRaw: vi.fn(),
-    usePathname: vi.fn(),
-  }));
+/** Renders inside a query client, which the shell's support dialog reads through. */
+function render(ui: ReactElement) {
+  const client = makeQueryClient();
+  return rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
-vi.mock('@/lib/auth-context', () => ({ useAuth }));
+const {
+  useAuth,
+  useCan,
+  useThemeMode,
+  useAggregatorConfig,
+  useDashboard,
+  useProfileRaw,
+  usePathname,
+  search,
+} = vi.hoisted(() => ({
+  useAuth: vi.fn(),
+  useCan: vi.fn(),
+  useThemeMode: vi.fn(),
+  useAggregatorConfig: vi.fn(),
+  useDashboard: vi.fn(),
+  useProfileRaw: vi.fn(),
+  usePathname: vi.fn(),
+  search: { value: '' },
+}));
+
+vi.mock('@/lib/auth-context', () => ({ useAuth, useCan }));
 vi.mock('@/lib/theme-mode', () => ({ useThemeMode }));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
   useAggregatorConfig,
@@ -39,7 +62,11 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 }));
 vi.mock('@/hooks/useDashboard', () => ({ useDashboard }));
 vi.mock('@/hooks/useProfile', () => ({ useProfileRaw }));
-vi.mock('next/navigation', () => ({ usePathname }));
+vi.mock('next/navigation', () => ({
+  usePathname,
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(search.value),
+}));
 vi.mock('next/image', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => <img {...props} alt={props.alt} />,
@@ -58,15 +85,19 @@ vi.mock('next-intl', () => ({
       open_menu: 'Open menu',
       close_menu: 'Close menu',
       menu_label: 'Main navigation',
+      back_to_console: 'Back to console',
+      acting_sublabel: `Coordinator · ${vars?.org ?? ''}`,
+      acting_sublabel_no_org: 'Coordinator',
     };
     return map[key] ?? key;
   },
 }));
 
-import { Sidebar } from '@/components/shell/Sidebar';
+import { AppSidebar, Sidebar } from '@/components/shell/Sidebar';
 
 function mockDefaults() {
   usePathname.mockReturnValue('/onboarding');
+  useCan.mockReturnValue(() => true);
   useAuth.mockReturnValue({
     user: { id: 'u1', org: 'Acme Org', name: 'Acme', email: 'a@a.com', phone: '' },
     signOut: vi.fn(),
@@ -105,12 +136,46 @@ describe('<Sidebar />', () => {
   });
 
   it('shows the participants badge on the dashboard link when a rollup total is available', () => {
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useDashboard.mockReturnValue({
       data: { by_domain: { seeker: { rollup: { total_items: 42 } } } },
     });
     render(<Sidebar />);
     expect(screen.getByText('42')).toBeInTheDocument();
+  });
+
+  it('shows the total across every served domain for a multi-domain coordinator', () => {
+    search.value = 'domain=provider';
+    useAggregatorConfig.mockReturnValue({
+      data: {
+        aggregator: { name: 'Aggregator' },
+        brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', url_slug: 'dashboard' },
+        network: { id: 'blue_dot' },
+        domains: [
+          { id: 'seeker', label: 'Seeker', plural_label: 'Seekers', item_type: 'profile_1.0' },
+          {
+            id: 'provider',
+            label: 'Provider',
+            plural_label: 'Providers',
+            item_type: 'job_posting_1.0',
+          },
+        ],
+      },
+    });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
+    useDashboard.mockReturnValue({
+      data: {
+        by_domain: {
+          seeker: { rollup: { total_items: 42 } },
+          provider: { rollup: { total_items: 7 } },
+        },
+      },
+    });
+    render(<Sidebar />);
+    expect(screen.getAllByText('49').length).toBeGreaterThan(0);
+    expect(screen.queryByText('42')).toBeNull();
+    expect(screen.queryByText('7')).toBeNull();
+    search.value = '';
   });
 
   it('omits the badge when no rollup total is available yet', () => {
@@ -194,7 +259,7 @@ describe('<Sidebar />', () => {
 
   it('applies the active-tone badge styling when the dashboard link itself is the current route', () => {
     usePathname.mockReturnValue('/dashboard');
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useDashboard.mockReturnValue({
       data: { by_domain: { seeker: { rollup: { total_items: 7 } } } },
     });
@@ -205,7 +270,7 @@ describe('<Sidebar />', () => {
 
   it('renders the org initials and org name in the footer card', () => {
     render(<Sidebar />);
-    expect(screen.getByText('AC')).toBeInTheDocument();
+    expect(screen.getByText('AO')).toBeInTheDocument();
     expect(screen.getByText('Acme Org')).toBeInTheDocument();
   });
 
@@ -355,5 +420,127 @@ describe('<Sidebar /> mobile navigation drawer', () => {
     } finally {
       window.matchMedia = original;
     }
+  });
+
+  it('hides Onboarding without profiles.onboard (RBAC)', () => {
+    mockDefaults();
+    useCan.mockReturnValue((c: string) => c !== 'profiles.onboard');
+    render(<Sidebar />);
+    expect(screen.queryAllByText('Onboarding')).toHaveLength(0);
+  });
+});
+
+describe("<Sidebar /> acting as the owner's own coordinator account", () => {
+  function mockActing() {
+    useAuth.mockReturnValue({
+      user: { id: 'c1', org: 'o@x.org', name: 'Asha', email: 'o@x.org' },
+      signOut: vi.fn(),
+      supportEnabled: false,
+      acting: true,
+      actingOrgName: 'Acme Jobs',
+    });
+  }
+
+  it('shows Back to console above Overview, leaving acting mode through the GET route', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    const back = within(aside).getByRole('link', { name: /Back to console/ });
+    expect(back).toHaveAttribute('href', '/api/auth/acting/leave?returnTo=%2Fconsole');
+    const overview = within(aside).getByText('Overview');
+    expect(back.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the role alone in the footer when the organisation is not known', () => {
+    useAuth.mockReturnValue({
+      user: { id: 'c1', org: 'o@x.org', name: 'Asha', email: 'o@x.org' },
+      signOut: vi.fn(),
+      supportEnabled: false,
+      acting: true,
+      actingOrgName: null,
+    });
+    render(<Sidebar />);
+    expect(screen.getAllByText('Coordinator').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Coordinator ·/)).toBeNull();
+    expect(screen.getAllByRole('link', { name: /Back to console/ }).length).toBeGreaterThan(0);
+  });
+
+  it('links Account Details to the console profile', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    expect(within(aside).getByRole('link', { name: /Profile/ })).toHaveAttribute(
+      'href',
+      '/api/auth/acting/leave?returnTo=%2Fconsole%2Fprofile',
+    );
+  });
+
+  it('shows the coordinator account name and its organisation in the footer', () => {
+    mockActing();
+    render(<Sidebar />);
+    expect(screen.getAllByText('Asha').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Coordinator · Acme Jobs').length).toBeGreaterThan(0);
+  });
+
+  it('offers no campaign entry point (the API refuses campaign routes while acting)', () => {
+    mockActing();
+    render(<Sidebar />);
+    const aside = screen.getByRole('complementary');
+    const hrefs = within(aside)
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.length).toBeGreaterThan(0);
+    expect(hrefs.filter((h) => /campaign/i.test(h))).toEqual([]);
+    expect(within(aside).queryByText(/campaign/i)).toBeNull();
+  });
+
+  it('shows no Back to console for a plain coordinator', () => {
+    render(<Sidebar />);
+    expect(screen.queryByRole('link', { name: /Back to console/ })).toBeNull();
+    expect(screen.getAllByRole('link', { name: /Profile/ })[0]).toHaveAttribute('href', '/profile');
+  });
+});
+
+describe('<AppSidebar /> account card', () => {
+  const renderCard = (account: Parameters<typeof AppSidebar>[0]['account']) =>
+    render(<AppSidebar nav={[]} portalLabel="Console" account={account} />);
+
+  it('opens with the email once when the title is the email', () => {
+    renderCard({
+      title: 'admin@net.org',
+      subtitle: 'Network admin',
+      details: [{ label: 'Email', value: 'admin@net.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /admin@net\.org/ })[0]!);
+    const popup = screen.getByRole('dialog');
+    expect(within(popup).getAllByText('admin@net.org')).toHaveLength(1);
+    expect(within(popup).getByText('Network admin')).toBeInTheDocument();
+    expect(within(popup).getByText('AD')).toBeInTheDocument();
+  });
+
+  it('closes on a click outside the card and stays open on a click inside it', () => {
+    renderCard({
+      title: 'Asha Rao',
+      subtitle: 'Organisation owner',
+      details: [{ label: 'Email', value: 'asha@a.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /Asha Rao/ })[0]!);
+    fireEvent.mouseDown(within(screen.getByRole('dialog')).getByText('Organisation owner'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the name and the role in the header when there is a name', () => {
+    renderCard({
+      title: 'Asha Rao',
+      subtitle: 'Organisation owner',
+      details: [{ label: 'Email', value: 'asha@a.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /Asha Rao/ })[0]!);
+    const popup = screen.getByRole('dialog');
+    expect(within(popup).getByText('Asha Rao')).toBeInTheDocument();
+    expect(within(popup).getByText('Organisation owner')).toBeInTheDocument();
+    expect(within(popup).getByText('asha@a.org')).toBeInTheDocument();
   });
 });

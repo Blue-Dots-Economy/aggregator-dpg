@@ -2,6 +2,7 @@
  * BFF route test: POST /api/links/[id]/deactivate.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/upstream-client', () => ({
   callApi: vi.fn(),
@@ -23,27 +24,74 @@ describe('POST /api/links/[id]/deactivate', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('deactivates the link at the encoded id path', async () => {
-    mockCallApi.mockResolvedValue(jsonResponse(200, { id: 'l 1', status: 'retired' }));
-    const res = await POST(new Request('http://localhost/api/links/l 1/deactivate') as never, {
-      params: Promise.resolve({ id: 'l 1' }),
-    });
+    mockCallApi.mockResolvedValue(
+      jsonResponse(200, { id: '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}', status: 'retired' }),
+    );
+    const res = await POST(
+      new Request(
+        'http://localhost/api/links/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/deactivate',
+      ) as never,
+      {
+        params: Promise.resolve({ id: '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}' }),
+      },
+    );
     expect(res.status).toBe(200);
-    expect(mockCallApi).toHaveBeenCalledWith('/v1/links/l%201/deactivate', { method: 'POST' });
+    expect(mockCallApi).toHaveBeenCalledWith(
+      '/v1/links/%7Ba0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11%7D/deactivate',
+      { method: 'POST' },
+    );
   });
 
   it('returns 401 when there is no active session', async () => {
     mockCallApi.mockRejectedValue(new Error('no active session'));
-    const res = await POST(new Request('http://localhost/api/links/l1/deactivate') as never, {
-      params: Promise.resolve({ id: 'l1' }),
-    });
+    const res = await POST(
+      new Request(
+        'http://localhost/api/links/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/deactivate',
+      ) as never,
+      {
+        params: Promise.resolve({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' }),
+      },
+    );
     expect(res.status).toBe(401);
   });
 
   it('returns 503 when the upstream call throws', async () => {
     mockCallApi.mockRejectedValue(new Error('timeout'));
-    const res = await POST(new Request('http://localhost/api/links/l1/deactivate') as never, {
-      params: Promise.resolve({ id: 'l1' }),
-    });
+    const res = await POST(
+      new Request(
+        'http://localhost/api/links/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/deactivate',
+      ) as never,
+      {
+        params: Promise.resolve({ id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' }),
+      },
+    );
     expect(res.status).toBe(503);
+  });
+});
+
+describe('POST /api/links/[id]/deactivate id check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each(['l1', 'not-a-uuid', '../../v1/admin', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1'])(
+    'returns the 404 NOT_FOUND envelope for %j without calling upstream',
+    async (id) => {
+      const res = await POST(new NextRequest('http://localhost/x', { method: 'POST' }), {
+        params: Promise.resolve({ id }),
+      });
+      expect(res.status).toBe(404);
+      await expect(res.json()).resolves.toEqual({
+        error: { code: 'NOT_FOUND', title: 'Not found' },
+      });
+      expect(mockCallApi).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts an upper-case UUID', async () => {
+    mockCallApi.mockResolvedValue(jsonResponse(200, {}));
+    const res = await POST(new NextRequest('http://localhost/x', { method: 'POST' }), {
+      params: Promise.resolve({ id: 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11' }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledTimes(1);
   });
 });

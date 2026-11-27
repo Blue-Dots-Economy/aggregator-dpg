@@ -18,13 +18,13 @@ export type BulkUploadStatus =
 
 export interface BulkUpload {
   id: string;
-  aggregatorId: string;
+  userId: string;
   participantType: string;
-  s3Key: string;
-  s3Etag: string | null;
+  storageKey: string;
+  contentFingerprint: string | null;
   status: BulkUploadStatus;
   statusReason: string | null;
-  errorsCsvS3Key: string | null;
+  errorsCsvStorageKey: string | null;
   schemaId: string;
   schemaVersion: string;
   uploadedBy: string;
@@ -35,9 +35,9 @@ export interface BulkUpload {
 }
 
 export interface CreateBulkUploadInput {
-  aggregatorId: string;
+  userId: string;
   participantType: string;
-  s3Key: string;
+  storageKey: string;
   schemaId: string;
   schemaVersion: string;
   uploadedBy: string;
@@ -45,7 +45,6 @@ export interface CreateBulkUploadInput {
 
 export type StoreError =
   | { code: 'NOT_FOUND'; message: string }
-  | { code: 'DUPLICATE_ETAG'; message: string }
   | { code: 'INVALID_TRANSITION'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
@@ -64,39 +63,30 @@ export interface ListBulkUploadsResult {
 export abstract class BulkUploadsStoreBase {
   /** Create a new upload row in `pending` status. */
   abstract create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>>;
-  /** Find by id; cross-aggregator access blocked at the API layer (caller passes aggregatorId). */
-  abstract findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>>;
-  /** Find an existing pending/in-flight upload for a re-uploaded ETag. */
-  abstract findByAggregatorAndEtag(
-    aggregatorId: string,
-    s3Etag: string,
-  ): Promise<StoreResult<BulkUpload | null>>;
+  /** Find by id; cross-aggregator access blocked at the API layer (caller passes userId). */
+  abstract findById(id: string, userId: string): Promise<StoreResult<BulkUpload | null>>;
   /**
    * Paginated list scoped to one aggregator. Most-recent first.
+   *
+   * Leaves out uploads that never started: `pending` ones, and the ones the
+   * worker's watchdog failed as `upload_abandoned`.
    */
   abstract list(
-    aggregatorId: string,
+    userId: string,
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>>;
   /**
-   * Transition `pending` → `uploaded` and record the S3 ETag captured by
-   * the API after the browser confirms the PUT completed.
+   * Transition `pending` → `uploaded` and record the content fingerprint of
+   * the uploaded file.
    *
-   * Idempotent: calling on a row already in `uploaded` (or later) is a
-   * no-op and returns the current row. Calling on a terminal status
-   * (completed | failed) returns INVALID_TRANSITION.
+   * Idempotent: a row already `uploaded` with the same fingerprint is returned as is.
+   * Any status other than `pending` or `uploaded` returns INVALID_TRANSITION.
    */
   abstract markUploaded(
     id: string,
-    aggregatorId: string,
-    s3Etag: string,
+    userId: string,
+    contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>>;
-  /**
-   * Delete a row that is still `pending`. Used to clean up orphan rows
-   * created when a re-upload of identical CSV bytes hits the
-   * (aggregator_id, s3_etag) UNIQUE conflict — we keep the original row
-   * (which already holds the etag) and drop the pending duplicate so the
-   * user does not see a stale entry in their list.
-   */
-  abstract deletePending(id: string, aggregatorId: string): Promise<StoreResult<void>>;
+  /** Delete a row that is still `pending`. */
+  abstract deletePending(id: string, userId: string): Promise<StoreResult<void>>;
 }

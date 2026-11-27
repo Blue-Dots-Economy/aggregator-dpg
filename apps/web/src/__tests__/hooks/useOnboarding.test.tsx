@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -99,7 +99,7 @@ describe('useOnboarding hooks', () => {
 
   it('useOnboardingSummary / useOnboardingBySource resolve', async () => {
     svc.summary!.mockResolvedValue({
-      aggregator_id: 'a1',
+      user_id: 'a1',
       from: null,
       to: null,
       total: 0,
@@ -107,12 +107,41 @@ describe('useOnboarding hooks', () => {
       failed: 0,
       skipped: 0,
     });
-    svc.bySource!.mockResolvedValue({ aggregator_id: 'a1', from: null, to: null, by_source: [] });
+    svc.bySource!.mockResolvedValue({ user_id: 'a1', from: null, to: null, by_source: [] });
     const { wrapper } = makeWrapper();
     const s1 = renderHook(() => useOnboardingSummary(), { wrapper });
     await waitFor(() => expect(s1.result.current.isSuccess).toBe(true));
     const s2 = renderHook(() => useOnboardingBySource(), { wrapper });
     await waitFor(() => expect(s2.result.current.isSuccess).toBe(true));
+    expect(svc.summary).toHaveBeenCalledWith({});
+    expect(svc.bySource).toHaveBeenCalledWith({});
+  });
+
+  it('reads the metrics of one profile type, cached per type', async () => {
+    svc.summary!.mockResolvedValue({
+      user_id: 'a1',
+      from: null,
+      to: null,
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    svc.bySource!.mockResolvedValue({ user_id: 'a1', from: null, to: null, by_source: [] });
+    const { client, wrapper } = makeWrapper();
+    const s = renderHook(() => useOnboardingSummary({ domain: 'provider' }), { wrapper });
+    await waitFor(() => expect(s.result.current.isSuccess).toBe(true));
+    const b = renderHook(() => useOnboardingBySource({ domain: 'provider' }), { wrapper });
+    await waitFor(() => expect(b.result.current.isSuccess).toBe(true));
+    expect(svc.summary).toHaveBeenCalledWith({ domain: 'provider' });
+    expect(svc.bySource).toHaveBeenCalledWith({ domain: 'provider' });
+    expect(client.getQueryData(['onboarding', 'summary', 'provider'])).toBeDefined();
+  });
+
+  it('does not read the metrics while disabled', () => {
+    const { wrapper } = makeWrapper();
+    renderHook(() => useOnboardingSummary({ domain: 'seeker', enabled: false }), { wrapper });
+    expect(svc.summary).not.toHaveBeenCalled();
   });
 
   it('useBulkUpload delegates to onboardingService.uploadCsv and invalidates summary', async () => {
@@ -122,9 +151,14 @@ describe('useOnboarding hooks', () => {
     const { result } = renderHook(() => useBulkUpload(), { wrapper });
     const file = new File(['a,b'], 'x.csv', { type: 'text/csv' });
     await act(async () => {
-      await result.current.mutateAsync({ file, participantType: 'seeker', attestation: true });
+      await result.current.mutateAsync({
+        file,
+        participantType: 'seeker',
+        attestation: true,
+        maxBytes: 1000,
+      });
     });
-    expect(svc.uploadCsv).toHaveBeenCalledWith(file, 'seeker', true);
+    expect(svc.uploadCsv).toHaveBeenCalledWith(file, 'seeker', true, 1000);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['onboarding', 'summary'] });
   });
 
@@ -139,5 +173,72 @@ describe('useOnboarding hooks', () => {
     const { result } = renderHook(() => useRecentBulkUploads(5), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(svc.listBulkUploads).toHaveBeenCalledWith({ limit: 5 });
+  });
+
+  it('useRecentBulkUploads keeps only the given domain, from one shared fetch', async () => {
+    svc.listBulkUploads!.mockResolvedValue({
+      items: [
+        { upload_id: 'u1', status: 'completed', participant_type: 'seeker' },
+        { upload_id: 'u2', status: 'completed', participant_type: 'provider' },
+      ],
+      total: 2,
+      limit: 10,
+      offset: 0,
+    });
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () => ({ all: useRecentBulkUploads(10), provider: useRecentBulkUploads(10, 'provider') }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.provider.isSuccess).toBe(true));
+    expect(result.current.provider.data?.items.map((i) => i.upload_id)).toEqual(['u2']);
+    expect(result.current.all.data?.items).toHaveLength(2);
+    expect(svc.listBulkUploads).toHaveBeenCalledTimes(1);
+  });
+
+  describe('useRecentBulkUploads polling', () => {
+    const POLL_MS = 3000;
+
+    async function pollCallsAfterInitialFetch(statuses: string[]) {
+      svc.listBulkUploads!.mockResolvedValue({
+        items: statuses.map((status, i) => ({ upload_id: `u${i}`, status })),
+        total: statuses.length,
+        limit: 10,
+        offset: 0,
+      });
+      const { wrapper } = makeWrapper();
+      renderHook(() => useRecentBulkUploads(), { wrapper });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(svc.listBulkUploads).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+      });
+      return svc.listBulkUploads!.mock.calls.length - 1;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each(['uploaded', 'file_validating', 'row_processing', 'finalising'])(
+      'refetches on the interval while an upload is %s',
+      async (status) => {
+        expect(await pollCallsAfterInitialFetch([status])).toBe(3);
+      },
+    );
+
+    it('does not refetch on the interval when the only unfinished uploads are pending', async () => {
+      expect(await pollCallsAfterInitialFetch(['pending', 'completed', 'failed'])).toBe(0);
+    });
+
+    it('does not refetch on the interval when every upload is completed or failed', async () => {
+      expect(await pollCallsAfterInitialFetch(['completed', 'failed'])).toBe(0);
+    });
   });
 });

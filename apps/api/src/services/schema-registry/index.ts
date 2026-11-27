@@ -1,9 +1,9 @@
 /**
- * Schema registry — allowlist lookup for persona + service IDs that an
- * aggregator is permitted to declare on its profile.
+ * Schema registry: the persona and service ids an aggregator may declare on
+ * its profile (`@aggregator-dpg/api`).
  *
- * The registry is backed by `config/schema-registry.yaml` and loaded once
- * at startup. Tests can replace the singleton via {@link _setSchemaRegistry}.
+ * Loaded once from `config/schema-registry.yaml`. Tests can replace the
+ * singleton with {@link _setSchemaRegistry}.
  */
 
 import { readFileSync } from 'node:fs';
@@ -25,8 +25,7 @@ export abstract class SchemaRegistryBase {
 }
 
 /**
- * YAML-backed registry. Loads the file on construction; callers can ship a
- * different file path by passing `pathOverride`.
+ * YAML-backed registry. Loads the file on construction; `pathOverride` sets another path.
  */
 export class YamlSchemaRegistry extends SchemaRegistryBase {
   private readonly personas: Map<string, RegistryEntry>;
@@ -61,8 +60,7 @@ export class YamlSchemaRegistry extends SchemaRegistryBase {
 }
 
 /**
- * In-memory registry for tests. Seed it with fixture IDs that match the
- * test scenario; bypasses file I/O entirely.
+ * In-memory registry for tests, seeded with fixture ids. No file I/O.
  */
 export class InMemorySchemaRegistry extends SchemaRegistryBase {
   private readonly personas = new Map<string, RegistryEntry>();
@@ -102,7 +100,7 @@ export function getSchemaRegistry(): SchemaRegistryBase {
   return instance;
 }
 
-/** Test helper — replace the singleton with a fake. */
+/** Test helper; replaces the singleton with a fake. */
 export function _setSchemaRegistry(r: SchemaRegistryBase | null): void {
   instance = r;
 }
@@ -110,14 +108,13 @@ export function _setSchemaRegistry(r: SchemaRegistryBase | null): void {
 // ─── Minimal YAML parser ─────────────────────────────────────────────────────
 
 /**
- * Hand-rolled parser tuned to the exact shape of `schema-registry.yaml`:
+ * Minimal parser for the shape of `schema-registry.yaml`:
  *
  *   personas:
  *     - id: ...
  *       name: ...
  *
- * No external dep needed for this single-purpose file. If the registry
- * grows beyond simple flat lists, swap to `js-yaml`.
+ * Handles flat lists only; use `js-yaml` if the file grows more complex.
  */
 function parseSimpleYaml(raw: string): {
   personas: RegistryEntry[];

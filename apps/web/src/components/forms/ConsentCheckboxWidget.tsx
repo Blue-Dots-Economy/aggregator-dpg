@@ -19,26 +19,22 @@ import type { WidgetProps } from '@rjsf/utils';
 import { ConsentModal } from '../consent/ConsentModal';
 import type { ConsentTab } from '../consent/ConsentModal';
 import type { ConsentDocContent } from '../consent/consent-types';
+import { errorAria } from './error-aria';
 
 /**
  * Renders the registration consent checkbox with clickable Terms/Privacy links.
  *
- * Pulls `consentContent` from the form context so it can be passed server-side
- * from the page without threading extra props through RJSF field wiring. The
- * checkbox state is controlled by RJSF via `value`/`onChange`.
+ * Reads `consentContent` from `registry.formContext`. The checkbox state is
+ * controlled by RJSF via `value`/`onChange`.
  *
- * RJSF v6 dropped the top-level `formContext` prop from `WidgetProps` in favour
- * of `registry.formContext`. `WidgetProps` extends `GenericObjectType`, so the
- * old `props.formContext` still type-checks and silently reads `undefined` —
- * read it off the registry, never off `props`.
+ * Read the form context from `registry`, not `props.formContext`: the latter
+ * type-checks but is always `undefined` in RJSF v6.
  *
- * @param props - Standard RJSF WidgetProps; uses `id`, `value`, `required`,
- *   `disabled`, `readonly`, `onChange`, and `registry.formContext.consentContent`.
- * @returns The checkbox with linked label and (when content available) a
- *   read-only consent modal.
+ * @param props - Standard RJSF widget props.
+ * @returns The checkbox with its label and, when content exists, the consent modal.
  */
 export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
-  const { id, value, required, disabled, readonly, onChange, registry } = props;
+  const { id, value, required, disabled, readonly, onChange, onBlur, registry, rawErrors } = props;
   const t = useTranslations('register');
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ConsentTab>('terms');
@@ -89,7 +85,9 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
           checked={Boolean(value)}
           required={required}
           disabled={disabled || readonly}
+          {...errorAria(id, rawErrors)}
           onChange={(e) => onChange(e.target.checked)}
+          onBlur={() => onBlur(id, Boolean(value))}
         />
         {label}
       </label>

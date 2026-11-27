@@ -87,3 +87,41 @@ describe('POST /api/links', () => {
     expect(res.status).toBe(503);
   });
 });
+
+describe('GET /api/links query check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['', ''],
+    ['?status=draft&limit=1&offset=0', '?status=draft&limit=1&offset=0'],
+    ['?status=retired&limit=100&offset=500', '?status=retired&limit=100&offset=500'],
+    ['?offset=10&evil=1&limit=20', '?limit=20&offset=10'],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    mockCallApi.mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new NextRequest(`http://localhost/api/links${query}`));
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledWith(
+      `/v1/links${forwarded}`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it.each([
+    '?status=paused',
+    '?status=',
+    '?limit=0',
+    '?limit=101',
+    '?limit=abc',
+    '?limit=1.5',
+    '?offset=-1',
+  ])('rejects %j with 400 without calling upstream', async (query) => {
+    const res = await GET(new NextRequest(`http://localhost/api/links${query}`));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
+    });
+    expect(mockCallApi).not.toHaveBeenCalled();
+  });
+});

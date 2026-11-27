@@ -5,7 +5,7 @@
  * since the real adapter/store hit Keycloak/Redis. Uses the *real*
  * `signFlowState`/`verifyFlowState` from `@/lib/cookies` (pure HMAC, no I/O)
  * so the flow-cookie round trip is exercised for real. Crafts a fake JWT
- * (base64url payload, no real signature — `tokenAggregatorId` never
+ * (base64url payload, no real signature — `tokenUserId` never
  * verifies the signature) to drive the coordinator-gate branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -24,6 +24,8 @@ vi.mock('@/lib/oidc', () => ({
 vi.mock('@/lib/session', () => ({
   getSessionStore: vi.fn(),
 }));
+const { activateInviteeMock } = vi.hoisted(() => ({ activateInviteeMock: vi.fn() }));
+vi.mock('@/lib/invite-activation', () => ({ activateInvitee: activateInviteeMock }));
 
 import { GET } from '@/app/api/auth/callback/route';
 import { getOidcAdapter } from '@/lib/oidc';
@@ -52,6 +54,7 @@ describe('GET /api/auth/callback', () => {
   let originalRedirectUri: string | undefined;
   let originalPublicUrl: string | undefined;
   const exchangeCode = vi.fn();
+  const refresh = vi.fn();
   const create = vi.fn(async () => 'new-sid');
 
   beforeEach(() => {
@@ -64,7 +67,7 @@ describe('GET /api/auth/callback', () => {
     mockGetOidcAdapter.mockReturnValue({
       buildAuthorizationUrl: vi.fn(),
       exchangeCode,
-      refresh: vi.fn(),
+      refresh,
       buildLogoutUrl: vi.fn(),
     } as never);
     mockGetSessionStore.mockReturnValue({
@@ -91,13 +94,13 @@ describe('GET /api/auth/callback', () => {
       ok: true,
       value: {
         tokens: {
-          accessToken: fakeJwt({ aggregator_id: 'agg-1' }),
+          accessToken: fakeJwt({ user_id: 'agg-1' }),
           refreshToken: 'refresh-1',
           idToken: 'id-1',
           accessTokenExp: Date.now() + 60_000,
           refreshTokenExp: Date.now() + 60_000,
         },
-        claims: { sub: 'user-1', email: 'jane@x.com' },
+        claims: { sub: 'user-1', email: 'jane@x.com', sid: 'kc-session-1' },
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
@@ -106,8 +109,9 @@ describe('GET /api/auth/callback', () => {
     const res = await GET(req);
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('http://portal.test/dashboard');
+    // The Keycloak session id is kept so Keycloak's back-channel logout can name this session.
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ sub: 'user-1', email: 'jane@x.com' }),
+      expect.objectContaining({ sub: 'user-1', email: 'jane@x.com', idpSid: 'kc-session-1' }),
     );
     const setCookie = res.headers.getSetCookie
       ? res.headers.getSetCookie().join(' | ')
@@ -162,11 +166,11 @@ describe('GET /api/auth/callback', () => {
 
   /**
    * One Keycloak realm serves this portal and the Signals app, so "no
-   * aggregator_id" covers three different populations. The reason code has to
+   * user_id" covers three different populations. The reason code has to
    * tell them apart or the login screen shows org-owner advice to a Signals
    * participant (#753).
    */
-  function blockedWith(roles: string[]): Promise<Response> {
+  function blockedWith(roles: string[], returnTo = '/dashboard'): Promise<Response> {
     exchangeCode.mockResolvedValue({
       ok: true,
       value: {
@@ -181,16 +185,86 @@ describe('GET /api/auth/callback', () => {
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
-      headers: { cookie: `oidc_flow=${flowCookie()}` },
+      headers: { cookie: `oidc_flow=${flowCookie(returnTo)}` },
     });
     return GET(req);
   }
 
-  it('blocks an org owner with org_no_portal', async () => {
+  describe('an invited account', () => {
+    const tokenSet = (claims: Record<string, unknown>) => ({
+      accessToken: fakeJwt(claims),
+      refreshToken: 'refresh-1',
+      idToken: 'id-1',
+      accessTokenExp: Date.now() + 60_000,
+      refreshTokenExp: Date.now() + 60_000,
+    });
+
+    function signIn(): Promise<Response> {
+      exchangeCode.mockResolvedValue({
+        ok: true,
+        value: {
+          tokens: tokenSet({ sub: 'owner-1', decision_made: 'invited' }),
+          claims: { sub: 'owner-1' },
+        },
+      });
+      const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
+        headers: { cookie: `oidc_flow=${flowCookie('/console')}` },
+      });
+      return GET(req);
+    }
+
+    it('is activated, its tokens refreshed, and it lands with the new access', async () => {
+      activateInviteeMock.mockResolvedValue('active');
+      refresh.mockResolvedValue({
+        ok: true,
+        value: tokenSet({ sub: 'owner-1', realm_access: { roles: ['org_owner'] } }),
+      });
+      const res = await signIn();
+      expect(activateInviteeMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith('refresh-1');
+      expect(res.headers.get('location')).toBe('http://portal.test/console');
+      expect(create).toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when the email was not verified', async () => {
+      activateInviteeMock.mockResolvedValue('email_not_verified');
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_email_not_verified',
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when activation fails', async () => {
+      activateInviteeMock.mockResolvedValue('failed');
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_activation_failed',
+      );
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when the refresh after activation fails', async () => {
+      activateInviteeMock.mockResolvedValue('active');
+      refresh.mockResolvedValue({ ok: false, error: { code: 'REFRESH_FAILED', message: 'x' } });
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_activation_failed',
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  it('signs an org owner in and lands them on the console (Phase 5)', async () => {
     const res = await blockedWith(['org_owner']);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('http://portal.test/login?error=org_no_portal');
-    expect(create).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toBe('http://portal.test/console');
+    expect(create).toHaveBeenCalled();
+  });
+
+  it('keeps an org owner on a requested console page', async () => {
+    const res = await blockedWith(['org_owner'], '/console/orgs');
+    expect(res.headers.get('location')).toBe('http://portal.test/console/orgs');
   });
 
   it('blocks a Signals participant with signals_account_no_portal', async () => {

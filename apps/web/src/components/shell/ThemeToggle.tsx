@@ -5,13 +5,9 @@ import { I } from '../../icons';
 import { useThemeMode } from '../../lib/theme-mode';
 
 /**
- * Light/dark switch. Extracted from `Topbar` so the public login page can
- * offer the same control without duplicating the markup — two copies would
- * have drifted the moment either one was restyled.
+ * Light/dark switch. Used by `Topbar` and the public login page.
  *
- * Deliberately no label: it sits beside the language switcher in a corner
- * slot, where a text label would compete with the brand lockup. The state is
- * carried by the icon plus `title`/`aria-label`.
+ * Has no text label; the icon and `title`/`aria-label` carry the state.
  */
 export function ThemeToggle() {
   const { mode, toggle } = useThemeMode();

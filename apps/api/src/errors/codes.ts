@@ -1,11 +1,10 @@
 /**
- * Central error code catalogue.
+ * Error code catalogue for the api app.
  *
- * Every domain-specific failure has one entry here. Routes throw
- * `httpError(ERR.<KEY>)` and the global error handler renders the canonical
- * envelope. Adding a new error = adding a row here.
+ * Each failure has one entry. Routes throw `httpError(ERR.<KEY>)` and the
+ * global error handler renders the envelope.
  *
- * Layered fields per code:
+ * Fields per code:
  *   - `code`     machine identifier surfaced in API response and logs
  *   - `status`   HTTP status the handler returns
  *   - `title`    short human-readable headline shown in the UI
@@ -173,7 +172,7 @@ export const ERR = {
     status: 403,
     title: 'Access denied',
     detail: 'You do not have permission to perform this action.',
-    hint: 'JWT aggregator_id claim does not match path id, or role missing.',
+    hint: 'JWT user_id claim does not match path id, or role missing.',
   },
   NOT_APPROVED: {
     code: 'NOT_APPROVED',
@@ -183,24 +182,86 @@ export const ERR = {
       'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
     hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
   },
-  AGGREGATOR_TYPE_MISMATCH: {
-    code: 'AGGREGATOR_TYPE_MISMATCH',
+  USER_NOT_PROVISIONED: {
+    code: 'USER_NOT_PROVISIONED',
     status: 403,
-    title: 'Wrong participant type',
-    detail:
-      'Your aggregator is registered for a different participant type. You can only upload or create registration links for the type you registered as.',
-    hint: 'Request body participant_type does not match the JWT `aggregator_type` claim.',
+    title: 'Account not set up',
+    detail: 'Your sign-in is not linked to an account here yet. Contact the network administrator.',
+    hint: 'No user_id claim and no user_identities row for (IDP_PROVIDER, sub). The boot reconcile (root / Default owners) or org create links admins; nothing links by email.',
   },
-  AGGREGATOR_TYPE_MISSING: {
-    code: 'AGGREGATOR_TYPE_MISSING',
+  NOT_ORG_ADMIN: {
+    code: 'NOT_ORG_ADMIN',
     status: 403,
-    title: 'Aggregator type not set',
+    title: 'No active organisation',
+    detail: 'Your account does not manage an active organisation.',
+    hint: 'Admin account resolved by subject but owns no active org (pending, rejected or released). See services/auth/actor.',
+  },
+  ACTING_ACCOUNT_INVALID: {
+    code: 'ACTING_ACCOUNT_INVALID',
+    status: 403,
+    title: 'Account not available',
+    detail: 'You cannot act as this account. Switch back to your own account and try again.',
+    hint: 'x-acting-account is not a guid, differs from the user_id claim, is not the coordinator linked to this login, the login holds no owner account, or the coordinator or its org is not active. See services/auth/acting.ts.',
+  },
+  NOT_ORG_OWNER: {
+    code: 'NOT_ORG_OWNER',
+    status: 403,
+    title: 'Not your organisation',
+    detail: 'You can add yourself only to an organisation you own.',
+    hint: 'POST /v1/user/self/add: the caller is not an admin, does not own org_id, or the token subject is not linked to the caller. See services/registration/owner-self-add.ts.',
+  },
+  ORG_NOT_ELIGIBLE: {
+    code: 'ORG_NOT_ELIGIBLE',
+    status: 403,
+    title: 'Organisation not available',
+    detail: 'You cannot add yourself to this organisation.',
+    hint: 'POST /v1/user/self/add: the org is Default or not active, or the caller owns the root. See services/registration/owner-self-add.ts.',
+  },
+  OWNER_PHONE_REQUIRED: {
+    code: 'OWNER_PHONE_REQUIRED',
+    status: 400,
+    title: 'Phone number needed',
+    detail: 'Add a phone number to your contact details before adding yourself to the team.',
+    hint: "POST /v1/user/self/add: the owner's contact has no phone, and a coordinator contact needs one (the OTP login key).",
+  },
+  ALREADY_COORDINATOR: {
+    code: 'ALREADY_COORDINATOR',
+    status: 409,
+    title: 'Already on a team',
+    detail: 'You already have a team account.',
+    hint: "POST /v1/user/self/add: the owner's contact or login already has a coordinator account (active, in another org, or on another login). One coordinator account per contact.",
+  },
+  SELF_ADD_DISABLED: {
+    code: 'SELF_ADD_DISABLED',
+    status: 403,
+    title: 'Not available',
+    detail: 'Adding yourself to your team is not enabled on this instance.',
+    hint: 'POST /v1/user/self/add: OWNER_SELF_ADD_MODE is `off` on this instance.',
+  },
+  SELF_ADD_UNAVAILABLE: {
+    code: 'SELF_ADD_UNAVAILABLE',
+    status: 503,
+    title: 'Could not add you',
+    detail: 'You could not be added to the team right now. Please try again.',
+    hint: 'POST /v1/user/self/add: a store, Signals or the consent config failed. A pending row left behind is reactivated by the next attempt. See the user.self_add log.',
+  },
+  DOMAIN_NOT_SERVED: {
+    code: 'DOMAIN_NOT_SERVED',
+    status: 403,
+    title: 'Profile type not served',
     detail:
-      'Your account is missing its aggregator type. Sign out and back in to refresh your session; if the problem persists, contact support.',
-    hint: 'JWT has no `aggregator_type` claim. KC user attribute missing or mapper not configured. Refresh required after backfill.',
+      'Your account does not serve this profile type. You can only work with the profile types your account serves. If they were changed recently, sign out and back in.',
+    hint: "The requested domain is not in the token's aggregator_type claim (empty = none). The claim changes at the next login.",
   },
 
   // ── Registration ────────────────────────────────────────────────────────
+  NAME_INVALID_CHARACTERS: {
+    code: 'NAME_INVALID_CHARACTERS',
+    status: 400,
+    title: 'Name has symbols we cannot accept',
+    detail: 'Please remove symbols such as ( ) < > & / # from the name and try again.',
+    hint: 'Keycloak refused the first or last name (error-person-name-invalid-character).',
+  },
   USER_EXISTS: {
     code: 'USER_EXISTS',
     status: 409,
@@ -222,7 +283,7 @@ export const ERR = {
     status: 400,
     title: 'Invalid phone number',
     detail: 'The phone number format is not recognised. Include country code, e.g. +91…',
-    hint: 'normalisePhone() failed E.164 parse. Check libphonenumber output.',
+    hint: 'parsePhone() refused it: wrong length or range for its country, a country not in PHONE_COUNTRIES, or not a mobile.',
   },
 
   // ── IDP (Keycloak) ──────────────────────────────────────────────────────
@@ -277,9 +338,7 @@ export const ERR = {
     detail: 'Failed to send your message. Please try again later.',
     hint: 'The mail transport rejected or failed the send.',
   },
-  // One code per rejection reason rather than a single generic 400, so the form
-  // can tell the submitter what to change (#551). The handler overrides `detail`
-  // with the specific limit or filename.
+  // One code per reason so the form can say what to change. The handler sets `detail` to the limit or filename.
   ATTACHMENT_COUNT_EXCEEDED: {
     code: 'ATTACHMENT_COUNT_EXCEEDED',
     status: 400,
@@ -349,29 +408,6 @@ export const ERR = {
     hint: 'mailer.send returned non-ok. Check SMTP config + provider response.',
   },
 
-  // ── Approval flow ───────────────────────────────────────────────────────
-  APPROVAL_TOKEN_INVALID: {
-    code: 'APPROVAL_TOKEN_INVALID',
-    status: 400,
-    title: 'Invalid approval link',
-    detail: 'This approval link is malformed or has been tampered with.',
-    hint: 'JWT verification failed. Check signing key rotation.',
-  },
-  APPROVAL_TOKEN_EXPIRED: {
-    code: 'APPROVAL_TOKEN_EXPIRED',
-    status: 410,
-    title: 'Approval link expired',
-    detail: 'This approval link has expired. Ask the applicant to resubmit.',
-    hint: 'JWT exp in past. TTL is 1h.',
-  },
-  APPROVAL_TOKEN_USED: {
-    code: 'APPROVAL_TOKEN_USED',
-    status: 409,
-    title: 'Already processed',
-    detail: 'This registration has already been approved or rejected.',
-    hint: 'Decision row exists. Single-use token replayed.',
-  },
-
   // ── Generic resource ────────────────────────────────────────────────────
   NOT_FOUND: {
     code: 'NOT_FOUND',
@@ -392,8 +428,8 @@ export const ERR = {
     status: 409,
     title: 'Already an organisation owner',
     detail:
-      'This email or phone already belongs to an organisation owner. Request coordinator access from your organisation instead of registering again.',
-    hint: 'Coordinator submit matched an aggregator_orgs.owner_email (spec A4). Owner→coordinator graduation is deferred.',
+      'This email or phone already belongs to an organisation owner. Ask your organisation to invite you as a user instead of registering again.',
+    hint: "Coordinator submit matched an org owner's email (the owner's admin account contact; spec A4). Owner→coordinator graduation is deferred.",
   },
   ORG_SLUG_TAKEN: {
     code: 'ORG_SLUG_TAKEN',
@@ -401,7 +437,7 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with a matching name is already registered or pending. Try a different name.',
-    hint: 'aggregator_orgs partial-unique slug collision over non-terminal rows (spec A9).',
+    hint: 'organisations partial-unique slug collision over non-terminal rows (spec A9).',
   },
   ORG_NAME_TAKEN: {
     code: 'ORG_NAME_TAKEN',
@@ -409,26 +445,62 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with this name is already registered or pending. Please choose a different name.',
-    hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
+    hint: 'organisations partial-unique name (case-insensitive) collision over non-terminal aggregator orgs.',
   },
-  REGISTRATION_COOLING: {
-    code: 'REGISTRATION_COOLING',
+  ORG_DEPTH_LIMIT: {
+    code: 'ORG_DEPTH_LIMIT',
     status: 409,
-    title: 'Please try again later',
+    title: 'Too many levels',
+    detail: 'The organisation cannot be placed this deep. Choose a parent higher in the tree.',
+    hint: 'Store DEPTH_LIMIT: parent depth + 1 (+ subtree height on a move) exceeds organisation.hierarchy.max_depth.',
+  },
+  ORG_CHILD_LIMIT: {
+    code: 'ORG_CHILD_LIMIT',
+    status: 409,
+    title: 'Parent organisation is full',
     detail:
-      'A recent registration with these details was declined. You can register again after the cooling period.',
-    hint: 'A rejected record for this email/phone/owner_email exists and now - rejected_at < REGISTRATION_COOLING_MINUTES. See response.error.fields.retry_after for the ISO timestamp.',
+      'The selected parent organisation cannot take more organisations. Choose another parent.',
+    hint: 'Store CHILD_LIMIT: pending + active children of the parent (Default excluded) reached organisation.hierarchy.max_children.',
+  },
+  ORG_TOTAL_LIMIT: {
+    code: 'ORG_TOTAL_LIMIT',
+    status: 409,
+    title: 'Registration closed',
+    detail: 'This network is not accepting new organisations right now.',
+    hint: 'Store TOTAL_LIMIT: pending + active aggregator orgs (root and Default excluded) reached organisation.hierarchy.max_total_orgs.',
+  },
+  ORG_PARENT_CYCLE: {
+    code: 'ORG_PARENT_CYCLE',
+    status: 400,
+    title: 'Invalid parent',
+    detail: 'An organisation cannot be moved under itself or an organisation below it.',
+    hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
   },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,
     title: 'Organisation unavailable',
-    detail:
-      'The selected organisation is not accepting coordinators. Contact the organisation owner.',
+    detail: 'The selected organisation is not accepting users. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
+  NO_PROFILE_TYPES: {
+    code: 'NO_PROFILE_TYPES',
+    status: 409,
+    title: 'No profile types set',
+    detail: "Set the coordinator's profile types before approving.",
+    hint: "The coordinator's serves holds no domain id of this network. Set it with PATCH /v1/user/metadata/update/:id, then approve.",
+  },
 
-  // ── Coordinator invites (#700) ────────────────────────────────────────────
+  ORG_DETAILS_READ_ONLY: {
+    code: 'ORG_DETAILS_READ_ONLY',
+    status: 409,
+    title: 'Organisation details are read-only here',
+    detail:
+      "url, locations, company and GST number belong to the user's organisation and cannot be changed from the user profile.",
+    hint: 'Profile PATCH carried an org-detail field (migration 0028); the org owner edits them. `fields.fields` lists the offending keys.',
+  },
+
+  // ── Coordinator invites ──────────────────────────────────────────────────
   INVITE_INVALID: {
     code: 'INVITE_INVALID',
     status: 400,
@@ -450,19 +522,26 @@ export const ERR = {
     detail: 'This invitation has already been used. If you already registered, sign in instead.',
     hint: 'Invite row not pending (consumed/revoked/expired) or the pending→consumed CAS lost a race (§4.4.6).',
   },
-  GRANT_INVALID: {
-    code: 'GRANT_INVALID',
+  INVITE_EMAIL_MISMATCH: {
+    code: 'INVITE_EMAIL_MISMATCH',
     status: 400,
-    title: 'Invalid link',
-    detail: 'This invite-management link is not valid. Use the link from your approval email.',
-    hint: 'grant-token signature/audience/sub verify failed (aggregator-grant).',
+    title: 'Use the invited email',
+    detail: 'Register with the email address this invitation was sent to.',
+    hint: 'Submitted email differs from the invite token email claim; the invited address is enforced on accept.',
   },
-  GRANT_EXPIRED: {
-    code: 'GRANT_EXPIRED',
-    status: 410,
-    title: 'Link expired',
-    detail: 'This invite-management link has expired. Request a fresh link to continue.',
-    hint: 'grant-token exp elapsed (GRANT_TOKEN_TTL_SECONDS). Recovery re-mails a fresh grant to the registered owner (§6).',
+  EMAIL_NOT_VERIFIED: {
+    code: 'EMAIL_NOT_VERIFIED',
+    status: 403,
+    title: 'Verify your email',
+    detail: 'Sign in with the code we email you to verify your email address, then try again.',
+    hint: 'Invited login has emailVerified=false: it signed in by phone, or the OTP authenticator does not mark the email verified.',
+  },
+  NOT_INVITED: {
+    code: 'NOT_INVITED',
+    status: 403,
+    title: 'Nothing to activate',
+    detail: 'This account was not created from an invitation, or it has already been decided.',
+    hint: 'Keycloak decision_made is not "invited", or the coordinator / org row is not pending.',
   },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────
@@ -514,12 +593,90 @@ export const ERR = {
     detail: 'The selected registration mode is not declared in this network configuration.',
     hint: 'Create body referenced a mode key not present in aggregator.config.yaml registration_modes, or one this deployment withholds via AGGREGATOR_ONBOARDING_ENABLED. Surface the declared keys via fields.declared and the usable subset via fields.enabled.',
   },
+  INVALID_VOICE_BOT: {
+    code: 'INVALID_VOICE_BOT',
+    status: 400,
+    title: 'Invalid voice bot',
+    detail: 'The selected voice bot is not configured for this link’s domain.',
+    hint: 'Create body named a voice_bot_key that is not in aggregator.voice_bots or whose domains do not include the link domain. fields.configured lists the keys serving that domain.',
+  },
+  VOICE_BOT_REQUIRED: {
+    code: 'VOICE_BOT_REQUIRED',
+    status: 400,
+    title: 'Choose a voice bot',
+    detail: 'Several voice bots serve this domain and none is the default, so one must be chosen.',
+    hint: 'Create body for a voice-offering mode omitted voice_bot_key, the domain has more than one bot, and default_voice_bots names none. Send voice_bot_key, or set a default for the domain.',
+  },
+  VOICE_BOT_UNAVAILABLE: {
+    code: 'VOICE_BOT_UNAVAILABLE',
+    status: 409,
+    title: 'Voice registration is unavailable',
+    detail:
+      'This link cannot take a voice request right now. Please register with the form instead.',
+    hint: 'The link mode does not offer voice, or no bot resolves for the link (removed or never configured). The public page falls back to the form.',
+  },
   INVALID_CONFIG: {
     code: 'INVALID_CONFIG',
     status: 400,
     title: 'Invalid configuration',
     detail: 'The combination of fields supplied is not allowed by the API.',
     hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
+  },
+  RBAC_NOT_ENABLED: {
+    code: 'RBAC_NOT_ENABLED',
+    status: 503,
+    title: 'Access control is off',
+    detail: 'Access control is not enabled on this instance, so roles cannot be changed.',
+    hint: 'RBAC_MODE=off: the role catalogue is not loaded. Set RBAC_MODE=log or enforce (docs/rbac/).',
+  },
+  ROLE_UNKNOWN: {
+    code: 'ROLE_UNKNOWN',
+    status: 400,
+    title: 'Unknown role',
+    detail: 'That role does not exist on this instance.',
+    hint: 'role_key is not a key of the role table (built-in roles are seeded by migration 0031).',
+  },
+  ROLE_EXISTS: {
+    code: 'ROLE_EXISTS',
+    status: 409,
+    title: 'Role already exists',
+    detail: 'A role with that key already exists.',
+    hint: 'Role keys are unique across built-in and custom roles.',
+  },
+  ROLE_BUILTIN: {
+    code: 'ROLE_BUILTIN',
+    status: 409,
+    title: 'Built-in role',
+    detail: 'Built-in roles cannot be changed or deleted here.',
+    hint: 'Built-in roles are seeded by migration 0031 and changed by a new migration; create a custom role instead.',
+  },
+  ROLE_IN_USE: {
+    code: 'ROLE_IN_USE',
+    status: 409,
+    title: 'Role in use',
+    detail: 'This role is assigned to someone, so it cannot be deleted.',
+    hint: 'Revoke its live assignments first.',
+  },
+  ROLE_LIMIT_REACHED: {
+    code: 'ROLE_LIMIT_REACHED',
+    status: 409,
+    title: 'Too many custom roles',
+    detail: 'This instance already has the most custom roles allowed.',
+    hint: 'MAX_CUSTOM_ROLES (50); delete an unused custom role first.',
+  },
+  ROLE_INVALID: {
+    code: 'ROLE_INVALID',
+    status: 400,
+    title: 'Invalid role',
+    detail: 'The role breaks a role rule.',
+    hint: 'See fields.issues; rules: docs/rbac/rbac-permissions-and-roles.md §4.',
+  },
+  ROLE_ASSIGNMENT_NOT_ALLOWED: {
+    code: 'ROLE_ASSIGNMENT_NOT_ALLOWED',
+    status: 409,
+    title: 'Role cannot be assigned',
+    detail: 'This role cannot be given to this user in this organisation.',
+    hint: 'A role rule refused it; see fields.reason (base_role, not_member, self, account_type, org_type, days_exceed_max). Rules: docs/rbac/rbac-permissions-and-roles.md §4.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 

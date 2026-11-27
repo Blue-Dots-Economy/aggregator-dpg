@@ -1,19 +1,17 @@
 /**
- * Contact-support endpoints (post-login).
+ * Contact-support endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
- *   GET  /v1/support/config → whether SUPPORT_EMAIL is set, plus the attachment
- *                             limits and accepted content types (#551).
- *   POST /v1/support        → emails the submission to SUPPORT_EMAIL, with any
- *                             attached image/video/audio files.
+ *   GET  /v1/support/config → whether SUPPORT_EMAIL is set, plus attachment
+ *                             limits and accepted content types.
+ *   POST /v1/support        → emails the submission and any image/video/audio
+ *                             attachments to SUPPORT_EMAIL.
  *
- * Any authenticated coordinator may submit — approval status is
- * intentionally not required (an aggregator awaiting approval may still
- * need to contact support). Belongs to `@aggregator-dpg/api`.
+ * An active coordinator, an organisation owner or the network admin may submit.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import {
   renderSupportRequest,
@@ -21,6 +19,7 @@ import {
   getEmailBrand,
 } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
+import { ContactPhoneField } from '../services/phone.js';
 import { errorResponses } from '../errors/openapi.js';
 import { supportEmail, supportCc, supportPortalLink, supportAttachmentLimits } from '../config.js';
 import { checkSupportRate } from '../services/support-rate.js';
@@ -30,18 +29,19 @@ import {
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { requireActor, type ResolvedCaller } from '../services/auth/actor/index.js';
 
 const SupportRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
-    email: z.string().email().max(320).optional(),
-    phone: z.string().min(3).max(20).optional(),
+    email: z.email().max(320).optional(),
+    phone: ContactPhoneField.optional(),
     type: z.enum(['complaint', 'support_request']),
     details: z.string().trim().min(1).max(5000),
     consent: z.literal(true),
-    // Count/size/type limits are applied in the handler by
-    // validateSupportAttachments so each rejection carries its own error code
-    // and a detail naming the offending file (#551).
+    // Count, size and type limits are checked in the handler by
+    // validateSupportAttachments, so each rejection names the file.
     attachments: z
       .array(
         z.object({
@@ -54,9 +54,8 @@ const SupportRequestSchema = z
       .optional(),
   })
   .strict()
-  // At least one contact channel is required so support can reply. A failed
-  // refine surfaces as a 400 SCHEMA_VALIDATION envelope via the global error
-  // handler (see app.ts), consistent with every other zod body rejection.
+  // At least one contact channel is required so support can reply. A failure
+  // is a 400 SCHEMA_VALIDATION.
   .refine((body) => Boolean(body.email) || Boolean(body.phone), {
     message: 'Provide at least one of email or phone so support can reach you.',
     path: ['email'],
@@ -67,10 +66,12 @@ const SupportRequestSchema = z
  *
  * @param app - The Fastify instance to attach routes to.
  */
-export async function registerSupportRoutes(app: FastifyInstance): Promise<void> {
+export function registerSupportRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/support/config',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['support'],
         summary: 'Whether the contact-support form is enabled',
@@ -86,14 +87,13 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
             /** Picker hint only — validation is MIME-based. */
             allowedExtensions: z.array(z.string()),
           }),
-          ...errorResponses(401),
+          ...errorResponses(401, 403),
         },
       },
     },
     async (req, reply) => {
-      await requireAuth(req);
-      // Limits are served rather than duplicated in the web bundle, so the
-      // form's validation cannot disagree with this API's.
+      await requireSupportCaller(req);
+      // Served to the web form so its checks match this API's.
       const limits = supportAttachmentLimits();
       return reply.send({
         enabled: Boolean(supportEmail()),
@@ -108,6 +108,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
   app.post(
     '/v1/support',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['support'],
         summary: 'Send a contact-support message',
@@ -117,17 +118,16 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         body: SupportRequestSchema,
         response: {
           201: z.object({ ok: z.boolean(), reference: z.string() }),
-          ...errorResponses(400, 401, 429, 502, 503),
+          ...errorResponses(400, 401, 403, 429, 502, 503),
         },
       },
-      // Fastify's 1MB default would reject any attachment submission (base64
-      // inflates a 5MB file to ~6.7MB). Derived from the configured budget so
-      // raising the cap cannot turn into a silent 413; other routes keep 1MB.
+      // Body limit derived from the attachment budget (base64 adds about a third).
+      // Other routes keep Fastify's 1MB default.
       bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      const log = req.log.child({ operation: 'support.submit', actor: auth.userId });
+      const { actor, auth } = await requireSupportCaller(req);
+      const log = req.log.child({ operation: 'support.submit', actor: auth.subject });
       const start = Date.now();
 
       const recipient = supportEmail();
@@ -135,26 +135,14 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         throw httpError('SUPPORT_NOT_CONFIGURED');
       }
 
-      // Validated by the route's `body` zod schema. Use the SUBMITTED
-      // name/email/phone — the web form prefills them from the session but
-      // lets the coordinator correct them before sending.
-      const { name, email, phone, type, details, attachments } = req.body as z.infer<
-        typeof SupportRequestSchema
-      >;
+      // Validated by the route's `body` schema. Use the submitted name, email and
+      // phone; the coordinator may have edited the prefilled values.
+      const { name, email, phone, type, details, attachments } = req.body;
 
-      // Per-coordinator cap, counted BEFORE the body is validated, deliberately.
-      // Fastify (and the BFF proxy ahead of it) has already buffered and parsed
-      // the payload by the time this runs, so a rejected submission has cost the
-      // same as an accepted one — if only accepted ones counted, a caller could
-      // post oversized rubbish (a fourth file, a disallowed content type) without
-      // limit and never spend a slot. The web form validates the same rules before
-      // submitting, so a legitimate coordinator does not reach here with an
-      // invalid body.
-      //
-      // Still after the 503: an instance with no support address should not burn
-      // anyone's quota. The limiter fails open on a Redis error — an outage must
-      // not silence a complaint.
-      const rate = await checkSupportRate(auth.userId);
+      // Count against the per-user cap before validating the body, so
+      // rejected submissions also use a slot. Runs after the 503 check. Fails open
+      // on a Redis error.
+      const rate = await checkSupportRate(auth.subject);
       if (!rate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many support submissions; please try again later.',
@@ -176,8 +164,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         details,
         reference,
         link: supportPortalLink(),
-        // Brand short-name seeded from config-loader at server boot
-        // (setEmailBrand); falls back to the generic default under test.
+        // Brand short-name set at boot (setEmailBrand).
         teamName: getEmailBrand().short_name,
         submittedAt: new Date(),
         attachments: checked.attachments.map(({ filename, bytes }) => ({ filename, bytes })),
@@ -216,7 +203,8 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId ?? null,
+        caller_type: actor.userType,
         reference,
         attachment_count: checked.attachments.length,
         attachment_bytes: checked.attachments.reduce((sum, a) => sum + a.bytes, 0),
@@ -226,13 +214,17 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
   );
 }
 
-/** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `dashboard.ts`, `aggregator-profile.ts`). */
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await authenticate(req);
-  if (result.ok) return result.context;
-  const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
-  throw httpError(code, {
-    detail: result.error.message,
-    fields: { reason: result.error.code },
-  });
+/**
+ * Returns the caller, resolved as the console resolves it: an active
+ * coordinator, an organisation owner or the network admin.
+ *
+ * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
+ *   account or wrong client), `USER_NOT_PROVISIONED`, `NOT_APPROVED` (a
+ *   coordinator not active yet), `NOT_ORG_ADMIN` (an owner with no active
+ *   organisation).
+ */
+async function requireSupportCaller(req: FastifyRequest): Promise<ResolvedCaller> {
+  const caller = await requireActor(req, { allowCoordinator: true });
+  await recordRouteCaller(req, callerFromAny(caller.auth));
+  return caller;
 }

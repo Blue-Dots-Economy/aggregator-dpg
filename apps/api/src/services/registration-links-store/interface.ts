@@ -1,33 +1,32 @@
 /**
- * Registration links store contract.
+ * Registration links store contract (`@aggregator-dpg/api`).
  *
- * Persistence port for the `registration_links` table. Owns slug uniqueness
- * and the status lifecycle (draft → live → retired).
+ * Stores the `registration_links` table. Owns slug uniqueness and the status
+ * lifecycle (draft, live, retired).
  */
 
 export type RegistrationLinkStatus = 'draft' | 'live' | 'retired';
 
 /**
- * Per-link admin-facing registration mode key. The mode → form-shape
- * mapping lives in network config (aggregator.config.yaml under
- * `registration_modes`); unknown keys at read time fall back to `form`
- * shape via resolveSubmissionShape() (see services/registration-mode).
- * Open snake_case identifier; not constrained to a fixed enum.
+ * Per-link registration mode key, an open snake_case identifier.
+ *
+ * Network config (`registration_modes`) maps each key to a form shape.
+ * Unknown keys fall back via resolveSubmissionShape() in services/registration-mode.
  */
 export type RegistrationLinkRegistrationMode = string;
 
 export interface RegistrationLink {
   id: string;
-  aggregatorId: string;
+  userId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
   /** See {@link RegistrationLinkRegistrationMode}. */
   registrationMode: RegistrationLinkRegistrationMode;
+  /** Voice bot key chosen at create; immutable afterwards. `null` when the link has none. */
+  voiceBotKey: string | null;
   /**
-   * Legacy (#650): QR is now generated client-side, so this is read but never
-   * written going forward. Retained one release for legacy rows — do NOT add a
-   * write path. Dropped in a follow-up migration.
+   * Read only, for older rows; the QR is generated client-side. Do not add a write path.
    */
   qrObjectKey: string | null;
   status: RegistrationLinkStatus;
@@ -38,21 +37,23 @@ export interface RegistrationLink {
 }
 
 export interface CreateRegistrationLinkInput {
-  aggregatorId: string;
+  userId: string;
   slug: string;
   domain: string;
   context: Record<string, unknown>;
   status?: RegistrationLinkStatus;
   /** Defaults to the network's `form` mode when omitted. */
   registrationMode?: RegistrationLinkRegistrationMode;
+  /** Voice bot key; omitted is stored as `null`. */
+  voiceBotKey?: string | null;
   expiresAt?: Date | null;
   createdBy: string;
 }
 
 /**
- * Partial patch shape accepted by {@link RegistrationLinksStoreBase.updateDraft}.
- * Only fields that should be mutated on a draft are present. `null` on
- * `expiresAt` clears the expiry; omitting the key leaves the column untouched.
+ * Patch accepted by {@link RegistrationLinksStoreBase.updateDraft}.
+ *
+ * `null` on `expiresAt` clears the expiry; an omitted key is left unchanged.
  */
 export interface UpdateDraftInput {
   slug?: string;
@@ -80,64 +81,55 @@ export interface ListRegistrationLinksResult {
 
 export abstract class RegistrationLinksStoreBase {
   /**
-   * Create a new registration link. Returns SLUG_COLLISION on slug uniqueness
-   * violation so the caller can retry with a fresh suffix.
+   * Creates a registration link.
+   *
+   * Returns SLUG_COLLISION when the slug is taken, so the caller can retry.
    */
   abstract create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>>;
   /**
-   * Find a link by id, scoped to the calling aggregator. Cross-aggregator
-   * access is enforced at the store boundary so route-layer mistakes can't
-   * leak rows.
-   */
-  abstract findById(
-    id: string,
-    aggregatorId: string,
-  ): Promise<StoreResult<RegistrationLink | null>>;
-  /**
-   * Find a link by its public slug. Used by the public resolve and submit
-   * endpoints — no aggregator scoping; the slug is the access token.
+   * Finds a link by id, scoped to the calling aggregator.
    *
-   * @deprecated Slug is now unique per-aggregator (migration 0008). Use
-   *   {@link findByOrgAndSlug} for the new `/<org_slug>/<slug>` public URL.
+   * Scoping is enforced here so a route mistake cannot leak another aggregator's rows.
+   */
+  abstract findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>>;
+  /**
+   * Finds a link by its public slug, with no aggregator scoping.
+   *
+   * @deprecated Slugs are unique per aggregator. Use {@link findByOrgAndSlug}
+   *   for the `/<org_slug>/<slug>` public URL.
    */
   abstract findBySlug(slug: string): Promise<StoreResult<RegistrationLink | null>>;
 
   /**
-   * Public-URL lookup keyed by (aggregator's `org_slug`, registration link
-   * slug). JOINs `aggregators` on `org_slug` so the route layer doesn't need
-   * a separate aggregator-resolve step.
+   * Finds a link by the coordinator's `signalstack_org_slug` and the link slug.
    */
   abstract findByOrgAndSlug(
     orgSlug: string,
     slug: string,
   ): Promise<StoreResult<RegistrationLink | null>>;
   /**
-   * Patch the editable fields on a draft row (`slug`, `context`, `expires_at`).
-   * Live + retired rows reject with `NOT_FOUND` so the caller can surface a
-   * "edits are only allowed on drafts" error without leaking the row's
-   * existence. Slug uniqueness violations return `SLUG_COLLISION`, mirroring
-   * {@link create}, so the caller can retry with a fresh suffix.
+   * Updates the editable fields of a draft (`slug`, `context`, `expires_at`).
+   *
+   * Live and retired rows return `NOT_FOUND`. A taken slug returns `SLUG_COLLISION`.
    */
   abstract updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>>;
   /**
-   * Paginated list scoped to one aggregator. Most-recent first. Optional
-   * status filter narrows to draft/live/retired.
+   * Lists one aggregator's links, newest first, optionally filtered by status.
    */
   abstract list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<ListRegistrationLinksResult>>;
   /**
-   * Flip a link's status. Idempotent — calling with the current status
-   * returns the row unchanged.
+   * Sets a link's status. Setting the current status returns the row unchanged.
    */
   abstract updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>>;
 }

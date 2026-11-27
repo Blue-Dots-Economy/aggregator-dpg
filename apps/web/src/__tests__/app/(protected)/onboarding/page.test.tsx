@@ -12,13 +12,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
+import { AuthProvider } from '@/lib/auth-context';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock('@/components/shell/Topbar', () => ({
@@ -75,8 +78,10 @@ import OnboardingPage from '@/app/(protected)/onboarding/page';
 
 function renderPage() {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
-      <OnboardingPage />
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <AuthProvider initialUser={{ id: 'u1', name: 'C', org: '', email: 'c@example.com' }}>
+        <OnboardingPage />
+      </AuthProvider>
     </NextIntlClientProvider>,
   );
 }
@@ -84,8 +89,10 @@ function renderPage() {
 describe('<OnboardingPage />', () => {
   beforeEach(() => {
     pushMock.mockClear();
+    useRegistrationLinks.mockClear();
+    useRecentBulkUploads.mockClear();
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
   });
 
   afterEach(() => {
@@ -181,14 +188,39 @@ describe('<OnboardingPage />', () => {
     expect(screen.getByText(/Last link 2d ago/)).toBeInTheDocument();
   });
 
-  it('falls back to the aggregator config default domain when the profile has not loaded yet', () => {
+  it('shows the loading text and reads no links until the profile has loaded', () => {
     useProfileRaw.mockReturnValue({ data: undefined });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
 
     renderPage();
 
-    expect(useRegistrationLinks).toHaveBeenCalledWith('seeker');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
+    expect(useRegistrationLinks).not.toHaveBeenCalled();
+  });
+
+  it('shows the no-access notice instead of the cards for a coordinator with no profile types', () => {
+    useProfileRaw.mockReturnValue({ data: { type: null, serves: [] } });
+    useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
+
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: "You don't have access yet" })).toBeInTheDocument();
+    expect(useRegistrationLinks).not.toHaveBeenCalled();
+    expect(useRecentBulkUploads).not.toHaveBeenCalled();
+  });
+
+  it('counts links for the stored active domain of a multi-domain coordinator', async () => {
+    window.localStorage.setItem('bd:active-domain', 'provider');
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
+    useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
+
+    renderPage();
+
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+    window.localStorage.clear();
   });
 
   it('navigates to the bulk-uploads and links sub-pages on CTA click', async () => {

@@ -1,5 +1,5 @@
 /**
- * Aggregator-specific DTOs and Zod schemas — actor / role / status enums,
+ * Coordinator-specific DTOs and Zod schemas — actor / role / status enums,
  * consent records, and the registration payload shape that drives the
  * `aggregators` table.
  *
@@ -24,18 +24,37 @@ export const ActorTypeSchema = z.enum(['aggregator', 'seeker', 'provider']);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
 /**
- * Aggregator participant focus / domain id. Open string — the
- * signalstack network's `network.json` declares the valid values per
- * deployment (blue_dot: seeker/provider; yellow_dot: learner/tutor;
- * etc.). Callers validate against `getNetworkConfig().domainIds` at
- * the route boundary instead of pinning a closed enum here.
+ * Coordinator domain id. An open string: each network's `network.json` lists
+ * the valid values. Callers validate against `getNetworkConfig().domainIds`.
  */
 export const RoleTypeSchema = z.string().min(1);
 export type RoleType = z.infer<typeof RoleTypeSchema>;
 
-/** Alias kept for new code paths — same shape as {@link RoleTypeSchema}. */
+/** Alias of {@link RoleTypeSchema}. */
 export const DomainIdSchema = RoleTypeSchema;
 export type DomainId = RoleType;
+
+/**
+ * A profile type a coordinator serves: a network domain id such as `seeker`.
+ * A coordinator serves one or more; none means it can act on no participants.
+ */
+export const ProfileTypeSchema = z.string().min(1);
+export type ProfileType = z.infer<typeof ProfileTypeSchema>;
+
+/**
+ * The network domains a coordinator serves, in network order.
+ *
+ * Ids that are not in the network are dropped, so the result is always a
+ * subset of `domainIds`. An empty `serves` serves nothing. The API, the portal
+ * and the console use it, so all three read `serves` the same way.
+ *
+ * @param serves - The coordinator's stored domain ids.
+ * @param domainIds - The active network's domain ids, in declaration order.
+ * @returns The served domain ids.
+ */
+export function servedDomainIds(serves: readonly string[], domainIds: readonly string[]): string[] {
+  return domainIds.filter((d) => serves.includes(d));
+}
 
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
 export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;
@@ -46,25 +65,22 @@ export type DecisionMade = z.infer<typeof DecisionMadeSchema>;
 // ─── Consent ────────────────────────────────────────────────────────────────
 
 /**
- * Stored consent shape — used by DB types and reads. The DB CHECK only
- * enforces `value is boolean`. The registration route narrows further with
- * {@link RegistrationConsentSchema} to require an affirmative `true`.
+ * Stored consent shape. `value` may be any boolean. Registration uses
+ * {@link RegistrationConsentSchema}, which requires `true`.
  */
 export const ConsentRecordSchema = z
   .object({
     value: z.boolean(),
-    given_at: z.string().datetime(),
-    valid_till: z.string().datetime(),
+    given_at: z.iso.datetime(),
+    valid_till: z.iso.datetime(),
   })
   .strict();
 
 export type ConsentRecord = z.infer<typeof ConsentRecordSchema>;
 
 /**
- * Registration-time consent shape — `value` must be literal `true`. The JSON
- * Schema in `registration.v1.json` uses `"type": "boolean"` (browser checkbox
- * constraint); this Zod schema adds the server-side affirmative guard so that
- * a direct API caller cannot submit `value: false`.
+ * Registration-time consent shape. `value` must be `true`, so an API caller
+ * cannot submit `value: false`.
  */
 export const RegistrationConsentSchema = ConsentRecordSchema.extend({
   value: z.literal(true),
@@ -72,21 +88,38 @@ export const RegistrationConsentSchema = ConsentRecordSchema.extend({
 
 // ─── Registration payload (slim — what the signup form submits) ─────────────
 
+/**
+ * The registration's domain ids as a list.
+ *
+ * @param type - The payload's `type`: one id or a list.
+ * @returns The ids, in the order given.
+ */
+export function registrationDomains(type: string | readonly string[]): string[] {
+  return typeof type === 'string' ? [type] : [...type];
+}
+
 export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Aggregator's domain focus — `seeker` or `provider`. Mirrored to the
-     * Keycloak `aggregator_type` user attribute and published in the JWT
-     * claim of the same name. Routes that write participant data compare
-     * the request body to that claim.
+     * The profile types the coordinator serves: one id, or a non-empty list
+     * without repeats. Stored in `users.serves` and copied to the multivalued
+     * Keycloak `aggregator_type` attribute, whose token claim the API checks.
      */
-    type: RoleTypeSchema,
-    url: z.string().url().max(2048).optional(),
+    type: z.union([
+      ProfileTypeSchema,
+      z
+        .array(ProfileTypeSchema)
+        .min(1)
+        .refine((ids) => new Set(ids).size === ids.length, {
+          message: 'domain ids must not repeat',
+        }),
+    ]),
+    url: z.url().max(2048).optional(),
     /**
-     * Sub-org / division / vertical / institution name. Declared only by
-     * deployments whose registration schema asks for it (UP-GZB today), so it
-     * is absent elsewhere. Has no column — persisted to `aggregators.profile`.
+     * Sub-org, division or institution name. Present only when the
+     * deployment's registration schema asks for it. Stored in
+     * `users.profile`.
      */
     sub_org_name: z.string().max(200).optional(),
     contact: BecknContactSchema,

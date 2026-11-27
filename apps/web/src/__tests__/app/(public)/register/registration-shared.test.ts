@@ -16,6 +16,8 @@ import {
   stripConsentBlock,
   withResolvedCoordinates,
   withOrgCoordinates,
+  inviteSignInUrl,
+  withReadonlyField,
 } from '@/app/(public)/register/registration-shared';
 
 describe('titleCase', () => {
@@ -96,6 +98,14 @@ describe('humaniseValidationErrors', () => {
     expect(out).toEqual(['Owner Email is required']);
   });
 
+  it('uses the schema title when RJSF already ends the path with the missing field', () => {
+    const out = humaniseValidationErrors(
+      [{ name: 'required', property: '.owner.email', params: { missingProperty: 'email' } }],
+      schema,
+    );
+    expect(out).toEqual(['Owner Email is required']);
+  });
+
   it('falls back to a title-cased key when no schema title exists', () => {
     const out = humaniseValidationErrors(
       [{ name: 'required', property: '', params: { missingProperty: 'phone_number' } }],
@@ -166,6 +176,7 @@ describe('parseError', () => {
       detail: 'Name is required',
       code: 'VALIDATION',
       requestId: 'req-1',
+      status: 400,
     });
   });
 
@@ -176,7 +187,28 @@ describe('parseError', () => {
       detail: 'The server returned HTTP 500.',
       code: 'UNKNOWN',
       requestId: 'req-xyz',
+      status: 500,
     });
+  });
+
+  it('falls back per field when a field has the wrong type', () => {
+    const out = parseError(
+      { error: { title: 42, detail: 'Name is required', code: ['X'], fields: 'oops' } },
+      400,
+      'req-2',
+    );
+    expect(out).toEqual({
+      title: 'Submission failed',
+      detail: 'Name is required',
+      code: 'UNKNOWN',
+      requestId: 'req-2',
+      status: 400,
+    });
+  });
+
+  it('keeps the fields object of the envelope', () => {
+    const out = parseError({ error: { code: 'X', fields: { name: 'required' } } }, 400, 'r');
+    expect(out.fields).toEqual({ name: 'required' });
   });
 
   it('falls back to the given requestId when the envelope omits one', () => {
@@ -218,14 +250,35 @@ describe('submitRegistration', () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+        new Response(JSON.stringify({ user_id: 'agg-1' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
     ) as unknown as typeof fetch;
 
     const result = await submitRegistration('/api/aggregator/register', { name: 'Acme' });
-    expect(result).toEqual({ ok: true, body: { aggregator_id: 'agg-1' } });
+    expect(result).toEqual({ ok: true, body: { user_id: 'agg-1' } });
+  });
+
+  it('returns an empty body when a 2xx body is not a JSON object', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response('null', { status: 201, headers: { 'content-type': 'application/json' } }),
+    ) as unknown as typeof fetch;
+
+    const result = await submitRegistration('/api/aggregator/register', {});
+    expect(result).toEqual({ ok: true, body: {} });
+  });
+
+  it('returns an empty body when a 2xx body is not JSON', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>', { status: 201 }),
+    ) as unknown as typeof fetch;
+
+    const result = await submitRegistration('/api/aggregator/register', {});
+    expect(result).toEqual({ ok: true, body: {} });
   });
 
   it('returns a parsed error envelope on a non-2xx response', async () => {
@@ -241,7 +294,13 @@ describe('submitRegistration', () => {
     const result = await submitRegistration('/api/aggregator/register', {});
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toEqual({ title: 'Nope', detail: 'Bad', code: 'X', requestId: 'req-9' });
+      expect(result.error).toEqual({
+        title: 'Nope',
+        detail: 'Bad',
+        code: 'X',
+        requestId: 'req-9',
+        status: 400,
+      });
     }
   });
 
@@ -259,7 +318,7 @@ describe('submitRegistration', () => {
     }
   });
 
-  it('returns a network-error result when fetch throws', async () => {
+  it('returns a network-error result, without the raw error text, when fetch throws', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => {
       throw new Error('fetch failed: DNS lookup');
@@ -270,9 +329,10 @@ describe('submitRegistration', () => {
     if (!result.ok) {
       expect(result.error).toEqual({
         title: 'Network error',
-        detail: 'fetch failed: DNS lookup',
+        detail: 'Could not reach the server.',
         code: 'NETWORK_ERROR',
         requestId: '',
+        status: 0,
       });
     }
   });
@@ -419,5 +479,28 @@ describe('withOrgCoordinates', () => {
     const body = { display_name: 'ABC Limited' };
     withOrgCoordinates(body, place);
     expect(body).not.toHaveProperty('coordinates');
+  });
+});
+
+describe('inviteSignInUrl', () => {
+  it('pre-fills the invited email and keeps the landing page', () => {
+    expect(inviteSignInUrl({ login_hint: 'a+b@x.org' }, '/console')).toBe(
+      '/api/auth/login?returnTo=%2Fconsole&login_hint=a%2Bb%40x.org',
+    );
+  });
+
+  it('leaves the hint out when the response has none', () => {
+    expect(inviteSignInUrl({}, '/dashboard')).toBe('/api/auth/login?returnTo=%2Fdashboard');
+  });
+});
+
+describe('withReadonlyField', () => {
+  it('locks a nested field and keeps the rest of the UI schema', () => {
+    const ui = { contact: { phone: { 'ui:widget': 'phone' } }, name: { 'ui:widget': 'hidden' } };
+    expect(withReadonlyField(ui, ['contact', 'email'])).toEqual({
+      contact: { phone: { 'ui:widget': 'phone' }, email: { 'ui:readonly': true } },
+      name: { 'ui:widget': 'hidden' },
+    });
+    expect(ui.contact).toEqual({ phone: { 'ui:widget': 'phone' } });
   });
 });

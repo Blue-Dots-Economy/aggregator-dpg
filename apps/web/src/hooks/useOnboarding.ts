@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   onboardingService,
   type ApiRegistrationLink,
+  type BulkUploadList,
   type CreateLinkInput,
+  type ListVoiceBotsResponse,
   type OnboardingBySource,
   type OnboardingSummary,
   type UpdateLinkInput,
@@ -21,12 +23,21 @@ export function useRegistrationLinks(domain: string) {
   });
 }
 
+/** The voice bots a coordinator can attach to a link in `domain`, plus the instance default. */
+export function useVoiceBots(domain: string) {
+  return useQuery<ListVoiceBotsResponse>({
+    queryKey: ['onboarding', 'voice-bots', domain],
+    queryFn: () => onboardingService.listVoiceBots(domain),
+    staleTime: 60_000,
+  });
+}
+
 export function useCreateLink() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateLinkInput) => onboardingService.createLink(input),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -37,7 +48,7 @@ export function useUpdateLink() {
     mutationFn: ({ id, patch }: { id: string; patch: UpdateLinkInput }) =>
       onboardingService.updateLink(id, patch),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -47,7 +58,7 @@ export function useActivateLink() {
   return useMutation({
     mutationFn: (id: string) => onboardingService.activateLink(id),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
@@ -57,28 +68,45 @@ export function useDeactivateLink() {
   return useMutation({
     mutationFn: (id: string) => onboardingService.deactivateLink(id),
     onSuccess: (link) => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'links', link.domain] });
     },
   });
 }
 
-export function useOnboardingSummary() {
+/** Options of the onboarding metrics reads. */
+export interface OnboardingMetricsOptions {
+  /** Profile type to count; omitted counts every profile type. */
+  domain?: string | undefined;
+  /** `false` holds the read, e.g. until the active profile type is known. */
+  enabled?: boolean;
+}
+
+/**
+ * Fetches the onboarding totals, for one profile type when `domain` is set.
+ *
+ * @returns The React Query result for the totals.
+ */
+export function useOnboardingSummary({ domain, enabled = true }: OnboardingMetricsOptions = {}) {
   return useQuery<OnboardingSummary>({
-    queryKey: ['onboarding', 'summary'],
-    queryFn: () => onboardingService.summary(),
+    queryKey: ['onboarding', 'summary', domain ?? null],
+    queryFn: () => onboardingService.summary(domain ? { domain } : {}),
     staleTime: 30_000,
+    enabled,
   });
 }
 
 /**
- * Aggregator-wide onboarding counters grouped by entry source
- * (`bulk` / `link`). Drives the dashboard's "joins by entry mode" card.
+ * Fetches onboarding counters grouped by entry source (`bulk` / `link`),
+ * for one profile type when `domain` is set.
+ *
+ * @returns The React Query result for the by-source counters.
  */
-export function useOnboardingBySource() {
+export function useOnboardingBySource({ domain, enabled = true }: OnboardingMetricsOptions = {}) {
   return useQuery<OnboardingBySource>({
-    queryKey: ['onboarding', 'by-source'],
-    queryFn: () => onboardingService.bySource(),
+    queryKey: ['onboarding', 'by-source', domain ?? null],
+    queryFn: () => onboardingService.bySource(domain ? { domain } : {}),
     staleTime: 30_000,
+    enabled,
   });
 }
 
@@ -89,27 +117,39 @@ export function useBulkUpload() {
       file,
       participantType,
       attestation,
+      maxBytes,
     }: {
       file: File;
       participantType: string;
       attestation: boolean;
-    }) => onboardingService.uploadCsv(file, participantType, attestation),
+      maxBytes?: number | undefined;
+    }) => onboardingService.uploadCsv(file, participantType, attestation, maxBytes),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
+      void qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
     },
   });
 }
 
-export function useRecentBulkUploads(limit = 10) {
+/**
+ * Lists the most recent bulk uploads, polling while any is still processing.
+ *
+ * @param limit - How many recent uploads to fetch.
+ * @param domain - When set, keeps only uploads of this participant type. The
+ *   filter runs in the browser over one cached list shared by every domain, so
+ *   it can return fewer than `limit` items.
+ * @returns The react-query result for the upload list.
+ */
+export function useRecentBulkUploads(limit = 10, domain?: string) {
   return useQuery({
     queryKey: ['onboarding', 'bulk-uploads', 'list', limit],
     queryFn: () => onboardingService.listBulkUploads({ limit }),
+    // Filtered after the fetch, so every domain shares one cached list.
+    select: (list: BulkUploadList) =>
+      domain ? { ...list, items: list.items.filter((it) => it.participant_type === domain) } : list,
     refetchInterval: (q) => {
       const items = q.state.data?.items ?? [];
       const inFlight = items.some((it) =>
-        ['pending', 'uploaded', 'file_validating', 'row_processing', 'finalising'].includes(
-          it.status,
-        ),
+        ['uploaded', 'file_validating', 'row_processing', 'finalising'].includes(it.status),
       );
       return inFlight ? 3000 : false;
     },

@@ -6,29 +6,23 @@ import Link from 'next/link';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
 import { BrandPanel } from '../../../components/login/BrandPanel';
-import { I } from '../../../icons';
 import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 export interface RegisterPageShellProps {
   /** Page heading rendered above the form (the coordinator/owner title). */
   heading: string;
-  /**
-   * Sub-heading under the title. Omit to use the default registration tagline;
-   * pass `null` to render no tagline (e.g. the invite surfaces, which carry
-   * their own intro copy).
-   */
+  /** Sub-heading under the title. Omit for the default tagline; pass `null` for none. */
   tagline?: string | null;
   /** The registration form (coordinator or org). */
   children: ReactNode;
 }
 
 /**
- * Shared chrome for the public registration surfaces — the coordinator page
- * (`RegisterView`) and the owner deep link (`OwnerRegisterView`, #619). Renders
- * the brand panel, header/logo, "back to sign in" link, heading + tagline, the
- * form (`children`), and the Terms/Privacy footer links. Extracted so the two
- * views don't duplicate ~60 lines of identical layout.
+ * Shared layout for the public registration pages.
+ *
+ * Renders the brand panel, logo, "back to sign in" link, heading and tagline,
+ * the form (`children`), and the Terms/Privacy footer links.
  *
  * @param props - The page heading and the form to render.
  * @returns The registration page body.
@@ -88,12 +82,15 @@ export function RegisterPageShell({
             )}
           </header>
 
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-2 text-[13.5px] text-ink-500 hover:text-ink-900 transition-colors"
-          >
-            <I.arrowL size={15} /> Back to sign in
-          </Link>
+          <p className="text-[13.5px] text-ink-500">
+            Already registered?{' '}
+            <Link
+              href="/login"
+              className="font-semibold text-(--bd-primary-600) hover:text-ink-900 transition-colors"
+            >
+              Sign in
+            </Link>
+          </p>
 
           <h1 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight mt-3">
             {heading}
@@ -104,8 +101,7 @@ export function RegisterPageShell({
 
           {children}
 
-          {/* Once the blocking ConsentGate closes, nothing else on this page
-              links to the read-only legal page. */}
+          {/* The only link to the legal page after the consent gate closes. */}
           <LegalLinksFooter variant="separated" className="mt-8" />
         </div>
       </div>

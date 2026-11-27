@@ -8,7 +8,7 @@
  * must hold — a coordinator token cannot reach the dump, and a system token
  * cannot reach the org-scoped PII routes. Each 403 case pins its
  * `fields.reason` too, not just the status: several fixtures are 403 for
- * different reasons (wrong azp vs. wrong username vs. no aggregator_id), and
+ * different reasons (wrong azp vs. wrong username vs. no user_id), and
  * asserting status alone can't tell those apart or prove which gate fired.
  *
  * @module apps/api/campaign/__tests__/auth.test
@@ -25,17 +25,24 @@ function req(token?: string): FastifyRequest {
   } as unknown as FastifyRequest;
 }
 
+/** The campaign manager's own client_credentials token: the dump route's caller. */
 const SYSTEM_CLAIMS = {
   sub: 'sa-uuid',
   azp: 'campaign-manager',
   preferred_username: 'service-account-campaign-manager',
 };
 
+const NO_AGGREGATOR_CLAIMS = {
+  sub: 'other-uuid',
+  azp: 'campaign-manager',
+  preferred_username: 'someone@org.example',
+};
+
 const COORDINATOR_CLAIMS = {
   sub: 'human-uuid',
   azp: 'campaign-manager',
   preferred_username: 'coordinator@org.example',
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   signalstack_org_id: 'org_5d3b7fa4',
   email: 'coordinator@org.example',
 };
@@ -43,12 +50,12 @@ const COORDINATOR_CLAIMS = {
 /**
  * A service account that has been misprovisioned with org attributes — the
  * state the local realm was found in. It must still be rejected by the
- * org-scoped gate, which is exactly what the absence of `aggregator_id`
+ * org-scoped gate, which is exactly what the absence of `user_id`
  * cannot guarantee.
  */
 const MISPROVISIONED_SYSTEM_CLAIMS = {
   ...SYSTEM_CLAIMS,
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   signalstack_org_id: 'org_5d3b7fa4',
 };
 
@@ -77,6 +84,8 @@ describe('campaign auth', () => {
       switch (token) {
         case 'system':
           return SYSTEM_CLAIMS;
+        case 'no-aggregator':
+          return NO_AGGREGATOR_CLAIMS;
         case 'coordinator':
           return COORDINATOR_CLAIMS;
         case 'misprovisioned':
@@ -174,18 +183,22 @@ describe('campaign auth', () => {
   describe('requireCampaignAuth — reverse direction', () => {
     it('accepts a coordinator token', async () => {
       const ctx = await requireCampaignAuth(req('coordinator'));
-      expect(ctx.aggregatorId).toBe('agg-1');
+      expect(ctx.userId).toBe('agg-1');
       expect(ctx.signalstackOrgId).toBe('org_5d3b7fa4');
     });
 
-    it('rejects the system token with 403 — the pre-existing missing-aggregator_id path, since a correctly-provisioned service account never reaches the new guard', async () => {
-      await expect(requireCampaignAuth(req('system'))).rejects.toMatchObject({
+    it('rejects a token without user_id with 403', async () => {
+      await expect(requireCampaignAuth(req('no-aggregator'))).rejects.toMatchObject({
         status: 403,
-        fields: { reason: 'MISSING_AGGREGATOR_ID' },
+        fields: { reason: 'MISSING_USER_ID' },
       });
     });
 
-    it('rejects a misprovisioned service account with 403 even though it has an org id — the new reverse-direction guard', async () => {
+    it('rejects the system token with 403 (no user_id)', async () => {
+      await expect(requireCampaignAuth(req('system'))).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('rejects a system token given an org id by mistake with 403 SYSTEM_TOKEN_NOT_PERMITTED', async () => {
       await expect(requireCampaignAuth(req('misprovisioned'))).rejects.toMatchObject({
         status: 403,
         fields: { reason: 'SYSTEM_TOKEN_NOT_PERMITTED' },

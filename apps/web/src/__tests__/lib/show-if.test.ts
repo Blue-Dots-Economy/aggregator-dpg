@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { RJSFSchema } from '@rjsf/utils';
-import { isFieldVisible, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
+import {
+  isFieldVisible,
+  pruneHiddenFields,
+  resolveVisibleSchema,
+  stripShowIf,
+} from '../../lib/show-if';
 
 // A small schema mirroring a real conditional chain:
 // educationCategory -> schoolQualification -> schoolQualificationOther
@@ -118,6 +123,29 @@ describe('resolveVisibleSchema', () => {
     resolveVisibleSchema(schema, {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('doesNotExist'));
     warn.mockRestore();
+  });
+});
+
+describe('pruneHiddenFields', () => {
+  it('removes the named fields from properties and required', () => {
+    const base = chainSchema();
+    base.required = ['educationCategory', 'schoolQualification'];
+    const pruned = pruneHiddenFields(base, ['schoolQualification', 'schoolQualificationOther']);
+    expect(Object.keys(pruned.properties ?? {})).toEqual(['educationCategory', 'note']);
+    expect(pruned.required).toEqual(['educationCategory']);
+  });
+
+  it('returns every field when nothing is hidden, without mutating the input', () => {
+    const base = chainSchema();
+    const pruned = pruneHiddenFields(base, []);
+    expect(pruned.properties).toEqual(base.properties);
+    expect(pruned).not.toBe(base);
+  });
+
+  it('matches the schema resolveVisibleSchema returns for the same hidden set', () => {
+    const base = chainSchema();
+    const resolved = resolveVisibleSchema(base, { educationCategory: 'College' });
+    expect(pruneHiddenFields(base, resolved.hidden)).toEqual(resolved.schema);
   });
 });
 

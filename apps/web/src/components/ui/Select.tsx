@@ -1,11 +1,8 @@
 'use client';
 
 /**
- * shadcn/ui Select — Radix primitive with Tailwind styling matching
- * the rest of the app (`bd-input` look, brand-coloured focus ring).
- *
- * Single-select dropdown. For array-of-enum fields, use
- * `<MultiSelect>` instead (sibling file).
+ * Single-select dropdown built on Radix Select, styled to match `bd-input`.
+ * For array-of-enum fields, use `<MultiSelect>`.
  */
 
 import * as React from 'react';
@@ -71,9 +68,12 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 
 export const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = 'popper', ...props }, ref) => (
-  <SelectPrimitive.Portal>
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content> & {
+    /** Where the open list is rendered; `document.body` when unset. */
+    container?: HTMLElement | null;
+  }
+>(({ className, children, position = 'popper', container, ...props }, ref) => (
+  <SelectPrimitive.Portal container={container}>
     <SelectPrimitive.Content
       ref={ref}
       className={cn(

@@ -1,21 +1,16 @@
 /**
  * The one renderer for externalised email cases.
  *
- * Belongs to `@aggregator-dpg/api`. Every case's HTML body, plain-text body
- * and subject come out of this function, driven by the declarative layout on
- * its registry entry. Before this existed each template module repeated the
- * same four steps — look up copy, substitute tokens, assemble blocks, derive
- * the text part — which is four chances per template for the two parts to
- * drift, and six copies to edit when the shell changes.
+ * Belongs to `@aggregator-dpg/api`. Builds every case's subject, HTML body and
+ * plain-text body from the layout on its registry entry.
  *
- * A template module now supplies only its typed inputs; the layout lives in
+ * A template module supplies only its typed inputs; the layout lives in
  * `email-cases.ts` and the copy lives in the properties layers.
  *
  * @module @aggregator-dpg/api
  */
 
 import {
-  callout,
   ctaButton,
   ctaRow,
   getEmailBrand,
@@ -23,7 +18,6 @@ import {
   note,
   para,
   paraLast,
-  paraSmall,
   renderShell,
 } from './shared.js';
 import { caseTokenTypes, getEmailCase, type BlockSpec, type EmailCaseDef } from './email-cases.js';
@@ -43,18 +37,11 @@ export interface RenderedEmail {
 /**
  * Decides whether a conditional block belongs in this render.
  *
- * `requires` keeps a block out unless every named token has a value;
- * `absent` keeps it out unless every named token has none. Together they
- * express the three conditionals the migrated templates actually have — an
- * optional rejection reason, a named-vs-anonymous greeting, and the
- * invite-link-vs-coming-soon tail — without any of them being code.
+ * `requires` keeps a block out unless every named token has a value.
  */
 function blockApplies(spec: BlockSpec, values: CaseValues): boolean {
   for (const token of spec.requires ?? []) {
     if (values[token] === undefined || values[token] === '') return false;
-  }
-  for (const token of spec.absent ?? []) {
-    if (values[token] !== undefined && values[token] !== '') return false;
   }
   return true;
 }
@@ -63,9 +50,7 @@ const BLOCK_RENDERERS: Record<string, (html: string) => string> = {
   heading,
   para,
   paraLast,
-  paraSmall,
   note,
-  callout,
 };
 
 /**
@@ -154,7 +139,7 @@ function renderBlock(
 /**
  * Renders one externalised email case.
  *
- * @param caseId - Registry key, e.g. `applicant_approved`.
+ * @param caseId - Registry key, e.g. `coordinator_invite`.
  * @param values - Token values. Brand tokens are added automatically, and a
  *   token used for a CTA href is passed through unescaped by the button
  *   helper rather than substituted into copy.
@@ -185,11 +170,10 @@ export function renderCase(caseId: string, values: CaseValues): RenderedEmail {
   }
 
   const subject = toPlainText(copy(def.subjectKey ?? 'subject'));
-  const signOff = def.signOff === false ? '' : `\nSent by ${brand.long_name}.\n`;
 
   return {
     subject,
     html: renderShell({ preheader: subject, bodyHtml: htmlBlocks.join('\n') }),
-    text: `${textBlocks.join('\n\n')}\n${signOff}`,
+    text: `${textBlocks.join('\n\n')}\n\nSent by ${brand.long_name}.\n`,
   };
 }

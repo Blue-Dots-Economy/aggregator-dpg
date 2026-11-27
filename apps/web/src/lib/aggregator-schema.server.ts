@@ -1,15 +1,16 @@
 /**
  * Server-side loader for the aggregator registration JSON Schema.
  *
- * Both the public registration page and the (read-only) authenticated profile
- * page render the *same* form from `config/schemas/aggregator/registration.v1`.
- * Keeping the load + network-enum patch in one module guarantees the two
- * surfaces never drift. Belongs to the `web` app's server layer.
+ * The registration page and the read-only profile page both render the form
+ * from `registration.v1` loaded here, so they stay the same.
  *
  * @module apps/web/src/lib/aggregator-schema.server
  */
 
+import { applyUrlRule } from '@aggregator-dpg/network-config/uri-fields';
 import 'server-only';
+import { readDomainLabels } from './aggregator-config-domains';
+import { parseJsonObject, parseJsonSchema, readJsonObject } from './json-object';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -25,15 +26,8 @@ export interface AggregatorSchemaPair {
 /**
  * Resolves an aggregator schema file, preferring a network/brand override.
  *
- * Works for both `pnpm --filter web dev` (cwd = apps/web) and the production
- * Docker build (cwd = /app/apps/web). Within each `config/` root the
- * network/brand override is tried before the shared default, so an instance
- * that needs extra registration fields (UP-GZB) ships its own complete copy
- * under `config/<network>[/<brand>]/schemas/aggregator/` while Purple Dot and
- * Dharwad keep rendering the generic form.
- *
- * Falls back to the shared-default path when nothing exists, so the caller's
- * `readFile` surfaces a normal ENOENT naming a real location.
+ * Works with cwd `apps/web` (dev) and `/app/apps/web` (Docker). Returns the
+ * shared-default path when no file exists, so `readFile` fails with ENOENT.
  *
  * @param file - Bare schema file name, e.g. `registration.v1.json`.
  * @returns Absolute path to the most specific schema file that exists.
@@ -45,21 +39,17 @@ export function resolveAggregatorSchemaPath(file: string): string {
     path.resolve(process.cwd(), 'config'),
   ];
   const rel = aggregatorSchemaRelPaths(file);
-  // Specificity first, then root — a brand override in any resolvable root must
-  // beat the shared default in another.
+  // Most specific path first, across all roots.
   const candidates = rel.flatMap((r) => roots.map((root) => path.join(root, r)));
   const found = candidates.find((c) => existsSync(c));
   return found ?? path.join(roots[0]!, rel.at(-1)!);
 }
 
 /**
- * Replaces the static `properties.type.enum` in the registration schema and
- * `type['ui:enumNames']` in the ui schema with the current network's domain
- * ids + labels (from `GET /v1/aggregator-config`). Falls back silently to the
- * file's static values if the api is unreachable.
+ * Replaces the `type` options in the schema and UI schema with the network's
+ * domains from `GET /v1/aggregator-config`, for a single-choice or a list field.
  *
- * Without this, the type dropdown shows the hardcoded `[seeker, provider]`
- * labels even when the live network declares different domains.
+ * Keeps the file's static values if the api is unreachable.
  *
  * @param schema - The loaded registration JSON Schema (mutated in place).
  * @param uiSchema - The loaded RJSF UI schema (mutated in place).
@@ -72,42 +62,47 @@ export async function patchTypeFromNetwork(
   try {
     const res = await fetch(`${apiBase}/v1/aggregator-config`, { cache: 'no-store' });
     if (!res.ok) return;
-    const cfg = (await res.json()) as {
-      domains?: Array<{ id: string; label?: string; plural_label?: string }>;
-    };
-    const domains = cfg?.domains ?? [];
+    const domains = readDomainLabels(await res.json()) ?? [];
     if (domains.length === 0) return;
 
-    const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    const typeField = props?.['type'];
-    if (typeField) {
-      typeField['enum'] = domains.map((d) => d.id);
-      typeField['oneOf'] = domains.map((d) => ({ const: d.id, title: d.label ?? d.id }));
-    }
+    const ids = domains.map((d) => d.id);
+    const labels = domains.map((d) => d.label);
+    const typeField = schema.properties?.['type'];
+    const typeUi = readJsonObject(uiSchema['type']) ?? {};
 
-    const typeUi = (uiSchema['type'] as Record<string, unknown> | undefined) ?? {};
-    typeUi['ui:enumNames'] = domains.map((d) => d.label ?? d.id);
+    // A list field (several domains) carries its choices on `items`, and RJSF
+    // reads their labels from the items UI schema.
+    if (typeof typeField === 'object' && typeField.type === 'array') {
+      typeField.items = { type: 'string', enum: ids };
+      typeUi['items'] = { 'ui:enumNames': labels };
+    } else {
+      if (typeof typeField === 'object') {
+        typeField.enum = ids;
+        typeField.oneOf = domains.map((d) => ({ const: d.id, title: d.label }));
+      }
+      typeUi['ui:enumNames'] = labels;
+    }
     uiSchema['type'] = typeUi;
   } catch {
-    // best-effort; static values from the files remain the fallback.
+    // Best-effort; the static values remain.
   }
 }
 
 /**
  * Loads the aggregator registration schema pair and patches the `type` enum
- * from the live network config. Shared by the registration page and the
- * read-only profile page so both render an identical form.
+ * from the network config.
  *
- * @returns The parsed schema + UI schema, with the type dropdown reflecting
- *   the current network's domains.
+ * @returns The parsed schema and UI schema.
  */
 export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
   const [schemaRaw, uiSchemaRaw] = await Promise.all([
     readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
     readFile(resolveAggregatorSchemaPath('registration.v1.ui.json'), 'utf8'),
   ]);
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
-  const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
+  // The same web-address rule the API and Signals apply, so the form refuses
+  // what the server would refuse and says why.
+  const schema = applyUrlRule(parseJsonSchema(schemaRaw));
+  const uiSchema = parseJsonObject(uiSchemaRaw);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };
 }

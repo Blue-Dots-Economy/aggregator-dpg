@@ -5,13 +5,13 @@ export type ProfileStatus = 'complete' | 'incomplete';
 export interface ParticipantStats {
   total: number;
   shortlisted?: number;
-  /** accept bucket — "Connected" for purple_dot. */
+  /** `accept` bucket. */
   accepted?: number;
-  /** reject bucket — "Declined" for purple_dot. */
+  /** `reject` bucket. */
   rejected: number;
-  /** create bucket — "Requested" for purple_dot. */
+  /** `create` bucket. */
   pending: number;
-  /** cancel bucket — "Cancelled". */
+  /** `cancel` bucket. */
   cancelled?: number;
 }
 
@@ -40,24 +40,20 @@ export interface ParticipantBase {
   avatar: string;
   profile: ParticipantProfile;
   applied: ParticipantStats;
-  /** Actions this profile INITIATED, by canonical action state. */
+  /** Actions this profile initiated, by action state. */
   initiated: DirectionalStats;
-  /** Actions this profile RECEIVED, by canonical action state. */
+  /** Actions this profile received, by action state. */
   received: DirectionalStats;
   status: ParticipantStatus;
   last: string;
   /**
-   * Signalstack-computed `actionable_tags` for the row, e.g.
-   * `missing_contact_phone`. Drives the Recommended Action column.
-   * Empty when signalstack returns no tags.
+   * Signals `actionable_tags` for the row (e.g. `missing_contact_phone`).
+   * Drives the Recommended Action column.
    */
   actionableTags?: string[];
   /**
-   * Onboarding lifecycle bucket for the row. Sourced from `/v1/dashboard`
-   * and normalised client-side by `resolveLifecycleStatus` on the dashboard
-   * page, so legacy items without `lifecycle_status` surface as `'live'`.
-   * Undefined when the lifecycle fetch hasn't resolved yet or this row
-   * has no associated signals item.
+   * Lifecycle bucket for the row. Items without a lifecycle status show as
+   * `'live'`. Undefined when the row has no Signals item.
    */
   lifecycle_status?: LifecycleStatus;
 }

@@ -74,6 +74,26 @@ describe('parsePhotonFeatures', () => {
     expect(parsePhotonFeatures({})).toEqual([]);
     expect(parsePhotonFeatures(null)).toEqual([]);
   });
+
+  it('returns an empty list when features is not a list', () => {
+    expect(parsePhotonFeatures({ features: { 0: FEATURE } })).toEqual([]);
+  });
+
+  it('ignores a property of the wrong type and keeps the other features', () => {
+    const odd = {
+      geometry: { coordinates: [77.6, 12.9] },
+      properties: { name: 42, city: 'Bengaluru' },
+    };
+    const out = parsePhotonFeatures({ features: [odd, FEATURE] });
+    expect(out).toHaveLength(2);
+    expect(out[0]!.label).toBe('Bengaluru');
+    expect(out[0]!.components.locality).toBeUndefined();
+    expect(out[1]!.label).toBe('Jayanagar, Bengaluru, Karnataka, 560041, India');
+  });
+
+  it('skips a feature that is not an object', () => {
+    expect(parsePhotonFeatures({ features: ['Jayanagar', FEATURE] })).toHaveLength(1);
+  });
 });
 
 describe('createPhotonProvider', () => {

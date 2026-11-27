@@ -1,12 +1,9 @@
 /**
- * Campaign email rendering — Markdown → sanitised HTML + text (aggregator-dpg#578).
+ * Renders campaign emails from Markdown to sanitised HTML and plain text.
  *
- * Renders the shared Markdown body to sanitised HTML and a plain-text part, and
- * substitutes one recipient's placeholder values. Values are HTML-escaped in the
- * HTML part so a decrypted value can never break out of the markup; the subject
- * and text parts are plain text. Isolated in its own subpath so callers that
- * only validate placeholders (the API) never load the Markdown dependencies.
- * Belongs to `@aggregator-dpg/campaign-template`.
+ * Values are HTML-escaped in the HTML part. The subject and text parts are
+ * plain text. Kept in its own subpath so callers that only validate do not
+ * load the Markdown dependencies. Belongs to `@aggregator-dpg/campaign-template`.
  */
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
@@ -18,8 +15,7 @@ export interface RenderedEmail {
   text: string;
 }
 
-// Allow only the formatting tags a campaign email needs; strip scripts, styles,
-// event handlers, and unsafe URL schemes. Links open safely.
+// Allows only basic formatting tags. Strips scripts, styles, event handlers and unsafe URL schemes.
 const SANITIZE_OPTS: sanitizeHtml.IOptions = {
   allowedTags: [
     'p',
@@ -53,9 +49,8 @@ const SANITIZE_OPTS: sanitizeHtml.IOptions = {
 /**
  * Renders one recipient's email from the shared Markdown template.
  *
- * The Markdown body is rendered to HTML and sanitised (with placeholder tokens
- * still intact), then placeholders are substituted — HTML-escaped in the HTML
- * part, verbatim in the plain-text part. The subject is treated as plain text.
+ * The body is rendered and sanitised first, then placeholders are substituted.
+ * Values are HTML-escaped in the HTML part only.
  *
  * @param input.subject - Subject template (may contain placeholders).
  * @param input.bodyMarkdown - Markdown body template (may contain placeholders).

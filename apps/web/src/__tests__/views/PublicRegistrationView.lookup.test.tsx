@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type * as UseAggregatorConfigModule from '@/hooks/useAggregatorConfig';
+import { chooseOption } from '@/__tests__/test-utils';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -455,7 +456,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
   });
 
-  it('shows a server error banner (title/detail/code) on a non-409 failure response', async () => {
+  it('shows one readable banner, never the server title/detail/code, on a non-field failure', async () => {
     globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
@@ -473,9 +474,11 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Rejected');
-    expect(screen.getByText('Bad payload')).toBeInTheDocument();
-    expect(screen.getByText(/Code: BAD_INPUT/)).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(messages.profile.public_reg.error_submission_title);
+    expect(alert).toHaveTextContent(messages.form.request_error.invalid);
+    expect(screen.queryByText('Bad payload')).toBeNull();
+    expect(screen.queryByText(/BAD_INPUT/)).toBeNull();
   });
 
   it('shows a network-error banner when the /submit fetch throws', async () => {
@@ -487,16 +490,33 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      throw new Error('network down');
+      throw new TypeError('Failed to fetch');
     }) as unknown as typeof fetch;
 
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      messages.profile.public_reg.error_network_title,
-    );
-    expect(screen.getByText('network down')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.network);
+    expect(screen.queryByText('Failed to fetch')).toBeNull();
+  });
+
+  it('says something went wrong, not "network", for a failure that is not the network', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error('a bug in the submit handling');
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.generic);
   });
 
   it('"Register another" resets the done screen back to the form', async () => {
@@ -541,9 +561,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     renderView();
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 10) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 10));
     expect(screen.getByText(messages.profile.public_reg.u18_notice)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).toBeNull();
 
@@ -604,9 +622,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
         </NextIntlClientProvider>
       </QueryClientProvider>,
     );
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 30) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 30));
     // No inline checkbox before the gate opens.
     expect(screen.queryByRole('checkbox')).toBeNull();
 
@@ -660,9 +676,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
 
     const currentYear = new Date().getFullYear();
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Quick Signup' } });
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 22) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 22));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /Submit/ }));
@@ -687,5 +701,103 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(submitBody.consent_terms).toBe(true);
     expect(submitBody.consent_privacy).toBe(true);
     expect(submitBody.consent_profile).toBeUndefined();
+  });
+});
+
+describe('<PublicRegistrationView /> — response bodies are checked', () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** A probe that allows the submit, followed by `submitResponse` for `/submit`. */
+  function stubFetch(submitResponse: () => Response) {
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return submitResponse();
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  it('submits when the probe sends owned_elsewhere with the wrong type', async () => {
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(JSON.stringify({ owned_elsewhere: 'yes' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 's' }), {
+        status: 201,
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
+  });
+
+  it('uses the fallback title when the error title is not a string', async () => {
+    stubFetch(
+      () =>
+        new Response(JSON.stringify({ error: { title: 42, detail: 'Bad payload', code: 'X' } }), {
+          status: 400,
+        }),
+    );
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.profile.public_reg.error_submission_title,
+    );
+    expect(screen.queryByText('42')).toBeNull();
+  });
+
+  it('shows the server error when a 409 body is not an object', async () => {
+    stubFetch(() => new Response('null', { status: 409 }));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.profile.public_reg.error_submission_title,
+    );
+    expect(screen.getByText(messages.form.request_error.conflict)).toBeInTheDocument();
+  });
+
+  it('shows the done panel with the reference of a skipped 409', async () => {
+    stubFetch(
+      () =>
+        new Response(JSON.stringify({ outcome: 'skipped', submission_id: 'sub-409' }), {
+          status: 409,
+        }),
+    );
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(
+      await screen.findByText(messages.profile.public_reg.done_skipped_title),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/sub-409/)).toBeInTheDocument();
+  });
+
+  it('shows the done panel without a reference when an accepted body is not JSON', async () => {
+    stubFetch(() => new Response('<html>', { status: 201 }));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(
+      await screen.findByText(messages.profile.public_reg.done_passed_title),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(messages.profile.public_reg.done_ref_prefix)).toBeNull();
   });
 });

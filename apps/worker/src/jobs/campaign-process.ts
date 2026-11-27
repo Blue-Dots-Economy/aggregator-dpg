@@ -1,22 +1,17 @@
 /**
- * `campaign-process` job processor (aggregator-dpg#579).
+ * `campaign-process` job processor in `@aggregator-dpg/worker`.
  *
- * Builds the real collaborators from the worker's environment (job DB client,
- * Signals client, S3, mailer) and delegates to the pure `runCampaignJob`
- * orchestrator. A missing Signals client (terminal misconfiguration) fails the
- * job so BullMQ surfaces it; any other collaborator rejection propagates so
- * BullMQ retries — except on the last attempt, where the orchestrator records
- * a terminal `failed` with the real reason instead of stranding the job in
- * `processing`. Belongs to `@aggregator-dpg/worker`.
+ * Builds the real collaborators (job DB client, Signals, object storage, mailer, voice
+ * provider) and calls `runCampaignJob`. Throws if Signals is not configured.
  */
 import type { CampaignProcessJob } from '@aggregator-dpg/queue';
 import { getMailer } from '@aggregator-dpg/mailer';
+import { getObjectStorage, type DownloadUrl, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getVoiceProvider } from '../services/voice-provider.js';
 import { getCampaignAuditWriter } from '../services/campaign-audit.js';
-import { putObject, signExportDownloadUrl } from '../object-storage.js';
 import * as jobClient from '../services/campaign-job-client.js';
 import { runCampaignJob } from '../services/campaign-process/index.js';
 
@@ -28,10 +23,28 @@ export interface CampaignAttempt {
   maxAttempts: number;
 }
 
+function exportRef(key: string): ObjectRef {
+  return { area: 'exports', key };
+}
+
+async function putExport(key: string, body: Buffer, contentType: string): Promise<void> {
+  const put = await getObjectStorage().put({ ref: exportRef(key), body, contentType });
+  if (!put.success) throw put.error;
+}
+
+async function signExportDownloadUrl(key: string): Promise<DownloadUrl> {
+  const signed = await getObjectStorage().createDownloadUrl({
+    ref: exportRef(key),
+    expiresInSeconds: config.EXPORT_URL_TTL_SECONDS,
+    filename: 'participant-export.csv',
+    contentType: 'text/csv',
+  });
+  if (!signed.success) throw signed.error;
+  return signed.value;
+}
+
 /**
- * Retry position assumed when a caller doesn't supply one — a single,
- * final attempt. A shared constant rather than an inline object-literal
- * default so the value isn't re-allocated per call (and per sonar S7737).
+ * Default retry position: a single, final attempt.
  */
 const SINGLE_ATTEMPT: CampaignAttempt = { attempt: 1, maxAttempts: 1 };
 
@@ -56,17 +69,14 @@ export async function processCampaignJob(
     client: jobClient,
     export: {
       fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
-      putObject,
+      putObject: putExport,
       signDownloadUrl: signExportDownloadUrl,
       sendMail: (input) => getMailer().send(input),
     },
     voice: {
       fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
-      // A getter, not an eager call: this deps object is built for every
-      // campaign-process job regardless of channel, and getVoiceProvider()
-      // throws ConfigError when RAYA_API_KEY is unset. Deferring construction
-      // until the voice handler actually reads `.provider` means an
-      // export/email job never trips over a missing Raya key.
+      // A getter, because getVoiceProvider() throws when RAYA_API_KEY is
+      // unset. Export and email jobs never read it.
       get provider() {
         return getVoiceProvider();
       },

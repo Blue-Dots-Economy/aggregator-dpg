@@ -76,7 +76,7 @@ docker compose up -d
 docker compose ps   # wait until aggregator-keycloak is "healthy"
 ```
 
-The Keycloak realm is auto-imported from `infra/keycloak/realms/realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version (`make kc-plugin`).
+The Keycloak realm is auto-imported from `infra/keycloak/realms/realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.4.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/Blue-Dots-Economy/keycloak-otp-authenticator> when you bump the version (`make kc-plugin`).
 
 > This JAR copy serves **local dev only**. The image that runs in real environments is built in the **bluedots-automation** repo (`dockerfiles/keycloak/` → `ghcr.io/<owner>/keycloak-server`), which bakes the SPI in and pre-runs `kc.sh build`. Keycloak is a shared common service for both DPGs, so bumping the JAR here does **not** change any deployment — that needs the same bump in bluedots-automation followed by an image rebuild. See `dockerfiles/keycloak/providers/README.md` there.
 
@@ -202,28 +202,28 @@ The realm import covers most settings. Two protocol mappers must be added by han
 
 **Clients → `aggregator-portal` → Client scopes → `aggregator-portal-dedicated` → Add mapper → By configuration → User Attribute**
 
-| Field               | Value           |
-| ------------------- | --------------- |
-| Name                | `aggregator_id` |
-| User Attribute      | `aggregator_id` |
-| Token Claim Name    | `aggregator_id` |
-| Claim JSON Type     | String          |
-| Add to ID token     | ON              |
-| Add to access token | ON              |
-| Add to userinfo     | ON              |
-| Multivalued         | OFF             |
+| Field               | Value     |
+| ------------------- | --------- |
+| Name                | `user_id` |
+| User Attribute      | `user_id` |
+| Token Claim Name    | `user_id` |
+| Claim JSON Type     | String    |
+| Add to ID token     | ON        |
+| Add to access token | ON        |
+| Add to userinfo     | ON        |
+| Multivalued         | OFF       |
 
-Repeat the steps for the `phoneNumber` attribute (token claim name `phone_number`). Without these mappers the profile endpoint returns `403 MISSING_AGGREGATOR_ID`.
+Repeat the steps for the `phoneNumber` attribute (token claim name `phone_number`). Without these mappers the profile endpoint returns `403 MISSING_USER_ID`.
 
 ### Portal entitlement gate (shared realm)
 
-The realm is shared with signals-dpg, so every Signals participant is also a valid realm user. Without a gate they can complete the whole OTP login against `aggregator-portal` and are only turned away afterwards, at the BFF callback (`NO_AGGREGATOR_ID` → `org_no_portal`).
+The realm is shared with signals-dpg, so every Signals participant is also a valid realm user. Without a gate they can complete the whole OTP login against `aggregator-portal` and are only turned away afterwards, at the BFF callback (`NO_USER_ID` → `org_no_portal`).
 
 `aggregator-portal` therefore has its own browser flow, `aggregator-portal-browser`, bound via `authenticationFlowBindingOverrides`. It is `aggregator-otp-browser` plus two conditional gates that deny **before** `otp-channel-choice-form` sends a code:
 
 | Gate                 | Condition                                        | Denies                                     |
 | -------------------- | ------------------------------------------------ | ------------------------------------------ |
-| `gate-*-coordinator` | user has no `aggregator_id` attribute            | Signals participants, org owners           |
+| `gate-*-coordinator` | user has no `user_id` attribute                  | Signals participants, org owners           |
 | `gate-*-approved`    | `decision_made` is absent, `pending`, `rejected` | unapproved / rejected coordinator sign-ups |
 
 Each gate exists twice — once inside the OTP forms sub-flow (the pre-OTP rejection) and once at the top level, because a user with a live Keycloak SSO cookie satisfies `auth-cookie` and never enters the forms sub-flow at all.
@@ -356,7 +356,7 @@ apps/
         client.ts          pg.Pool + Drizzle singleton
         migrate.ts         Migration runner
       routes/
-        aggregator-registrations.ts   POST /v1/aggregator-registrations/create
+        aggregator-registrations.ts   POST /v1/user/invite/accept, GET /v1/user/invite/read
         aggregator-approvals.ts       Admin-side review pages + decision POST
         aggregator-profile.ts         GET/PATCH /v1/aggregators/profile/me
         health.ts
@@ -410,7 +410,7 @@ docker-compose.yml         All backing services
 | `EADDRINUSE 0.0.0.0:4000`                                       | Old API still running. `lsof -ti:4000 \| xargs kill -9`                                                                                                                                                                  |
 | `KEYCLOAK_URL ... must be set`                                  | API started without picking up `apps/api/.env` — run `pnpm --filter @aggregator-dpg/api dev` from the repo root, not from `apps/api/`                                                                                    |
 | BFF: `service-token HTTP 401: invalid client credentials`       | `BFF_SERVICE_CLIENT_SECRET` mismatch with `aggregator-api` client secret in KC                                                                                                                                           |
-| `403 MISSING_AGGREGATOR_ID` from `/v1/aggregators/profile/me`   | KC protocol mapper for `aggregator_id` not configured (see §5)                                                                                                                                                           |
+| `403 MISSING_USER_ID` from `/v1/aggregators/profile/me`         | KC protocol mapper for `user_id` not configured (see §5)                                                                                                                                                                 |
 | `409 PHONE_EXISTS` on registration                              | Phone already used by another KC user (unique check is intentional — same phone can't OTP-route to two accounts)                                                                                                         |
 | Approval link page shows "Already approved" on first click      | Test data left over — KC user has `decision_made=approved` attribute. Delete the user in KC admin or pick a different aggregator id                                                                                      |
 | Login complains "user does not exist" with the registered email | KC user's email field is empty. Either (a) re-register so the new createUser path populates email + emailVerified, or (b) edit the user in KC admin                                                                      |

@@ -1,0 +1,48 @@
+/**
+ * Permissions (network admin, read-only, #871): every permission in the
+ * catalogue, retired ones included, with the roles that grant it. Reads the
+ * roles too, for the summary and the role names. Other actors get "not
+ * found", as for anything out of reach.
+ */
+
+import { notFound } from 'next/navigation';
+import { withRoleDisplayNames } from '@/lib/role-display';
+import { getTranslations } from 'next-intl/server';
+import { getConsoleActor } from '@/lib/console-actor';
+import { consoleReadOptional } from '@/lib/console-api.server';
+import { can } from '@/lib/capabilities';
+import { Topbar } from '@/components/shell/Topbar';
+import { ConsoleSection } from '@/components/console/ConsoleUi';
+import { AccessCatalogue } from '@/components/console/AccessCatalogue';
+import {
+  CataloguePermissionsResponseSchema,
+  CatalogueRolesResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
+
+export default async function ConsoleAccessPermissionsPage() {
+  const t = await getTranslations('console.access');
+  const baseRoleName = (await getTranslations('console'))('roles.base_role_name');
+  const actor = await getConsoleActor();
+  if (!actor.ok) return null;
+  if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
+  const [roles, permissions] = await Promise.all([
+    consoleReadOptional('/v1/rbac/roles', CatalogueRolesResponseSchema),
+    consoleReadOptional('/v1/rbac/permissions', CataloguePermissionsResponseSchema),
+  ]);
+  return (
+    <>
+      <Topbar title={t('title')} />
+      {roles && permissions ? (
+        <AccessCatalogue
+          tab="permissions"
+          roles={withRoleDisplayNames(roles.roles, baseRoleName)}
+          permissions={permissions.permissions}
+        />
+      ) : (
+        <ConsoleSection>
+          <p className="text-[13.5px] text-ink-500">{t('off')}</p>
+        </ConsoleSection>
+      )}
+    </>
+  );
+}

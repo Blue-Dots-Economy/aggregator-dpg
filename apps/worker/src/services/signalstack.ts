@@ -1,12 +1,8 @@
 /**
- * Lazy SignalStack writer factory for the worker process.
+ * Signals writer factory for the worker app.
  *
- * Returns a singleton HttpSignalStackWriter when SIGNALSTACK_BASE_URL is set
- * and the configured credential (apikey or bearer — SIGNALSTACK_AUTH_MODE)
- * is fully configured, or `null` when signalstack push is disabled. Callers
- * should treat a null return as "skip the push, log nothing" — the env vars
- * are the operator's opt-in switch.
- *
+ * Returns a singleton writer when SIGNALSTACK_BASE_URL and the credentials for
+ * SIGNALSTACK_AUTH_MODE are set, or `null` when the push is disabled.
  * Tests inject a fake via `_setSignalStackWriter`.
  */
 
@@ -28,14 +24,17 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
 
   if (config.SIGNALSTACK_AUTH_MODE === 'bearer') {
     const { SIGNALSTACK_CLIENT_ID: clientId, SIGNALSTACK_CLIENT_SECRET: clientSecret } = config;
-    const { KEYCLOAK_URL: keycloakUrl, KEYCLOAK_REALM: keycloakRealm } = config;
+    const { KEYCLOAK_URL: keycloakUrl } = config;
+    // Signals may trust a different realm from this app's users.
+    // Falls back to KEYCLOAK_REALM.
+    const keycloakRealm = config.SIGNALSTACK_KEYCLOAK_REALM || config.KEYCLOAK_REALM;
     if (!clientId || !clientSecret || !keycloakUrl || !keycloakRealm) {
       logger.warn({
         status: 'warn',
         sub: 'signalstack.init',
         message:
           'SIGNALSTACK_AUTH_MODE=bearer requires SIGNALSTACK_CLIENT_ID, SIGNALSTACK_CLIENT_SECRET, ' +
-          'KEYCLOAK_URL, and KEYCLOAK_REALM — push disabled',
+          'KEYCLOAK_URL, and SIGNALSTACK_KEYCLOAK_REALM (or KEYCLOAK_REALM) — push disabled',
       });
       writer = null;
       return null;

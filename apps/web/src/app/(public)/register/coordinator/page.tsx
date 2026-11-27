@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { getSession } from '../../../../lib/server-session';
 import { loadRegistrationSchema } from '../../../../lib/aggregator-schema.server';
-import { isOrgHierarchyEnabled, loadConsentContent } from '../register-server';
+import { loadConsentContent } from '../register-server';
+import { readInvite } from '../../../../lib/invite-read.server';
 import { CoordinatorInviteView } from './CoordinatorInviteView';
 
 export const metadata: Metadata = {
@@ -16,16 +17,11 @@ interface CoordinatorInvitePageProps {
 }
 
 /**
- * Coordinator invite landing (#701): `/register/coordinator?invite=<jwt>`.
+ * Coordinator invite landing page: `/register/coordinator?invite=<jwt>`.
  *
- * Reached from a coordinator-invite email. Gating:
- * 1. An active session → dashboard.
- * 2. `ORG_HIERARCHY_ENABLED` off, or no `invite` token → `/login` (invite-only;
- *    a bare visit has no self-serve register path by design).
- *
- * The token is decoded client-side for display only (org name + bound email);
- * the submit endpoint is the security gate — it verifies the signature,
- * enforces the email binding, and consumes the invite.
+ * An active session redirects to the dashboard. A missing `invite` token
+ * redirects to `/login`. The invite is read on the server; the accept
+ * endpoint checks it again, enforces the email and uses it up.
  */
 export default async function CoordinatorInvitePage({
   searchParams,
@@ -34,16 +30,20 @@ export default async function CoordinatorInvitePage({
   if (session) redirect('/dashboard');
 
   const { invite } = await searchParams;
-  if (!isOrgHierarchyEnabled() || !invite) redirect('/login');
+  if (!invite) redirect('/login');
 
-  const { schema, uiSchema } = await loadRegistrationSchema();
-  const consentContent = await loadConsentContent();
+  const [{ schema, uiSchema }, consentContent, read] = await Promise.all([
+    loadRegistrationSchema(),
+    loadConsentContent(),
+    readInvite('user', invite),
+  ]);
 
   return (
     <CoordinatorInviteView
       schema={schema}
       uiSchema={uiSchema}
       inviteToken={invite}
+      invite={read}
       aggregatorConsentContent={consentContent?.aggregator ?? null}
     />
   );

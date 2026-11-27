@@ -1,0 +1,102 @@
+/**
+ * Organisation console layout.
+ *
+ * Server Component. Requires a session and never runs in acting mode: a
+ * session with an acting account is sent through the leave route first, so
+ * console calls never carry the acting-account header. It resolves the actor from
+ * `GET /v1/user/read/me`, cached in the session for about 60 s. Coordinators go
+ * to `/dashboard`; admins the API does not know, or without an active org, are
+ * signed out with a reason.
+ *
+ * Uses the coordinator portal's sidebar frame, with the same Contact support
+ * entry when the API reports it enabled.
+ */
+
+import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
+import type { ReactNode } from 'react';
+import { getSession } from '@/lib/server-session';
+import { getConsoleActor, type ConsoleActorFailure } from '@/lib/console-actor';
+import { getTranslations } from 'next-intl/server';
+import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
+import { AuthProvider } from '@/lib/auth-context';
+import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ActingEndedNotice } from '@/components/console/ActingEndedNotice';
+import { actingLeaveHref } from '@/lib/acting';
+import { canViewCoordinators, coordinatorsHref, ownProfileOrgId } from '@/lib/capabilities';
+
+export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const session = await getSession();
+  const path = (await headers()).get('x-pathname') ?? '/console';
+  if (!session) redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
+  if (session.refreshTokenExp && session.refreshTokenExp <= Date.now()) {
+    redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
+  }
+
+  if (session.actingAccountId !== undefined) redirect(actingLeaveHref(path));
+
+  const actor = await getConsoleActor();
+  if (!actor.ok) leaveConsole(actor.reason, path);
+  if (actor.me.kind === 'coordinator') redirect('/dashboard');
+
+  const [t, supportEnabled] = await Promise.all([
+    getTranslations('console'),
+    fetchSupportEnabled(),
+  ]);
+  const me = actor.me;
+  const name = me.user.contact.name ?? me.user.contact.email;
+  return (
+    <AuthProvider
+      initialUser={{ id: me.user.id, name, org: '', email: me.user.contact.email }}
+      supportEnabled={supportEnabled}
+      capabilities={me.capabilities ?? null}
+    >
+      {/* Column below `lg` (menu bar above the page), row from `lg` up, as in
+          the coordinator portal (#793). */}
+      <div className="flex flex-col lg:flex-row min-h-dvh">
+        <ConsoleSidebar
+          teamHref={canViewCoordinators(me) ? coordinatorsHref(me) : null}
+          showProfile={ownProfileOrgId(me) !== null}
+          ownCoordinatorAccountId={me.own_coordinator_account_id ?? null}
+          account={{
+            title: name,
+            subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
+            // No phone, no row. The popup skips a title that repeats the email.
+            details: [
+              { label: t('account.email'), value: me.user.contact.email, icon: 'mail' as const },
+              ...(me.user.contact.phone
+                ? [
+                    {
+                      label: t('account.phone'),
+                      value: me.user.contact.phone,
+                      icon: 'phone' as const,
+                    },
+                  ]
+                : []),
+            ],
+          }}
+        />
+        <main className="flex-1 min-w-0 overflow-x-clip">
+          <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+            <ActingEndedNotice />
+            {children}
+          </div>
+        </main>
+      </div>
+    </AuthProvider>
+  );
+}
+
+/**
+ * Sends a caller who cannot use the console to sign-in, the coordinator portal or sign-out.
+ *
+ * @throws {Error} When the console cannot be read.
+ */
+function leaveConsole(reason: ConsoleActorFailure, path: string): never {
+  if (reason === 'no_session') redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
+  if (reason === 'not_approved') redirect('/dashboard');
+  if (reason === 'unavailable') throw new Error('console unavailable');
+  redirect(
+    `/api/auth/logout?reason=${reason === 'no_org' ? 'console_no_org' : 'console_not_provisioned'}`,
+  );
+}

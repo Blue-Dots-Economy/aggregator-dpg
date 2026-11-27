@@ -1,24 +1,20 @@
 'use client';
 
 /**
- * Carries the runtime-resolved {@link FormRuntimeConfig} across the
- * server/client boundary for the schema-driven form widgets.
+ * Passes the runtime-resolved {@link FormRuntimeConfig} from the server to the
+ * schema-driven form widgets.
  *
- * Exists for the same reason as `EnabledLocalesProvider`: these values must stay
- * RUNTIME settings. A client component cannot read them — Next.js only exposes
- * `NEXT_PUBLIC_*` to the browser, and those are inlined at `next build`. The
- * root layout is a server component that every route nests under, so it resolves
- * the config once per request and publishes it here.
- *
- * Consumers outside a provider get the defaults, which degrade to plain text
- * inputs and the key-less geocoder rather than throwing — a mis-wired subtree
- * loses autocomplete, it does not lose the form.
+ * The root layout resolves the config once per request and publishes it here,
+ * so the values stay runtime settings rather than build-time `NEXT_PUBLIC_*`.
+ * Consumers outside a provider get defaults: plain text inputs and the key-less
+ * geocoder.
  *
  * @module apps/web/lib/FormRuntimeConfigProvider
  */
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { DEFAULT_COLLEGE_DATASET, type FormRuntimeConfig } from './form-runtime-config';
+import { parsePhoneCountries, type PhoneCountries } from './phone';
 
 const FormRuntimeConfigContext = createContext<FormRuntimeConfig | null>(null);
 
@@ -47,4 +43,14 @@ export function FormRuntimeConfigProvider({
  */
 export function useFormRuntimeConfig(): FormRuntimeConfig {
   return useContext(FormRuntimeConfigContext) ?? FALLBACK_CONFIG;
+}
+
+/**
+ * The countries a phone field offers, from the deployment's `PHONE_COUNTRIES`.
+ *
+ * @returns The parsed list (India only when unset); the first is the default.
+ */
+export function usePhoneCountries(): PhoneCountries {
+  const raw = useFormRuntimeConfig().phoneCountries;
+  return useMemo(() => parsePhoneCountries(raw), [raw]);
 }

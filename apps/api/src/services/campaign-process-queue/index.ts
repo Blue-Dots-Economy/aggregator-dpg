@@ -1,10 +1,9 @@
 /**
- * BullMQ enqueue surface for the unified campaign-process pipeline (#579).
+ * BullMQ enqueue surface for the campaign-process pipeline.
  *
- * The API validates + persists the `campaign_job` row, then enqueues a job
- * carrying only its id; the worker's `campaign` role loads the rest and runs
- * the per-channel handler. Connection + queue are lazy singletons, mirroring
- * `services/campaign-export-queue`. Belongs to `@aggregator-dpg/api`.
+ * The API saves the `campaign_job` row, then enqueues a job carrying only its
+ * id; the worker's `campaign` role loads the rest and runs the channel
+ * handler. Connection and queue are lazy singletons. Belongs to `@aggregator-dpg/api`.
  */
 
 import { Queue } from 'bullmq';
@@ -17,6 +16,7 @@ import {
 import type { Redis } from 'ioredis';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let connection: Redis | null = null;
 let processQueue: Queue<CampaignProcessJob> | null = null;
@@ -32,9 +32,8 @@ function getConnection(): Redis {
 
 function getProcessQueue(): Queue<CampaignProcessJob> {
   if (processQueue) return processQueue;
-  // No `attempts` here: one queue serves every channel, so baking in the
-  // export knob would silently govern email and voice too. Callers pass their
-  // own CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
+  // No `attempts` here: the queue serves every channel, so callers pass
+  // CAMPAIGN_<CHANNEL>_ATTEMPTS per enqueue.
   processQueue = new Queue<CampaignProcessJob>(QueueName.CampaignProcess, {
     connection: getConnection(),
     defaultJobOptions: CAMPAIGN_PROCESS_JOB_OPTS,
@@ -43,10 +42,10 @@ function getProcessQueue(): Queue<CampaignProcessJob> {
 }
 
 /**
- * Enqueues a `campaign-process` job. Uses the durable `campaign_job.id` as the
- * BullMQ jobId so a same-job re-enqueue (e.g. an idempotency replay that races)
- * is de-duplicated by BullMQ. Throws on enqueue failure so the route can
- * surface a 503 rather than acknowledge a job that was never queued.
+ * Enqueues a `campaign-process` job.
+ *
+ * Uses `campaign_job.id` as the BullMQ jobId, so a re-enqueue of the same job
+ * is de-duplicated. Throws on failure so the route can answer 503.
  *
  * @param payload - `{ jobId }` — the campaign_job row to process.
  * @param opts.attempts - Retry count for this channel
@@ -72,7 +71,7 @@ export async function enqueueCampaignProcess(
     logger.error({
       operation: 'campaignProcessQueue.enqueue',
       status: 'failure',
-      error: (err as Error).message,
+      error: errorMessage(err),
       latency_ms: Date.now() - start,
       job_id: payload.jobId,
     });
@@ -81,8 +80,7 @@ export async function enqueueCampaignProcess(
 }
 
 /**
- * Closes the queue and its Redis connection. Idempotent; call from process
- * shutdown so the connection is not leaked on SIGTERM.
+ * Closes the queue and its Redis connection. Idempotent; call on process shutdown.
  */
 export async function closeCampaignProcessQueue(): Promise<void> {
   await processQueue?.close();

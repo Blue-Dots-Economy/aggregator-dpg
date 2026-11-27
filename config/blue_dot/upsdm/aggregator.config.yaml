@@ -37,7 +37,7 @@ aggregator:
   # Realm roles that mark a Signals participant. One Keycloak realm serves this
   # portal and the Signals app, so signing into either creates an SSO session the
   # other silently reuses; this portal then correctly refuses the token (no
-  # aggregator_id) and uses this list to tell the visitor WHICH account they are
+  # user_id) and uses this list to tell the visitor WHICH account they are
   # signed in as rather than showing everyone the org-owner message (#753).
   #
   # Must name the roles Signals actually stamps — its KEYCLOAK_REQUIRED_REALM_ROLES.
@@ -84,5 +84,40 @@ aggregator:
       public_hint_i18n_key: null
       signals_cta: true
 
+    # Two-option link: the public page offers both channels. Keep `voice` and
+    # `form` above: removing either changes the behaviour of links already issued.
+    voice_or_form:
+      label_i18n_key: registration_mode.voice_or_form.label
+      submission_shape: account_and_profile
+      public_hint_i18n_key: null
+      signals_cta: true
+      offers: [voice, form]
+
+  # ── Voice bots (the number shown on a two-option link) ─────────────────────
+  # One entry per calling number. Read at startup: a number change needs a
+  # config rollout. Left empty until a number is provisioned. Example (comment only):
+  #   - key: example_bot
+  #     display_name: Example helpline
+  #     phone: '+919999999999'
+  #     languages: [en, hi]
+  #     domains: [seeker]
+  #     description: Optional note shown to admins
+  voice_bots: []
+  # Per-domain default when a link names no bot: domain id -> bot key.
+  # Without an entry, the only bot serving that domain is used, else none.
+  # Required for every domain that two or more bots serve (load fails otherwise).
+  # default_voice_bots:
+  #   seeker: example_bot
+
   admin_emails:
     - abhishekg@sanketika.in
+
+  # ── Organisation tree ──────────────────────────────────────────────────────
+  # Omit the block for a flat tree: every organisation sits directly under the
+  # network and at most 50 organisations. Every organisation is "Aggregator"
+  # until its parent's owner defines "known as" values in the console.
+  organisation:
+    hierarchy:
+      max_depth: 10 # Deepest allowed aggregator org; 1 is directly under the network.
+      max_children: 100 # Direct children of any org, the network included.
+      max_total_orgs: 200 # Aggregator orgs in the instance (root and Default org not counted).

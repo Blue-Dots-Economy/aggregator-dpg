@@ -1,18 +1,17 @@
 /**
- * Coordinator invite-token mint and verify (#700).
+ * Invite-token mint and verify (`@aggregator-dpg/api`).
  *
- * Mirrors `approval-token.ts`: HS256 via `jose`, issuer `aggregator-api`,
- * secret reused from `APPROVAL_TOKEN_SECRET`. The distinguishing claim is the
- * **audience `aggregator-invite`**, so an approval/admin token can never be
- * replayed as an invite (and vice versa) even though they share a secret.
+ * HS256 via `jose`, issuer `aggregator-api`, secret `APPROVAL_TOKEN_SECRET`
+ * (`token-common.ts`). The audience `aggregator-invite` stops other tokens
+ * sharing the secret from being replayed as invites.
  *
- * The token carries the invite's identity (`sub` = the `registration_invites`
- * row `jti`), the org it admits to (`org`), and the bound recipient (`email`,
- * enforced on submit). Single-use is NOT a token property — it is the DB row's
- * `pending → consumed` CAS; the token only proves who/what/where.
+ * Claims: `sub` (the `registration_invites` row `jti`), `role`, `org` and
+ * `email`, the invited address. Single use is enforced by the DB row's
+ * `pending → consumed` update, not the token.
  */
 
 import { SignJWT } from 'jose';
+import type { InviteRole } from './registration-invites-store/index.js';
 import {
   TOKEN_ALG,
   TOKEN_ISSUER,
@@ -24,17 +23,23 @@ import {
 } from './token-common.js';
 
 const AUDIENCE = 'aggregator-invite';
-const INVITE_ROLE = 'coordinator';
+const INVITE_ROLES: ReadonlySet<string> = new Set<InviteRole>(['coordinator', 'org_owner']);
 /** 14 days — overridable per-call via `ttlSec` (`INVITE_TOKEN_TTL_SECONDS`). */
 const DEFAULT_TTL_SEC = 14 * 24 * 60 * 60;
 
-/** The single invite role in this phase. */
-export type InviteRole = typeof INVITE_ROLE;
+export type { InviteRole };
+
+/** Narrows a token claim to an invite role. */
+function isInviteRole(v: unknown): v is InviteRole {
+  return typeof v === 'string' && INVITE_ROLES.has(v);
+}
 
 export interface MintInviteInput {
   /** `jti` of the `registration_invites` row this token represents. */
   jti: string;
-  /** `parent_org_id` the invite admits the coordinator to. */
+  /** Defaults to `coordinator`. */
+  role?: InviteRole;
+  /** The org the coordinator joins, or the parent of the invited org. */
   org: string;
   /** Invited email — bound; enforced against the submitted email. */
   email: string;
@@ -48,17 +53,17 @@ export interface MintInviteResult {
 }
 
 /**
- * Issues a signed coordinator-invite token bound to an invite row, org, and
- * recipient email.
+ * Issues a signed invite token bound to an invite row, role, org and recipient email.
  *
- * @param input - Invite `jti`, `org` (parent_org_id), bound `email`, optional TTL.
+ * @param input - Invite `jti`, role, `org`, bound `email`, optional TTL.
  * @returns The token string and its absolute expiry timestamp.
  * @throws {Error} If `APPROVAL_TOKEN_SECRET` is unset or too short.
  */
 export async function mintInviteToken(input: MintInviteInput): Promise<MintInviteResult> {
   const ttl = input.ttlSec ?? DEFAULT_TTL_SEC;
   const expiresAt = new Date(Date.now() + ttl * 1000);
-  const token = await new SignJWT({ role: INVITE_ROLE, org: input.org, email: input.email })
+  const role = input.role ?? 'coordinator';
+  const token = await new SignJWT({ role, org: input.org, email: input.email })
     .setProtectedHeader({ alg: TOKEN_ALG })
     .setSubject(input.jti)
     .setIssuer(TOKEN_ISSUER)
@@ -74,7 +79,7 @@ export interface VerifyInviteOk {
   /** `jti` of the invite row (token `sub`). */
   jti: string;
   role: InviteRole;
-  /** `parent_org_id` from the token. */
+  /** The org id (`organisations.id`) from the token. */
   org: string;
   /** Bound recipient email (normalised at mint time). */
   email: string;
@@ -89,11 +94,9 @@ export type VerifyInviteResult = VerifyInviteOk | VerifyInviteErr;
 
 /**
  * Verifies an invite token's signature, audience, issuer, expiry, and required
- * claims. Unlike the approval token there is no `allowExpired` mode: an expired
- * invite has no in-app recovery — the owner re-mints (§6), so the caller only
- * ever needs a strict verify.
+ * claims. There is no `allowExpired` mode; the owner re-sends expired invites.
  *
- * @param token - Raw JWT string from the coordinator invite link.
+ * @param token - Raw JWT string from the invite link.
  * @returns Parsed `jti` / `org` / `email` / `role` on success; structured error otherwise.
  */
 export async function verifyInviteToken(token: string): Promise<VerifyInviteResult> {
@@ -105,7 +108,8 @@ export async function verifyInviteToken(token: string): Promise<VerifyInviteResu
     if (!payload.sub) {
       return { ok: false, error: { code: 'INVALID', message: 'missing sub claim' } };
     }
-    if (payload.role !== INVITE_ROLE) {
+    const role = payload.role;
+    if (!isInviteRole(role)) {
       return { ok: false, error: { code: 'INVALID', message: 'bad role claim' } };
     }
     const org = typeof payload.org === 'string' ? payload.org : '';
@@ -113,7 +117,7 @@ export async function verifyInviteToken(token: string): Promise<VerifyInviteResu
     if (!org || !email) {
       return { ok: false, error: { code: 'INVALID', message: 'missing org/email claim' } };
     }
-    return { ok: true, jti: payload.sub, role: INVITE_ROLE, org, email };
+    return { ok: true, jti: payload.sub, role, org, email };
   } catch (err) {
     return { ok: false, error: mapJoseError(err) };
   }

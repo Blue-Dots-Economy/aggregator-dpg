@@ -2,16 +2,11 @@
 /**
  * Contact-support modal.
  *
- * Collects a complaint / support request: Name, Email, Phone (all prefilled
- * from the session where available and editable), a Type selector, a Details
- * textarea, and a required consent checkbox. Submit is blocked until Details
- * is non-empty, at least one contact channel is filled, and consent is
- * checked. POSTs to the BFF `POST /api/support` (which forwards to the
- * aggregator API's `POST /v1/support` and emails the configured support
- * address). Shows an inline success / unavailable (SUPPORT_EMAIL not
- * configured, 503) / error status rather than a toast — matches the rest of
- * the portal's inline-notice pattern (see `ConsentModal`). Dismissible via
- * the close button, overlay, or ESC.
+ * Collects a support request: Name, Email, Phone (prefilled from the session
+ * and editable), Type, Details, and a required consent checkbox. A Submit
+ * with a missing or wrong field shows the message under that field. Posts to
+ * `POST /api/support`. Shows success, unavailable (503), or error inline.
+ * Closes on the close button, overlay click, or ESC.
  *
  * @module apps/web/src/components/support/SupportDialog
  */
@@ -20,9 +15,16 @@ import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 import { Button } from '../ui/Button';
+import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 import { useAuth } from '../../lib/auth-context';
+import { z } from 'zod';
+import { readApiError, type ApiError } from '@/lib/api-error';
+import { FieldMessage, useHandFieldErrors, type HandFieldError } from '../forms/useHandFieldErrors';
+import { PhoneInput } from '../forms/PhoneInput';
+import { isAcceptedPhone } from '@/lib/phone';
+import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
 import {
-  SUPPORT_CONFIG_FALLBACK,
   encodeAttachments,
   formatBytes,
   pickerAccept,
@@ -30,40 +32,67 @@ import {
   type AttachmentRejection,
   type SupportConfig,
 } from '../../lib/support-attachments';
+import { withStableKeys } from '@/lib/list-keys';
+import { useSupportConfig } from '@/hooks/useSupportConfig';
+import { useIsClient } from '@/hooks/useIsClient';
+import { SelectField } from '@/components/ui/SelectField';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
   /** Whether the dialog is currently visible. */
   open: boolean;
-  /** Callback fired when the dialog should be closed (sets open to false). */
+  /** Called when the dialog should close. */
   onOpenChange: (open: boolean) => void;
 }
 
 type Status =
-  | 'idle'
-  | 'sending'
-  | 'success'
-  | 'unavailable'
-  | 'error'
-  | 'invalid'
-  | 'rate_limited'
-  | 'attachment_rejected';
-type SupportType = 'complaint' | 'support_request';
+  'idle' | 'sending' | 'success' | 'unavailable' | 'error' | 'rate_limited' | 'attachment_rejected';
+const SUPPORT_TYPES = ['complaint', 'support_request'] as const;
+type SupportType = (typeof SUPPORT_TYPES)[number];
 
-/**
- * Reads the API's `{ error: { code, detail } }` envelope from a failed
- * response, tolerating a non-JSON body (a proxy error page, say).
- *
- * @param res - The failed response.
- * @returns The error code and detail, or null when unreadable.
- */
-async function readErrorCode(res: Response): Promise<{ code?: string; detail?: string } | null> {
-  try {
-    const body = (await res.json()) as { error?: { code?: string; detail?: string } };
-    return body.error ?? null;
-  } catch {
-    return null;
+/** Narrows a picked value to a request type the API accepts. */
+function isSupportType(value: string): value is SupportType {
+  const types: readonly string[] = SUPPORT_TYPES;
+  return types.includes(value);
+}
+
+type SupportField = 'name' | 'email' | 'phone' | 'details' | 'consent';
+const SUPPORT_FIELDS: ReadonlySet<string> = new Set<SupportField>([
+  'name',
+  'email',
+  'phone',
+  'details',
+  'consent',
+]);
+
+function isSupportField(key: unknown): key is SupportField {
+  return typeof key === 'string' && SUPPORT_FIELDS.has(key);
+}
+
+/** A `400 SCHEMA_VALIDATION`'s issues, as far as they name a field. */
+const IssuesSchema = z.object({
+  issues: z
+    .array(
+      z.object({
+        instancePath: z.string().optional().catch(undefined),
+        path: z
+          .array(z.union([z.string(), z.number()]))
+          .optional()
+          .catch(undefined),
+      }),
+    )
+    .catch([]),
+});
+
+/** Form fields named by a `400 SCHEMA_VALIDATION`'s issues. */
+function rejectedFields(error: ApiError | null): SupportField[] {
+  const parsed = IssuesSchema.safeParse(error?.fields ?? {});
+  const out = new Set<SupportField>();
+  for (const issue of parsed.success ? parsed.data.issues : []) {
+    const first = issue.path?.[0] ?? (issue.instancePath ?? '').split('/').find(Boolean);
+    if (isSupportField(first)) out.add(first);
   }
+  return [...out];
 }
 
 /** What the dialog should show after a submit response. */
@@ -73,12 +102,13 @@ interface SubmitOutcome {
   attachmentError?: string;
   /** Set to carry the API's own rejection detail (it names the file). */
   serverDetail?: string | null;
+  /** Fields the API rejected. */
+  rejected?: SupportField[];
 }
 
 /**
- * Maps a submit response to what the dialog shows. Extracted from the submit
- * handler so the status ladder reads as a list and each failure keeps its own
- * specific message instead of collapsing into the generic error line.
+ * Maps a submit response to what the dialog shows. Each failure keeps its own
+ * message.
  *
  * @param res - The response from `POST /api/support`.
  * @param t - The `support` namespace translator.
@@ -94,26 +124,25 @@ async function resolveSubmitOutcome(
   if (res.status === 503) return { status: 'unavailable' };
   if (res.status === 429) return { status: 'rate_limited' };
   if (res.status === 413) {
-    // The body limit, not the attachment check — a payload this far over the cap
-    // never reaches the handler's specific codes.
+    // Request body over the size limit; the handler never saw it.
     return {
       status: 'idle',
       attachmentError: t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) }),
     };
   }
-  // A server-side attachment rejection names the offending file, so it is more
-  // useful than the generic failure line.
-  const error = await readErrorCode(res);
+  // A server-side attachment rejection names the file, so show it.
+  const error = await readApiError(res);
   if (error?.code?.startsWith('ATTACHMENT_')) {
     return { status: 'attachment_rejected', serverDetail: error.detail ?? null };
   }
+  const rejected = rejectedFields(error);
+  if (rejected.length > 0) return { status: 'idle', rejected };
   return { status: 'error' };
 }
 
 /**
  * Translates a client-side attachment rejection into the inline message shown
- * under the picker. Split out so each reason reads as its own line rather than a
- * nested conditional.
+ * under the picker.
  *
  * @param rejection - The failed selection result.
  * @param t - The `support` namespace translator.
@@ -132,21 +161,41 @@ function rejectionMessage(
   return t('attachment_bad_type', { name: rejection.filename });
 }
 
+/** Identifies a picked file by its name, size and modification time. */
+function attachmentKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
  *
- * Returns null when `open` is false so the form state does not linger
- * between openings.
+ * Returns null when `open` is false. The form mounts on each opening, so its
+ * state starts again from the session user.
  *
  * @param props - Open state and change handler.
  * @returns The modal overlay element, or null when closed.
  */
-export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.Element | null {
+export function SupportDialog({
+  open,
+  onOpenChange,
+}: Readonly<SupportDialogProps>): JSX.Element | null {
+  // Render the portal only on the client, since `document` is client-only.
+  const isClient = useIsClient();
+  if (!open || !isClient) return null;
+  return <SupportForm onOpenChange={onOpenChange} />;
+}
+
+/** The open dialog: form state, submit and the portal. */
+function SupportForm({
+  onOpenChange,
+}: Readonly<Pick<SupportDialogProps, 'onOpenChange'>>): JSX.Element {
   const t = useTranslations('support');
+  const tForm = useTranslations('form');
   const { user } = useAuth();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const phoneCountries = usePhoneCountries();
+  const [name, setName] = useState(user?.name ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
   const [type, setType] = useState<SupportType>('complaint');
   const [details, setDetails] = useState('');
   const [consent, setConsent] = useState(false);
@@ -154,70 +203,61 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const [attachments, setAttachments] = useState<File[]>([]);
   /** Client-side attachment rejection, shown inline like the other notices. */
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  /** Server-side attachment rejection message — it names the offending file. */
+  /** Server-side attachment rejection message; it names the file. */
   const [serverDetail, setServerDetail] = useState<string | null>(null);
-  const [config, setConfig] = useState<SupportConfig>(SUPPORT_CONFIG_FALLBACK);
+  // Attachment limits come from the API. If the read fails, defaults stay.
+  const config = useSupportConfig();
+  const copy = useFieldErrorCopy();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Portal target only exists on the client; gate render until mounted so
-  // the server pass (and first client paint) doesn't touch `document`.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
 
-  // Reset form state each time the dialog opens so re-opening starts fresh,
-  // reseeding the prefill fields from the current session user.
+  // Dismiss on ESC.
   useEffect(() => {
-    if (open) {
-      setName(user?.name ?? '');
-      setEmail(user?.email ?? '');
-      setPhone(user?.phone ?? '');
-      setType('complaint');
-      setDetails('');
-      setConsent(false);
-      setStatus('idle');
-      setAttachments([]);
-      setAttachmentError(null);
-      setServerDetail(null);
-    }
-  }, [open, user]);
-
-  // Attachment limits come from the API, so the form validates against the same
-  // numbers it enforces and an operator can raise them without a web rebuild.
-  // A failed fetch leaves the defaults in place rather than blocking the form.
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    void fetch('/api/support/config')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: SupportConfig | null) => {
-        if (active && data) setConfig(data);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [open]);
-
-  // Dismiss on ESC, mirroring ConsentModal.
-  useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onOpenChange(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onOpenChange]);
-
-  if (!open || !mounted) return null;
+  }, [onOpenChange]);
 
   const hasContact = email.trim() !== '' || phone.trim() !== '';
-  const canSubmit = details.trim() !== '' && hasContact && consent;
+  const req = (ok: boolean, label: string): HandFieldError | null =>
+    ok ? null : { kind: 'required', message: copy.required(label) };
+  /** Email error: a contact is needed, and a typed email must look like one. */
+  const emailFieldError = (): HandFieldError | null => {
+    if (!hasContact) return { kind: 'required', message: t('error_contact_required') };
+    const typed = email.trim();
+    if (typed && !isEmailAddress(typed.toLowerCase())) {
+      return { kind: 'invalid', message: copy.invalid(t('error_email_invalid')) };
+    }
+    return null;
+  };
+  const fieldErrors: Partial<Record<SupportField, HandFieldError | null>> = {
+    name: req(name.trim() !== '', t('label_name')),
+    email: emailFieldError(),
+    phone:
+      phone.trim() && !isAcceptedPhone(phone.trim(), phoneCountries)
+        ? { kind: 'invalid', message: copy.invalid(t('error_phone_invalid')) }
+        : null,
+    details: req(details.trim() !== '', t('label_details')),
+    consent: req(consent, t('consent_short')),
+  };
+  const fe = useHandFieldErrors<SupportField>('support', fieldErrors);
+  const fieldLabel: Record<SupportField, string> = {
+    name: t('label_name'),
+    email: t('label_email'),
+    phone: t('label_phone'),
+    details: t('label_details'),
+    consent: t('consent_short'),
+  };
+  /** Props for a control, clearing its server message once edited. */
+  const ctl = (key: SupportField) => fe.controlProps(key);
+  const edited = (key: SupportField) => fe.clearServer(key);
 
   const attachedBytes = attachments.reduce((sum, file) => sum + file.size, 0);
 
   const onFilesSelected = (e: ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(e.target.files ?? []);
-    // Clear either way, so re-picking the same file still fires onChange and a
-    // rejected pick doesn't linger in the control.
+    // Clear the input so picking the same file again fires onChange.
     e.target.value = '';
     if (incoming.length === 0) return;
 
@@ -237,15 +277,11 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
 
   const submit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!canSubmit) {
-      setStatus('invalid');
-      return;
-    }
+    if (!fe.validate()) return;
     setStatus('sending');
     setServerDetail(null);
     try {
-      // Encoded inside the sending state: a multi-MB file takes long enough
-      // that the button must already be disabled.
+      // Encoding counts as sending, so the button is disabled during it.
       const encoded = attachments.length ? await encodeAttachments(attachments) : undefined;
       const res = await fetch('/api/support', {
         method: 'POST',
@@ -263,6 +299,16 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       const outcome = await resolveSubmitOutcome(res, t, config);
       if (outcome.attachmentError !== undefined) setAttachmentError(outcome.attachmentError);
       if (outcome.serverDetail !== undefined) setServerDetail(outcome.serverDetail);
+      if (outcome.rejected) {
+        fe.setServerErrors(
+          Object.fromEntries(
+            outcome.rejected.map((k) => [
+              k,
+              copy.invalid(tForm('error_value_rejected', { label: fieldLabel[k] })),
+            ]),
+          ),
+        );
+      }
       setStatus(outcome.status);
     } catch {
       setStatus('error');
@@ -270,7 +316,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   };
 
   const inputClass =
-    // 16px below `sm` so iOS Safari does not zoom the page when a field is focused.
+    // 16px below `sm` so iOS Safari does not zoom on focus.
     'w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[16px] sm:text-[14px] bg-transparent';
 
   return createPortal(
@@ -280,7 +326,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       aria-modal="true"
       aria-label={t('title')}
     >
-      {/* Invisible backdrop button captures click-outside-to-close (mirrors ConsentModal). */}
+      {/* Invisible backdrop button: click outside to close. */}
       <button
         type="button"
         aria-label={t('cancel')}
@@ -305,76 +351,98 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
         {status === 'success' ? (
           <p className="text-[14px] text-emerald-600">{t('success')}</p>
         ) : (
-          <form onSubmit={submit} className="space-y-3">
+          <form
+            onSubmit={(e) => {
+              void submit(e);
+            }}
+            noValidate
+            className="space-y-3"
+          >
             <div>
               <label htmlFor="support-name" className="block text-[13px] font-medium mb-1">
                 {t('label_name')}
               </label>
               <input
-                id="support-name"
+                {...ctl('name')}
                 value={name}
                 maxLength={200}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  edited('name');
+                }}
                 placeholder={t('placeholder_name')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('name')} message={fe.message('name')} />
             </div>
             <div>
               <label htmlFor="support-email" className="block text-[13px] font-medium mb-1">
                 {t('label_email')}
               </label>
               <input
-                id="support-email"
+                {...ctl('email')}
                 type="email"
                 value={email}
                 maxLength={320}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  edited('email');
+                }}
                 placeholder={t('placeholder_email')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('email')} message={fe.message('email')} />
             </div>
             <div>
               <label htmlFor="support-phone" className="block text-[13px] font-medium mb-1">
                 {t('label_phone')}
               </label>
-              <input
-                id="support-phone"
-                type="tel"
+              <PhoneInput
+                id={ctl('phone').id}
                 value={phone}
-                maxLength={20}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder={t('placeholder_phone')}
-                className={inputClass}
+                onChange={(next) => {
+                  setPhone(next ?? '');
+                  edited('phone');
+                }}
+                onBlur={ctl('phone').onBlur}
+                inputProps={ctl('phone')}
               />
+              <FieldMessage id={fe.errorId('phone')} message={fe.message('phone')} />
             </div>
             <div>
               <label htmlFor="support-type" className="block text-[13px] font-medium mb-1">
                 {t('label_type')}
               </label>
-              <select
+              <SelectField
                 id="support-type"
                 value={type}
-                onChange={(e) => setType(e.target.value as SupportType)}
-                className={inputClass}
-              >
-                <option value="complaint">{t('type_complaint')}</option>
-                <option value="support_request">{t('type_support_request')}</option>
-              </select>
+                onChange={(v) => {
+                  if (isSupportType(v)) setType(v);
+                }}
+                options={[
+                  { value: 'complaint', label: t('type_complaint') },
+                  { value: 'support_request', label: t('type_support_request') },
+                ]}
+              />
             </div>
             <div>
               <label htmlFor="support-details" className="block text-[13px] font-medium mb-1">
                 {t('label_details')}
               </label>
               <textarea
-                id="support-details"
+                {...ctl('details')}
                 value={details}
                 required
                 maxLength={5000}
                 rows={5}
-                onChange={(e) => setDetails(e.target.value)}
+                onChange={(e) => {
+                  setDetails(e.target.value);
+                  edited('details');
+                }}
                 placeholder={t('placeholder_details')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('details')} message={fe.message('details')} />
             </div>
             <div>
               <label htmlFor="support-attachments" className="block text-[13px] font-medium mb-1">
@@ -407,9 +475,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               </Button>
               {attachments.length > 0 && (
                 <ul className="mt-2 space-y-1">
-                  {attachments.map((file, index) => (
+                  {withStableKeys(attachments, attachmentKey).map(({ item: file, key }, index) => (
                     <li
-                      key={`${file.name}-${index}`}
+                      key={key}
                       className="flex items-center justify-between gap-2 rounded-[8px] border border-(--bd-border) px-2 py-1 text-[13px]"
                     >
                       <span className="truncate">{file.name}</span>
@@ -438,22 +506,26 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
                 </ul>
               )}
               {attachmentError && (
-                <p className="mt-1 text-[13px] text-rose-600">{attachmentError}</p>
+                <p className="mt-1 text-[11.5px] text-red-500">{attachmentError}</p>
               )}
             </div>
-            <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5"
-                aria-label={t('consent_label')}
-              />
-              <span>{t('consent_label')}</span>
-            </label>
-            {status === 'invalid' && (
-              <p className="text-[13px] text-rose-600">{t('validation_incomplete')}</p>
-            )}
+            <div>
+              <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
+                <input
+                  type="checkbox"
+                  {...ctl('consent')}
+                  checked={consent}
+                  onChange={(e) => {
+                    setConsent(e.target.checked);
+                    edited('consent');
+                  }}
+                  className="mt-0.5"
+                  aria-label={t('consent_label')}
+                />
+                <span>{t('consent_label')}</span>
+              </label>
+              <FieldMessage id={fe.errorId('consent')} message={fe.message('consent')} />
+            </div>
             {status === 'unavailable' && (
               <p className="text-[13px] text-amber-600">{t('unavailable')}</p>
             )}
@@ -467,7 +539,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
             <Button
               kind="primary"
               type="submit"
-              disabled={status === 'sending' || !canSubmit}
+              disabled={status === 'sending'}
               className="w-full justify-center py-2.5 text-[14px] font-semibold"
             >
               {status === 'sending' ? t('sending') : t('submit')}

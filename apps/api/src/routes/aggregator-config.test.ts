@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
+import { config } from '../config.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
@@ -192,6 +193,65 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.brand.accent_color).toBe('#445566');
     expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
     expect(body.brand.typography?.primaryFont).toBe('Inter');
+  });
+
+  it('names an invited organisation "Super Admin" when the instance names no role', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { organisation: { invite_role_label: string } };
+    expect(body.organisation).toEqual({ invite_role_label: 'Super Admin' });
+  });
+
+  it('serves the instance’s own role name for an invited organisation', async () => {
+    const base = buildBlueDotConfig();
+    _setNetworkConfig(
+      buildBlueDotConfig({
+        aggregator: {
+          ...base.aggregator,
+          organisation: { ...base.aggregator.organisation, invite_role_label: 'Lead Partner' },
+        },
+      }),
+    );
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { organisation: { invite_role_label: string } };
+    expect(body.organisation.invite_role_label).toBe('Lead Partner');
+  });
+
+  it('always exposes features.custom_roles, false by default (opt-in)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { features: { custom_roles: boolean } };
+    expect(body.features).toEqual({ custom_roles: false, owner_self_add: 'owner' });
+  });
+
+  it('exposes the bulk-upload size limit', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { bulk_upload_max_bytes: number };
+    expect(body.bulk_upload_max_bytes).toBe(config.BULK_UPLOAD_MAX_BYTES);
+  });
+
+  it('reports OWNER_SELF_ADD_MODE as features.owner_self_add', async () => {
+    const prev = config.OWNER_SELF_ADD_MODE;
+    config.OWNER_SELF_ADD_MODE = 'auto';
+    try {
+      const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+      const body = res.json() as { features: { owner_self_add: string } };
+      expect(body.features.owner_self_add).toBe('auto');
+    } finally {
+      config.OWNER_SELF_ADD_MODE = prev;
+    }
+  });
+
+  it('reports features.custom_roles=true when the flag is on', async () => {
+    const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
+    config.RBAC_CUSTOM_ROLES_ENABLED = true;
+    const withFlag = await buildApp();
+    try {
+      const res = await withFlag.inject({ method: 'GET', url: '/v1/aggregator-config' });
+      const body = res.json() as { features: { custom_roles: boolean } };
+      expect(body.features.custom_roles).toBe(true);
+    } finally {
+      await withFlag.close();
+      config.RBAC_CUSTOM_ROLES_ENABLED = prev;
+    }
   });
 
   it('exposes signals_ui_urls (empty when the env var is unset)', async () => {

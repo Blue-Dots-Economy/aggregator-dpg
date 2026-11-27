@@ -2,7 +2,7 @@
  * Server-component test: `(public)/register/owner/page.tsx` (#619).
  *
  * Invokes the async page function directly. Covers the deep-link gating chain:
- * session → redirect; org-hierarchy flag off → notFound; org schema missing →
+ * session → redirect; org schema missing →
  * notFound; and the happy path rendering OwnerRegisterView with the org schema
  * + org consent content.
  */
@@ -17,19 +17,21 @@ const { redirect, notFound } = vi.hoisted(() => ({
     throw new Error('NOT_FOUND');
   }),
 }));
-const { isOrgHierarchyEnabled, loadOrgSchema, loadConsentContent } = vi.hoisted(() => ({
-  isOrgHierarchyEnabled: vi.fn(),
+const { loadOrgSchema, loadConsentContent, readInvite } = vi.hoisted(() => ({
   loadOrgSchema: vi.fn(),
   loadConsentContent: vi.fn(),
+  readInvite: vi.fn(),
 }));
 
 vi.mock('@/lib/server-session', () => ({ getSession }));
 vi.mock('next/navigation', () => ({ redirect, notFound }));
 vi.mock('@/app/(public)/register/register-server', () => ({
-  isOrgHierarchyEnabled,
   loadOrgSchema,
   loadConsentContent,
 }));
+vi.mock('@/lib/invite-read.server', () => ({ readInvite }));
+const { ownerSelfAddMode } = vi.hoisted(() => ({ ownerSelfAddMode: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ ownerSelfAddMode }));
 
 import OwnerRegisterPage from '@/app/(public)/register/owner/page';
 
@@ -39,8 +41,12 @@ beforeEach(() => {
   getSession.mockReset().mockResolvedValue(null);
   redirect.mockClear();
   notFound.mockClear();
-  isOrgHierarchyEnabled.mockReset().mockReturnValue(true);
   loadOrgSchema.mockReset().mockResolvedValue({ schema: orgSchema, uiSchema: {} });
+  readInvite.mockReset().mockResolvedValue({
+    ok: true,
+    invite: { email: 'ravi@enable.org', expires_at: 'x', org: { id: 'p1', name: 'Parent Org' } },
+  });
+  ownerSelfAddMode.mockReset().mockResolvedValue('owner');
   loadConsentContent.mockReset().mockResolvedValue({
     aggregator: { terms: {}, privacy: {} },
     org: { terms: { version: 1, title: 'T', content: 'T' }, privacy: {} },
@@ -48,9 +54,9 @@ beforeEach(() => {
 });
 
 /** Runs the page and returns the thrown error's message (or null if none). */
-async function runAndCatch(): Promise<string | null> {
+async function runAndCatch(search: { invite?: string } = {}): Promise<string | null> {
   try {
-    await OwnerRegisterPage();
+    await OwnerRegisterPage({ searchParams: Promise.resolve(search) });
     return null;
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
@@ -64,22 +70,21 @@ describe('OwnerRegisterPage (server component)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('404s when the org hierarchy flag is off', async () => {
-    isOrgHierarchyEnabled.mockReturnValue(false);
-    expect(await runAndCatch()).toBe('NOT_FOUND');
+  it('404s when the org schema is missing', async () => {
+    loadOrgSchema.mockResolvedValue(null);
+    expect(await runAndCatch({ invite: 'tok' })).toBe('NOT_FOUND');
     expect(notFound).toHaveBeenCalled();
-    // Must not even attempt to load the schema once the flag gate fails.
+  });
+
+  it('says onboarding is by invitation only without an invite, reading nothing', async () => {
+    const el = await OwnerRegisterPage({ searchParams: Promise.resolve({}) });
+    expect(el.props).toEqual({ reason: 'invite_only' });
+    expect(readInvite).not.toHaveBeenCalled();
     expect(loadOrgSchema).not.toHaveBeenCalled();
   });
 
-  it('404s when the org schema is missing (flag on)', async () => {
-    loadOrgSchema.mockResolvedValue(null);
-    expect(await runAndCatch()).toBe('NOT_FOUND');
-    expect(notFound).toHaveBeenCalled();
-  });
-
   it('renders OwnerRegisterView with the org schema + org consent on the happy path', async () => {
-    const el = await OwnerRegisterPage();
+    const el = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
     expect(el.props.schema).toBe(orgSchema);
     expect(el.props.uiSchema).toEqual({});
     expect(el.props.orgConsentContent).toEqual({
@@ -88,5 +93,34 @@ describe('OwnerRegisterPage (server component)', () => {
     });
     expect(redirect).not.toHaveBeenCalled();
     expect(notFound).not.toHaveBeenCalled();
+  });
+
+  it('asks for the team member terms only when owners join their team at registration', async () => {
+    const owner = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(owner.props.teamConsentContent).toBeNull();
+
+    ownerSelfAddMode.mockResolvedValue('auto');
+    const auto = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(auto.props.teamConsentContent).toEqual({ terms: {}, privacy: {} });
+  });
+
+  it('passes the read org invite to the form', async () => {
+    readInvite.mockResolvedValue({
+      ok: true,
+      invite: { email: 'ravi@enable.org', expires_at: 'x', org: { id: 'p1', name: 'Parent Org' } },
+    });
+    const el = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(readInvite).toHaveBeenCalledWith('org', 'tok');
+    expect(el.props.invite).toEqual({
+      token: 'tok',
+      email: 'ravi@enable.org',
+      parentName: 'Parent Org',
+    });
+  });
+
+  it('shows why an unusable org invite cannot be used', async () => {
+    readInvite.mockResolvedValue({ ok: false, reason: 'expired' });
+    const el = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(el.props).toEqual({ reason: 'expired' });
   });
 });

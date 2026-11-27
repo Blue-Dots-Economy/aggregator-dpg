@@ -1,17 +1,14 @@
 /**
- * Link Metrics Aggregator — periodic rollup of `link_submissions` into
- * `onboarding`.
+ * Link metrics rollup for the worker app: adds `link_submissions` into `onboarding`.
  *
- * Per onboarding-implementation.md §4.3:
- *   1. SELECT * FROM link_submissions WHERE rolled_up_at IS NULL
- *      ORDER BY created_at LIMIT BATCH_SIZE.
- *   2. Aggregate by (aggregator_id, link_id, hour_bucket).
- *   3. UPSERT INTO onboarding (source='link', ...) ON CONFLICT
- *      (aggregator_id, link_id, period_start) WHERE source='link' DO UPDATE
- *      SET total/passed/failed/skipped += EXCLUDED.*.
- *   4. UPDATE link_submissions SET rolled_up_at = NOW() WHERE id IN (...).
+ * Steps:
+ *   1. Select up to BATCH_SIZE submissions with `rolled_up_at IS NULL`.
+ *   2. Group by aggregator, link and hour.
+ *   3. Upsert each group into `onboarding` (source='link'), adding to the totals.
+ *   4. Set `rolled_up_at` on the selected submissions.
  *
- * Idempotent. Restart-safe via `rolled_up_at IS NULL` filter.
+ * Steps 3 and 4 are not in one transaction. A crash between them counts those
+ * submissions again on the next run.
  */
 
 import { eq, inArray, isNull, sql } from 'drizzle-orm';
@@ -22,7 +19,7 @@ import { logger } from '../logger.js';
 const BATCH_SIZE = 1000;
 
 interface BucketKey {
-  aggregatorId: string;
+  userId: string;
   orgSlug: string;
   linkId: string;
   hourBucketIso: string;
@@ -50,13 +47,13 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     .select({
       id: schema.linkSubmissions.id,
       linkId: schema.linkSubmissions.linkId,
-      aggregatorId: schema.linkSubmissions.aggregatorId,
-      orgSlug: schema.aggregators.orgSlug,
+      userId: schema.linkSubmissions.userId,
+      orgSlug: schema.users.signalstackOrgSlug,
       outcome: schema.linkSubmissions.outcome,
       createdAt: schema.linkSubmissions.createdAt,
     })
     .from(schema.linkSubmissions)
-    .innerJoin(schema.aggregators, eq(schema.linkSubmissions.aggregatorId, schema.aggregators.id))
+    .innerJoin(schema.users, eq(schema.linkSubmissions.userId, schema.users.id))
     .where(isNull(schema.linkSubmissions.rolledUpAt))
     .orderBy(schema.linkSubmissions.createdAt)
     .limit(BATCH_SIZE);
@@ -70,12 +67,12 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
   const buckets = new Map<string, { key: BucketKey; totals: BucketTotals }>();
   for (const row of rows) {
     const bucketStart = startOfHour(row.createdAt);
-    const cacheKey = `${row.aggregatorId}|${row.linkId}|${bucketStart.toISOString()}`;
+    const cacheKey = `${row.userId}|${row.linkId}|${bucketStart.toISOString()}`;
     let entry = buckets.get(cacheKey);
     if (!entry) {
       entry = {
         key: {
-          aggregatorId: row.aggregatorId,
+          userId: row.userId,
           orgSlug: row.orgSlug,
           linkId: row.linkId,
           hourBucketIso: bucketStart.toISOString(),
@@ -91,16 +88,15 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     entry.totals.submissionIds.push(row.id);
   }
 
-  // UPSERT each bucket — partial UNIQUE (aggregator_id, link_id, period_start)
-  // WHERE source='link' is the conflict target.
+  // Conflict target: the partial unique index on (user, link, period_start) where source='link'.
   for (const { key, totals } of buckets.values()) {
     const periodStart = new Date(key.hourBucketIso);
     const periodEnd = new Date(periodStart.getTime() + 60 * 60 * 1000);
     await getDb()
       .insert(schema.onboarding)
       .values({
-        aggregatorId: key.aggregatorId,
-        orgSlug: key.orgSlug,
+        userId: key.userId,
+        signalstackOrgSlug: key.orgSlug,
         source: 'link',
         batchId: null,
         linkId: key.linkId,
@@ -112,11 +108,7 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
         skipped: totals.skipped,
       })
       .onConflictDoUpdate({
-        target: [
-          schema.onboarding.aggregatorId,
-          schema.onboarding.linkId,
-          schema.onboarding.periodStart,
-        ],
+        target: [schema.onboarding.userId, schema.onboarding.linkId, schema.onboarding.periodStart],
         targetWhere: sql`source = 'link'`,
         set: {
           total: sql`${schema.onboarding.total} + ${totals.total}`,
@@ -127,7 +119,6 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
       });
   }
 
-  // Mark all picked-up submissions as rolled up.
   const allIds = rows.map((r) => r.id);
   await getDb()
     .update(schema.linkSubmissions)

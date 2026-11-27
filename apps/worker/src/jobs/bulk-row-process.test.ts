@@ -25,7 +25,7 @@ import { logger } from '../logger.js';
 
 /**
  * Minimal fake Drizzle db: the push path runs exactly one read —
- * `select({signalstackOrgId}).from(aggregators).where(...).limit(1)` — so the
+ * `select({signalstackOrgId}).from(users).where(...).limit(1)` — so the
  * chain resolves to a single row carrying a non-null org id (else the push
  * short-circuits with SIGNALSTACK_ORG_NOT_REGISTERED before the onboard call).
  */
@@ -183,7 +183,7 @@ describe('blockingValidationReasons', () => {
 describe('pushToSignalStack — owned_elsewhere handling', () => {
   const job = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
@@ -236,7 +236,7 @@ describe('pushToSignalStack — owned_elsewhere handling', () => {
 describe('pushToSignalStack — consent forwarding', () => {
   const job = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
@@ -297,7 +297,7 @@ describe('pushToSignalStack — consent forwarding', () => {
 describe('pushToSignalStack — age forwarding', () => {
   const baseJob = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',

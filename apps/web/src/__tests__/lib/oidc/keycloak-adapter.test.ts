@@ -348,6 +348,46 @@ describe('KeycloakAdapter', () => {
     expect(result.value.tokens.refreshTokenExp).toBeGreaterThanOrEqual(before + 30 * 60_000 - 1000);
   });
 
+  it.each([
+    ['no exp', () => fakeJwt({ sub: 'u' })],
+    ['a text exp', () => fakeJwt({ exp: '1800000000' })],
+    [
+      'a payload that is a list',
+      () =>
+        `${Buffer.from('{}').toString('base64url')}.${Buffer.from('[1]').toString('base64url')}.sig`,
+    ],
+    ['two parts', () => fakeJwt({ exp: 1_800_000_000 }).split('.').slice(0, 2).join('.')],
+  ])(
+    'falls back to a 30 minute refresh expiry for a refresh token with %s',
+    async (_label, token) => {
+      const { KeycloakAdapter } = await importAdapter();
+      const before = Date.now();
+      mockCallback.mockResolvedValue({
+        access_token: 'AT',
+        refresh_token: token(),
+        id_token: 'IDT',
+        claims: () => ({ sub: 'user-3' }),
+      });
+      const adapter = new KeycloakAdapter({
+        issuerUrl: 'http://kc.fake/realms/aggregator',
+        clientId: 'aggregator-portal',
+      });
+      const result = await adapter.exchangeCode({
+        code: 'c',
+        codeVerifier: 'v',
+        redirectUri: 'http://app/cb',
+        state: 's',
+        expectedState: 's',
+        expectedNonce: 'n',
+      });
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.value.tokens.refreshTokenExp).toBeGreaterThanOrEqual(
+        before + 30 * 60_000 - 1000,
+      );
+      expect(result.value.tokens.refreshTokenExp).toBeLessThanOrEqual(Date.now() + 30 * 60_000);
+    },
+  );
+
   it('returns TOKEN_EXCHANGE_FAILED when the token set is missing a required field', async () => {
     const { KeycloakAdapter } = await importAdapter();
     mockCallback.mockResolvedValue({

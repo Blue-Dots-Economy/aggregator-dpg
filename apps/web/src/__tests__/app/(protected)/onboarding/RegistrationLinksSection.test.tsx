@@ -3,8 +3,8 @@
  * onboarding scope (767 lines). Covers both exports:
  *
  * - `CreateLinkSection`: the create-link form, its domain/registration-mode
- *   auto-pin effects, the location-based prefill, the disabled-submit
- *   blockers list, slug/title derivation, tag de-duplication, and the
+ *   auto-pin effects, the location-based prefill, the per-field required
+ *   messages, slug/title derivation, tag de-duplication, and the
  *   create success/failure paths.
  * - `YourLinksBody` (+ its private `LinkCard`): loading/error/empty states,
  *   draft vs live vs retired rendering, the inline edit flow, activate/
@@ -12,11 +12,15 @@
  *   `public_url` defensive branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { ACTIVE_DOMAIN_STORAGE_KEY } from '@/hooks/useActiveDomain';
+import { HttpError } from '@/services/http';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
+import { chooseOption } from '@/__tests__/test-utils';
+import { HttpError } from '@/services/http';
 
 const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -24,7 +28,8 @@ const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   searchParamsRef: { current: new URLSearchParams() },
 }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding',
   // YourLinksBody reads `?new=` to highlight a freshly-created draft.
   useSearchParams: () => searchParamsRef.current,
 }));
@@ -43,7 +48,10 @@ vi.mock('@/hooks/useOnboarding', () => ({
   useDeactivateLink: () => useDeactivateLink(),
   useRegistrationLinks: (...args: unknown[]) => useRegistrationLinks(...args),
   useUpdateLink: () => useUpdateLink(),
+  useVoiceBots: (domain: string) => useVoiceBots(domain),
 }));
+
+const { useVoiceBots } = vi.hoisted(() => ({ useVoiceBots: vi.fn() }));
 
 const { useProfile, useProfileRaw } = vi.hoisted(() => ({
   useProfile: vi.fn(),
@@ -70,8 +78,11 @@ import {
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
 
 const testMessages = {
+  common: messages.common,
   onboarding: messages.onboarding,
-  regmode: { form: 'Form', voice: 'Voice' },
+  access: messages.access,
+  form: messages.form,
+  regmode: { form: 'Form', voice: 'Voice', voice_or_form: 'Voice or Form' },
 };
 
 function renderCreate() {
@@ -106,6 +117,43 @@ const cfg = {
   },
 };
 
+const voiceOrFormCfg = {
+  ...cfg,
+  registration_modes: {
+    form: cfg.registration_modes.form,
+    voice: cfg.registration_modes.voice,
+    voice_or_form: {
+      label_i18n_key: 'regmode.voice_or_form',
+      submission_shape: 'account_only' as const,
+      public_hint_i18n_key: null,
+      offers: ['voice', 'form'] as const,
+    },
+  },
+};
+
+const BOT_HI = {
+  key: 'up-hi',
+  display_name: 'UP Rozgar Sahayak',
+  phone: '+911234567890',
+  languages: ['hi'],
+  description: 'Hindi, for seekers in UP',
+};
+const BOT_KN = {
+  key: 'ka-kn',
+  display_name: 'UP Kannada Bot',
+  phone: '+919876543210',
+  languages: ['kn'],
+};
+
+const twoDomainCfg = {
+  ...cfg,
+  domains: [
+    { id: 'seeker', label: 'Seeker', plural_label: 'Seekers' },
+    { id: 'provider', label: 'Provider', plural_label: 'Providers' },
+  ],
+};
+const BOTH = { type: 'seeker', serves: ['seeker', 'provider'] };
+
 function baseLink(overrides: Partial<ApiRegistrationLink> = {}): ApiRegistrationLink {
   return {
     link_id: 'link-1',
@@ -137,7 +185,7 @@ describe('<CreateLinkSection />', () => {
     updateMutateAsync.mockReset();
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useCreateLink.mockReturnValue({ mutateAsync: createMutateAsync, isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });
     useActivateLink.mockReturnValue({ mutate: activateMutate, isPending: false });
@@ -145,31 +193,43 @@ describe('<CreateLinkSection />', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('pins the read-only domain field to the org name + aggregator-registered domain', () => {
     renderCreate();
     expect(screen.getByDisplayValue('Acme Org')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Seekers')).toBeInTheDocument();
+    expect(screen.getByText('Seekers')).toBeInTheDocument();
   });
 
-  it('lists the remaining unmet blockers and keeps Create disabled when required fields are empty', () => {
+  it('keeps Create enabled and, on an empty submit, shows each missing field under it', async () => {
+    const user = userEvent.setup();
     renderCreate();
-    expect(screen.getByText('To create the link:')).toBeInTheDocument();
-    expect(screen.getByText('Enter the State.')).toBeInTheDocument();
-    expect(screen.getByText('Enter the District.')).toBeInTheDocument();
-    expect(screen.getByText('Enter the Event.')).toBeInTheDocument();
-    // domain + registration_mode are auto-pinned by mount-time effects, so
-    // those two blockers should already be cleared.
-    expect(screen.queryByText('Domain is not set.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Select a form type.')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
+    // Nothing shows before the first attempt.
+    expect(screen.queryByText('State is required.')).not.toBeInTheDocument();
+    const create = screen.getByRole('button', { name: 'Create link' });
+    expect(create).toBeEnabled();
+    await user.click(create);
+
+    expect(screen.getByText('State is required.')).toBeInTheDocument();
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
+    expect(screen.getByText('Event is required.')).toBeInTheDocument();
+    // domain + registration_mode are auto-pinned by mount-time effects.
+    expect(screen.queryByText('Campaign type is required.')).not.toBeInTheDocument();
+    const state = screen.getByPlaceholderText('State');
+    expect(state).toHaveAttribute('aria-invalid', 'true');
+    expect(state).toHaveAttribute('aria-describedby', 'create-link-state__error');
+    await waitFor(() => expect(state).toHaveFocus());
+    expect(createMutateAsync).not.toHaveBeenCalled();
   });
 
   it('prefills state/district/event location from the aggregator profile address at mount', () => {
     useProfileRaw.mockReturnValue({
       data: {
         type: 'seeker',
+        serves: ['seeker'],
         locations: [{ address: { addressRegion: 'Karnataka', addressLocality: 'Dharwad' } }],
       },
     });
@@ -177,20 +237,15 @@ describe('<CreateLinkSection />', () => {
     expect(screen.getByPlaceholderText('State')).toHaveValue('Karnataka');
     expect(screen.getByPlaceholderText('District')).toHaveValue('Dharwad');
     expect(screen.getByPlaceholderText('City or venue')).toHaveValue('Dharwad');
-    // Only the Event field remains unmet now.
-    expect(screen.queryByText('Enter the State.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Enter the District.')).not.toBeInTheDocument();
-    expect(screen.getByText('Enter the Event.')).toBeInTheDocument();
   });
 
-  it('clears the blockers and enables Create once the required fields are filled', async () => {
+  it('clears each message live once the field is filled after an attempt', async () => {
     const user = userEvent.setup();
     renderCreate();
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
-    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
-    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
-    expect(screen.queryByText('To create the link:')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+    expect(screen.queryByText('State is required.')).not.toBeInTheDocument();
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
   });
 
   it('creates a link with de-duplicated tags, a derived slug/title, and resets the form on success', async () => {
@@ -245,18 +300,85 @@ describe('<CreateLinkSection />', () => {
     expect(input.slug).toBeUndefined();
   });
 
-  it('surfaces the mutation error inline when create fails', async () => {
-    createMutateAsync.mockRejectedValue(new Error('Domain mismatch'));
+  async function submitFilledForm(): Promise<void> {
     const user = userEvent.setup();
     renderCreate();
-
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
+  }
 
-    expect(await screen.findByText('Domain mismatch')).toBeInTheDocument();
+  it('shows a plain message, not the error text, when create fails', async () => {
+    createMutateAsync.mockRejectedValue(new Error('request failed (500): {"error":{}}'));
+    await submitFilledForm();
+
+    expect(
+      await screen.findByText(messages.onboarding.create_link.save_failed),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/request failed/)).not.toBeInTheDocument();
+  });
+
+  it('shows a readable message, not the raw error, when create fails, and keeps the input', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(403, { code: 'AGGREGATOR_TYPE_MISMATCH' }));
+    await submitFilledForm();
+
+    expect(await screen.findByText("You don't have permission to do this.")).toBeInTheDocument();
+    expect(screen.queryByText(/AGGREGATOR_TYPE_MISMATCH|403/)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('State')).toHaveValue('Karnataka');
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('explains a refused profile type when create answers DOMAIN_NOT_SERVED', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(403, 'DOMAIN_NOT_SERVED'));
+    await submitFilledForm();
+
+    expect(await screen.findByText(messages.access.domain_not_served)).toBeInTheDocument();
+    expect(screen.queryByText(/DOMAIN_NOT_SERVED|request failed/)).not.toBeInTheDocument();
+  });
+
+  it('creates the link for the active domain tab, with no domain dropdown', async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+    expect(screen.getByText('Providers')).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+  });
+
+  it('keeps the domain set after the form resets on success', async () => {
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByText('Registration link created');
+    expect(screen.queryByText('Domain is not set.')).not.toBeInTheDocument();
+  });
+
+  it('names a duplicate link instead of the API code', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(409, { code: 'DUPLICATE_SLUG' }));
+    const user = userEvent.setup();
+    renderCreate();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+    expect(
+      await screen.findByText(/A link with this district and event already exists/),
+    ).toBeInTheDocument();
   });
 
   it('changes the registration mode via the select and reflects it on submit', async () => {
@@ -267,10 +389,135 @@ describe('<CreateLinkSection />', () => {
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'voice' } });
+    await chooseOption(screen.getByRole('combobox'), 'Voice');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
 
     expect(createMutateAsync.mock.calls[0]![0].registration_mode).toBe('voice');
+  });
+
+  describe('voice bot picker', () => {
+    async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+      await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+      await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+      await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    }
+
+    beforeEach(() => {
+      useAggregatorConfig.mockReturnValue({ data: voiceOrFormCfg });
+      useVoiceBots.mockReturnValue({
+        data: { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: 'ka-kn' },
+        isError: false,
+      });
+    });
+
+    afterEach(() => {
+      searchParamsRef.current = new URLSearchParams();
+    });
+
+    it('defaults to voice_or_form when the config declares it, and shows the picker', () => {
+      renderCreate();
+      expect(screen.getByRole('combobox')).toHaveTextContent('Voice or Form');
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+      expect(useVoiceBots).toHaveBeenCalledWith('seeker');
+    });
+
+    it('defaults to form, with no picker, when voice_or_form is not declared', () => {
+      useAggregatorConfig.mockReturnValue({ data: cfg });
+      renderCreate();
+      expect(screen.getByRole('combobox')).toHaveTextContent('Form');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    });
+
+    it('hides the picker for form and voice modes', async () => {
+      renderCreate();
+      await chooseOption(screen.getByRole('combobox'), 'Form');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      await chooseOption(screen.getByRole('combobox'), 'Voice');
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      await chooseOption(screen.getByRole('combobox'), 'Voice or Form');
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+    });
+
+    it('sends no voice_bot_key when the default stays selected', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      expect(screen.getByRole('radio', { name: /UP Kannada Bot/ })).toBeChecked();
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      const input = createMutateAsync.mock.calls[0]![0];
+      expect(input.registration_mode).toBe('voice_or_form');
+      expect(input).not.toHaveProperty('voice_bot_key');
+    });
+
+    it('blocks submit and asks for a choice when several bots and no default', async () => {
+      useVoiceBots.mockReturnValue({
+        data: { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: null },
+        isError: false,
+      });
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync).not.toHaveBeenCalled();
+      expect(screen.getByText('Choose a voice bot for this link.')).toBeInTheDocument();
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      expect(screen.queryByText('Choose a voice bot for this link.')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].voice_bot_key).toBe('up-hi');
+    });
+
+    it('sends the key of a non-default bot', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].voice_bot_key).toBe('up-hi');
+    });
+
+    it('sends no voice_bot_key for a mode that does not offer voice', async () => {
+      createMutateAsync.mockResolvedValue(baseLink());
+      const user = userEvent.setup();
+      renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+      await chooseOption(screen.getByRole('combobox'), 'Form');
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0]).not.toHaveProperty('voice_bot_key');
+    });
+
+    it('drops a chosen bot when the domain changes', async () => {
+      useAggregatorConfig.mockReturnValue({
+        data: { ...voiceOrFormCfg, domains: twoDomainCfg.domains },
+      });
+      useProfileRaw.mockReturnValue({ data: BOTH });
+      useVoiceBots.mockImplementation((domain: string) => ({
+        data:
+          domain === 'seeker'
+            ? { voice_bots: [BOT_HI, BOT_KN], default_voice_bot_key: 'ka-kn' }
+            : { voice_bots: [BOT_KN], default_voice_bot_key: 'ka-kn' },
+        isError: false,
+      }));
+      createMutateAsync.mockResolvedValue(baseLink({ domain: 'provider' }));
+      const user = userEvent.setup();
+      const view = renderCreate();
+      await fillRequired(user);
+      await user.click(screen.getByRole('radio', { name: /UP Rozgar Sahayak/ }));
+
+      searchParamsRef.current = new URLSearchParams('domain=provider');
+      view.rerender(
+        <NextIntlClientProvider locale="en" messages={testMessages}>
+          <CreateLinkSection />
+        </NextIntlClientProvider>,
+      );
+      await waitFor(() => expect(useVoiceBots).toHaveBeenLastCalledWith('provider'));
+      await user.click(screen.getByRole('button', { name: 'Create link' }));
+      expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+      expect(createMutateAsync.mock.calls[0]![0]).not.toHaveProperty('voice_bot_key');
+    });
   });
 });
 
@@ -297,7 +544,7 @@ describe('<YourLinksBody />', () => {
       this.dispatchEvent(new Event('close'));
     });
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
     useCreateLink.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });
@@ -312,7 +559,25 @@ describe('<YourLinksBody />', () => {
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('shows the voice bot name and number on a link that has one', () => {
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ voice_bot_key: 'up-hi', voice_bot: BOT_HI }),
+        baseLink({ link_id: 'link-2', slug: 'other-drive' }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    expect(screen.getAllByText(/UP Rozgar Sahayak/)).toHaveLength(1);
+    expect(screen.getByText(/\+91 12345 67890/)).toBeInTheDocument();
+    expect(screen.queryByText(/\+911234567890/)).not.toBeInTheDocument();
+  });
 
   it('shows a loading state', () => {
     useRegistrationLinks.mockReturnValue({ data: undefined, isLoading: true, error: null });
@@ -320,20 +585,48 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText('Loading links…')).toBeInTheDocument();
   });
 
-  it('shows an error state', () => {
+  it('shows a plain error state, not the error text', () => {
     useRegistrationLinks.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: new Error('links unavailable'),
+      error: new HttpError(503),
     });
     renderLinks();
-    expect(screen.getByText('links unavailable')).toBeInTheDocument();
+    expect(screen.getByText(messages.onboarding.your_links.load_failed)).toBeInTheDocument();
+    expect(screen.queryByText('links unavailable')).not.toBeInTheDocument();
+  });
+
+  it('explains a refused profile type when the list answers DOMAIN_NOT_SERVED', () => {
+    useRegistrationLinks.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new HttpError(403, 'DOMAIN_NOT_SERVED'),
+    });
+    renderLinks();
+    expect(screen.getByText(messages.access.domain_not_served)).toBeInTheDocument();
   });
 
   it('shows an empty state scoped to the aggregator type', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
+    expect(screen.getByText('No links for Seekers yet. Create one above.')).toBeInTheDocument();
+  });
+
+  it('lists the links for the active domain tab, with no domain dropdown', () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(ACTIVE_DOMAIN_STORAGE_KEY, 'provider');
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
+  });
+
+  it('shows no domain dropdown for a single-domain coordinator', () => {
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
   });
 
   it('renders the active-count and type-pill badges alongside each link card', () => {
@@ -347,7 +640,7 @@ describe('<YourLinksBody />', () => {
     });
     renderLinks();
     expect(screen.getByText('1 active')).toBeInTheDocument();
-    expect(screen.getByText('seeker links')).toBeInTheDocument();
+    expect(screen.getByText('Links for Seekers')).toBeInTheDocument();
     expect(screen.getByText('Live One')).toBeInTheDocument();
     expect(screen.getByText('Draft One')).toBeInTheDocument();
   });
@@ -369,6 +662,30 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
   });
 
+  it('closes the draft toast on time even when the list re-renders while it shows', () => {
+    vi.useFakeTimers();
+    try {
+      searchParamsRef.current = new URLSearchParams('new=l2');
+      useRegistrationLinks.mockReturnValue({
+        data: [baseLink({ link_id: 'l2', status: 'draft', context: { title: 'Draft One' } })],
+        isLoading: false,
+        error: null,
+      });
+      const { rerender } = renderLinks();
+      expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2000));
+      rerender(
+        <NextIntlClientProvider locale="en" messages={testMessages}>
+          <YourLinksBody />
+        </NextIntlClientProvider>,
+      );
+      act(() => vi.advanceTimersByTime(500));
+      expect(screen.queryByText(/created as a draft/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('draft card: shows the draft notice and Edit + Make Live actions, and Make Live activates the link', async () => {
     const user = userEvent.setup();
     useRegistrationLinks.mockReturnValue({
@@ -380,7 +697,27 @@ describe('<YourLinksBody />', () => {
 
     expect(screen.getByText('Public URL + QR appear after Make Live.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Make Live' }));
-    expect(activateMutate).toHaveBeenCalledWith('link-1');
+    expect(activateMutate).toHaveBeenCalledWith('link-1', expect.anything());
+  });
+
+  it('draft card: shows a readable message when Make Live fails', async () => {
+    activateMutate.mockImplementation((_id: string, opts: { onError: (e: unknown) => void }) =>
+      opts.onError(new HttpError(409, { code: 'CONFLICT' })),
+    );
+    const user = userEvent.setup();
+    useRegistrationLinks.mockReturnValue({
+      data: [baseLink({ context: { district: 'Dharwad', lever_event: 'Drive' } })],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    await user.click(screen.getByRole('button', { name: 'Make Live' }));
+    expect(
+      await screen.findByText(
+        'This has changed since you opened it. Refresh the page and try again.',
+      ),
+    ).toBeInTheDocument();
+    activateMutate.mockReset();
   });
 
   it('draft card edit flow: validates required fields, saves a patch, and closes the editor on success', async () => {
@@ -400,9 +737,9 @@ describe('<YourLinksBody />', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     const districtInputs = screen.getAllByDisplayValue('Dharwad');
     await user.clear(districtInputs[districtInputs.length - 1]!);
-    // Save Draft is disabled by the same required-field check while district
-    // is empty, so the button never fires the mutation.
-    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    // Save Draft stays enabled; the click shows the message and sends nothing.
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
     expect(updateMutateAsync).not.toHaveBeenCalled();
 
     await user.type(districtInputs[districtInputs.length - 1]!, 'Belagavi');
@@ -432,7 +769,7 @@ describe('<YourLinksBody />', () => {
   });
 
   it('draft card edit flow: keeps the editor open and shows an error on save failure', async () => {
-    updateMutateAsync.mockRejectedValue(new Error('conflict'));
+    updateMutateAsync.mockRejectedValue(new HttpError(409, { code: 'CONFLICT' }));
     const user = userEvent.setup();
     useRegistrationLinks.mockReturnValue({
       data: [baseLink({ context: { state: 'K', district: 'D', lever_event: 'E' } })],
@@ -444,7 +781,11 @@ describe('<YourLinksBody />', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save Draft' }));
 
-    expect(await screen.findByText('conflict')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'This has changed since you opened it. Refresh the page and try again.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
   });
 
@@ -485,7 +826,25 @@ describe('<YourLinksBody />', () => {
     expect(await screen.findByTitle('Copied!')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Deactivate' }));
-    expect(deactivateMutate).toHaveBeenCalledWith('link-1');
+    expect(deactivateMutate).toHaveBeenCalledWith('link-1', expect.anything());
+  });
+
+  it('says why Deactivate failed, in plain words, and keeps the link live', async () => {
+    const user = userEvent.setup();
+    deactivateMutate.mockImplementation((_id: string, opts: { onError?: (err: unknown) => void }) =>
+      opts.onError?.(new HttpError(503)),
+    );
+    useRegistrationLinks.mockReturnValue({
+      data: [
+        baseLink({ status: 'live', public_url: 'https://bluedots.example/acme/dharwad-drive' }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.server);
+    expect(screen.getByRole('button', { name: 'Deactivate' })).toBeInTheDocument();
   });
 
   it('QR modal: Download generates from public_url and saves qr-<slug>.png', async () => {

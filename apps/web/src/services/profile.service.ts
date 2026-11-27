@@ -1,4 +1,9 @@
 import type { AggregatorProfile } from '../types';
+import { z } from 'zod';
+import {
+  ActorTypeSchema,
+  AggregatorStatusSchema,
+} from '@aggregator-dpg/shared-primitives/aggregator';
 import { jsonFetch } from './http';
 
 export interface ProfileService {
@@ -8,56 +13,61 @@ export interface ProfileService {
 }
 
 /**
- * Wire shape of `contact` on `GET /v1/aggregators/profile/me` — mirrors
- * `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`. Since
- * migration 0025 the API composes it from the `contact` table (name / email /
- * phone) plus `aggregators.contact_extra` (the optional keys below); the shape
- * the web receives is unchanged.
+ * Shape of `contact` on `GET /v1/aggregators/profile/me`.
+ *
+ * Mirrors `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`.
  */
-interface BecknContact {
-  name: string;
-  phone: string;
-  email: string;
-  alternatePhone?: string;
-  company?: string;
-  gstNumber?: string;
-}
+const BecknContactSchema = z.object({
+  name: z.string(),
+  phone: z.string(),
+  email: z.string(),
+  alternatePhone: z.string().optional(),
+  company: z.string().optional(),
+  gstNumber: z.string().optional(),
+});
 
-interface BecknLocation {
-  geo: { type: string; coordinates?: unknown };
-  address?: Record<string, string | undefined>;
-}
+/** One profile location. Kept whole, because the profile form renders it as received. */
+const BecknLocationSchema = z
+  .object({
+    geo: z.object({ type: z.string(), coordinates: z.unknown().optional() }).loose(),
+    address: z.record(z.string(), z.string().optional()).optional(),
+  })
+  .loose();
 
-/**
- * `GET /v1/aggregators/profile/me` response shape — the `aggregators` row
- * flattened to the top level, plus the Keycloak-derived `identity` fragment.
- */
-export interface ProfileApiResponse {
-  aggregator_id: string;
-  org_slug: string;
-  org_name: string;
-  actor_type: 'aggregator' | 'seeker' | 'provider';
-  // Domain id the aggregator is scoped to. Comes from the network config
-  // (networks.json domains), so not limited to seeker/provider — e.g.
-  // orange_dot exposes tourist / practitioner.
-  type: string | null;
-  url: string | null;
-  contact: BecknContact;
-  locations: BecknLocation[];
-  consent: { value: boolean; given_at: string; valid_till: string };
-  status: 'pending' | 'active' | 'inactive' | 'retired';
-  identity?: {
-    first_name: string | null;
-    last_name: string | null;
-    email: string | null;
-    email_verified: boolean;
-    phone: string | null;
-    phone_verified: boolean;
-    active: boolean;
-  };
-  created_at: string;
-  updated_at: string;
-}
+/** Response of `GET /v1/aggregators/profile/me`, plus the Keycloak `identity` fragment. */
+export const ProfileApiResponseSchema = z.object({
+  user_id: z.string(),
+  org_slug: z.string(),
+  org_name: z.string(),
+  actor_type: ActorTypeSchema,
+  // Domain id from the network config; any network domain is possible.
+  // The first entry of `serves`, or null when it serves none.
+  type: z.string().nullable(),
+  // Every profile type the coordinator serves; empty means none.
+  serves: z.array(z.string()),
+  url: z.string().nullable(),
+  contact: BecknContactSchema,
+  locations: z.array(BecknLocationSchema),
+  // From the consent ledger; null when it has no registration row.
+  consent: z
+    .object({ value: z.boolean(), given_at: z.string(), valid_till: z.string() })
+    .nullable(),
+  status: AggregatorStatusSchema,
+  identity: z
+    .object({
+      first_name: z.string().nullable(),
+      last_name: z.string().nullable(),
+      email: z.string().nullable(),
+      email_verified: z.boolean(),
+      phone: z.string().nullable(),
+      phone_verified: z.boolean(),
+      active: z.boolean(),
+    })
+    .optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ProfileApiResponse = z.infer<typeof ProfileApiResponseSchema>;
 
 class ApiProfileService implements ProfileService {
   async get(): Promise<AggregatorProfile> {
@@ -66,20 +76,18 @@ class ApiProfileService implements ProfileService {
   }
 
   async getRaw(): Promise<ProfileApiResponse> {
-    return jsonFetch<ProfileApiResponse>('/api/aggregator/profile/me');
+    return jsonFetch('/api/aggregator/profile/me', ProfileApiResponseSchema);
   }
 }
 
 function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
-  // Display the Beckn contact.name as the coordinator, falling back to the KC
-  // identity (firstName + lastName) when the contact has not been set.
+  // Use contact.name, else the Keycloak first and last name.
   const identityFull = [api.identity?.first_name, api.identity?.last_name]
     .filter((p): p is string => Boolean(p && p.length > 0))
     .join(' ');
   const coordinator = api.contact?.name || identityFull;
 
-  // Render the first location's postal address as a single line for the
-  // dashboard card.
+  // First location's address as one line.
   const firstLoc = api.locations?.[0]?.address;
   const address = firstLoc
     ? [
@@ -92,10 +100,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
         .join(', ')
     : '';
 
-  // `addressRegion` only exists on rows registered before the address became a
-  // single autocomplete field (#810), so fall back to the free-text address —
-  // the only location text a current row carries. Without the fallback this
-  // renders blank for every new registration.
+  // Older rows have `addressRegion`; newer rows only have `streetAddress`.
   const geographies = (api.locations ?? [])
     .map((loc) => loc.address?.addressRegion || loc.address?.streetAddress)
     .filter((r): r is string => Boolean(r && r.length > 0))
@@ -109,7 +114,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   };
   return {
-    id: api.aggregator_id,
+    id: api.user_id,
     org: api.org_name || '',
     registered: fmtDate(api.created_at),
     coordinator,
@@ -118,9 +123,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       mobile: api.contact?.phone ?? api.identity?.phone ?? '',
       email: api.contact?.email ?? api.identity?.email ?? '',
     },
-    // `beneficiaries` / `sectors` were fed by the removed `aggregator_profile`
-    // personas + services. No component renders them; kept on the display type
-    // so the dashboard shape is unchanged.
+    // Not rendered anywhere; kept to satisfy the display type.
     beneficiaries: '',
     address,
     geographies,

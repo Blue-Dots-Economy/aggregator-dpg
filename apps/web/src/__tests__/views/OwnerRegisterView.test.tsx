@@ -4,7 +4,7 @@
  * Owner (organisation) registration used to be a tab on RegisterView; it now
  * has its own view/route. Covers: the org form renders, the consent block is
  * stripped from the schema handed to RJSF, submit opens the gate (posts
- * nothing) then accepting posts to /api/org/register, and a failed consent copy
+ * nothing) then accepting posts to /api/invite/org/accept, and a failed consent copy
  * surfaces a visible error without posting.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
@@ -45,10 +45,17 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
   },
 }));
 
-let capturedGateProps: { open: boolean; onAccept: () => void; onCancel?: () => void } | undefined;
+interface GateShimProps {
+  open: boolean;
+  onAccept: () => void;
+  onCancel?: () => void;
+  docs?: Array<{ id: string; title: string }>;
+  agreeLabel?: string;
+}
+let capturedGateProps: GateShimProps | undefined;
 
 vi.mock('@/components/consent/ConsentGate', () => ({
-  ConsentGate: (props: { open: boolean; onAccept: () => void; onCancel?: () => void }) => {
+  ConsentGate: (props: GateShimProps) => {
     capturedGateProps = props;
     if (!props.open) return null;
     return (
@@ -79,6 +86,18 @@ const consentContentFixture = {
 
 function renderView(props: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    accepting: true,
+    parents: [
+      {
+        id: 'p-root',
+        name: 'Blue Dots',
+        is_root: true,
+        known_as_name: null,
+        child_known_as_name: 'Aggregator',
+      },
+    ],
+  });
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -86,6 +105,7 @@ function renderView(props: Record<string, unknown> = {}) {
           schema={orgSchema}
           uiSchema={{}}
           orgConsentContent={consentContentFixture}
+          invite={{ token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' }}
           {...props}
         />
       </NextIntlClientProvider>
@@ -142,11 +162,11 @@ describe('OwnerRegisterView', () => {
     expect(rendered.required).not.toContain('consent');
   });
 
-  it('submitting opens the gate, posts nothing, then accepting posts consent.value:true to /api/org/register', async () => {
+  it('submitting opens the gate, posts nothing, then accepting posts consent.value:true to the org invite accept route', async () => {
     const calls: { url: string; body: string }[] = [];
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       const url = String(input);
-      if (url.includes('/api/org/register')) {
+      if (url.includes('/api/invite/org/accept')) {
         calls.push({ url, body: init?.body ?? '' });
         return new Response(JSON.stringify({ slug: 'acme-org' }), {
           status: 200,
@@ -173,11 +193,72 @@ describe('OwnerRegisterView', () => {
     expect(body.consent?.['valid_till']).toBeDefined();
   });
 
+  it('with team consent, the gate holds the team documents too and the body carries team_consent', async () => {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      if (String(input).includes('/api/invite/org/accept')) {
+        calls.push(init?.body ?? '');
+        return new Response(JSON.stringify({ slug: 'acme-org' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    renderView({ teamConsentContent: consentContentFixture });
+    expect(screen.getByText(messages.register.consent.team_join_note)).toBeInTheDocument();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+
+    expect(capturedGateProps?.docs?.map((d) => d.id)).toEqual([
+      'privacy',
+      'terms',
+      'team-privacy',
+      'team-terms',
+    ]);
+    expect(capturedGateProps?.docs?.[2]?.title).toBe('My Team: Privacy');
+    expect(capturedGateProps?.agreeLabel).toContain(messages.register.consent.team_scope);
+
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const body = JSON.parse(calls[0]!) as { team_consent?: Record<string, unknown> };
+    expect(body.team_consent).toMatchObject({ value: true });
+    expect(body.team_consent?.['valid_till']).toBeDefined();
+  });
+
+  it('without team consent, sends no team_consent and shows no team note', async () => {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      if (String(input).includes('/api/invite/org/accept')) {
+        calls.push(init?.body ?? '');
+        return new Response(JSON.stringify({ slug: 'acme-org' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    renderView();
+    expect(screen.queryByText(messages.register.consent.team_join_note)).toBeNull();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+    expect(capturedGateProps?.docs?.map((d) => d.id)).toEqual(['privacy', 'terms']);
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(JSON.parse(calls[0]!)).not.toHaveProperty('team_consent');
+  });
+
   it('when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {
     const registerCalls: string[] = [];
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input);
-      if (url.includes('/api/org/register')) registerCalls.push(url);
+      if (url.includes('/api/invite/org/accept')) registerCalls.push(url);
       return new Response('{}', { status: 200 });
     }) as unknown as typeof fetch;
 

@@ -170,3 +170,21 @@ describe('sniffIdentitySelectors', () => {
     });
   });
 });
+
+describe('sniffIdentitySelectors — malformed properties', () => {
+  it('skips a null property instead of throwing', () => {
+    const schema = {
+      properties: {
+        legacy: null,
+        name: { type: 'string' },
+        phone: { type: 'string', format: 'tel' },
+        email: { type: 'string', format: 'email' },
+      },
+    };
+    expect(sniffIdentitySelectors(schema)).toEqual({
+      name: 'name',
+      phone: 'phone',
+      email: 'email',
+    });
+  });
+});

@@ -1,18 +1,30 @@
 /**
  * Shared read accessors over a resolved config store.
  *
- * Internal module — not a subpath export. `FsConfigService` and
- * `InMemoryConfigService` implement the same `slice` / `get` / `require`
- * contract over a plain `Record<string, unknown>`, and previously carried
- * byte-identical copies of these bodies plus `resolvePath`. The
- * `ConfigServiceBase` contract stays fully abstract (see
- * `.claude/rules/base-class-pattern.md`), so the shared logic lives in free
- * functions the implementations delegate to rather than in the base class.
+ * Internal module, not a subpath export. `FsConfigService` and
+ * `InMemoryConfigService` delegate `slice` / `get` / `require` to these
+ * functions. `ConfigServiceBase` stays fully abstract, so the shared logic
+ * lives here instead of in the base class.
  *
  * @module @aggregator-dpg/config-loader
  */
 
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { isObjectLike } from './record.js';
+
+/**
+ * Types a store value as the caller's `T`.
+ *
+ * The store is validated per package at load, but `T` is the caller's own
+ * claim about one slice or path, which the store cannot check. This is the
+ * only place that claim is made.
+ *
+ * @param value - A value read from the validated store.
+ */
+function asCallerType<T>(value: unknown): T {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  return value as T;
+}
 
 /**
  * Resolves a dotted path into a nested object.
@@ -23,8 +35,8 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
  */
 export function resolvePath(obj: Record<string, unknown>, path: string): unknown {
   return path.split('.').reduce<unknown>((current, key) => {
-    if (current === undefined || current === null || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[key];
+    if (!isObjectLike(current)) return undefined;
+    return current[key];
   }, obj);
 }
 
@@ -44,7 +56,7 @@ export function sliceFromStore<T>(store: Record<string, unknown>, key: string): 
       details: { key },
     });
   }
-  return value as T;
+  return asCallerType<T>(value);
 }
 
 /**
@@ -58,7 +70,7 @@ export function getFromStore<T = unknown>(
   store: Record<string, unknown>,
   path: string,
 ): T | undefined {
-  return resolvePath(store, path) as T | undefined;
+  return asCallerType<T | undefined>(resolvePath(store, path));
 }
 
 /**
@@ -77,5 +89,5 @@ export function requireFromStore<T = unknown>(store: Record<string, unknown>, pa
       details: { path },
     });
   }
-  return value as T;
+  return asCallerType<T>(value);
 }

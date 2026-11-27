@@ -8,11 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -87,11 +83,11 @@ describe('POST /v1/campaign/voice', () => {
     store = new FailingCampaignJobStore();
     _setCampaignJobStore(store);
 
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
@@ -100,7 +96,7 @@ describe('POST /v1/campaign/voice', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'campaign-manager',
         };
@@ -114,7 +110,7 @@ describe('POST /v1/campaign/voice', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
   });
 
@@ -181,7 +177,7 @@ describe('POST /v1/campaign/voice', () => {
       if (token === 'good') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-1',
+          user_id: 'agg-1',
           signalstack_org_id: 'org_5d3b7fa4-x',
           azp: 'aggregator-portal',
         };
@@ -196,7 +192,7 @@ describe('POST /v1/campaign/voice', () => {
 
   it('returns 403 when the token has no signalstack_org_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') return { sub: 'u1', aggregator_id: 'agg-1', azp: 'campaign-manager' };
+      if (token === 'good') return { sub: 'u1', user_id: 'agg-1', azp: 'campaign-manager' };
       throw new Error('invalid');
     });
     const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
@@ -218,7 +214,7 @@ describe('POST /v1/campaign/voice', () => {
     // Seed the per-org active-job cap (default 3) so the request is the 4th.
     for (let i = 0; i < 3; i++) {
       await store.createJob({
-        aggregatorId: 'agg-1',
+        userId: 'agg-1',
         signalstackOrgId: 'org_5d3b7fa4-x',
         channel: 'voice',
         metadata: [],
@@ -258,11 +254,11 @@ describe('POST /v1/campaign/voice', () => {
   });
 
   it('returns 403 FORBIDDEN AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'pending' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'pending' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });
     expect(res.statusCode).toBe(403);
@@ -271,9 +267,9 @@ describe('POST /v1/campaign/voice', () => {
   });
 
   it('returns 403 FORBIDDEN RECIPIENT_UNRESOLVED when the token has no email and the aggregator has no contact_email', async () => {
-    const aggStore = new AggregatorStoreFake();
-    aggStore.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
-    _setAggregatorStore(aggStore);
+    const aggStore = new UserStoreFake();
+    aggStore.seed([buildCoordinator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    _setUserStore(aggStore);
     // The default 'good' verifier already omits an `email` claim.
 
     const res = await post({ item_ids: [VALID_UUID], content: { agent_id: 'agent-123' } });

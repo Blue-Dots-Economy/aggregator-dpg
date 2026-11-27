@@ -1,20 +1,22 @@
 /**
- * Postgres adapter for the registration-invites store (#700).
+ * Postgres registration-invites store (`@aggregator-dpg/api`).
  *
- * Wraps Drizzle queries against `registration_invites`. Driver-specific errors
- * are mapped to abstract `InviteStoreError` codes — callers reason in domain
- * terms. The partial-unique index on (parent_org_id, email) WHERE
- * status='pending' surfaces as `DUPLICATE_PENDING`.
+ * Queries `registration_invites` and maps driver errors to `InviteStoreError`
+ * codes. The unique index on pending (org_id, role, email) surfaces as
+ * `DUPLICATE_PENDING`.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { registrationInvites, type RegistrationInviteRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
+import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
+  type InviteRole,
+  type ListOpenInvitesInput,
   type InviteStoreResult,
   type RefreshInviteInput,
   type RegistrationInvite,
@@ -24,7 +26,7 @@ function toDomain(row: RegistrationInviteRow): RegistrationInvite {
   return {
     jti: row.jti,
     role: row.role,
-    parentOrgId: row.parentOrgId,
+    parentOrgId: row.orgId,
     email: row.email,
     status: row.status,
     expiresAt: row.expiresAt,
@@ -41,7 +43,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
       const rows = await getDb()
         .insert(registrationInvites)
         .values({
-          parentOrgId: input.parentOrgId,
+          orgId: input.parentOrgId,
           email: input.email,
           expiresAt: input.expiresAt,
           createdBy: input.createdBy,
@@ -77,6 +79,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>> {
     try {
@@ -85,7 +88,8 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
         .from(registrationInvites)
         .where(
           and(
-            eq(registrationInvites.parentOrgId, parentOrgId),
+            eq(registrationInvites.orgId, parentOrgId),
+            eq(registrationInvites.role, role),
             eq(registrationInvites.email, email),
             eq(registrationInvites.status, 'pending'),
           ),
@@ -94,6 +98,35 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (err) {
       return this.mapDbError('inviteStore.findPendingByOrgAndEmail', err, Date.now());
+    }
+  }
+
+  async listOpen(input: ListOpenInvitesInput): Promise<InviteStoreResult<RegistrationInvite[]>> {
+    const start = Date.now();
+    try {
+      const { after } = input;
+      const createdMs = sql`date_trunc('milliseconds', ${registrationInvites.createdAt})`;
+      const rows = await getDb()
+        .select()
+        .from(registrationInvites)
+        .where(
+          and(
+            eq(registrationInvites.orgId, input.orgId),
+            eq(registrationInvites.role, input.role),
+            inArray(registrationInvites.status, ['pending', 'expired']),
+            after
+              ? or(
+                  lt(createdMs, after.createdAt),
+                  and(eq(createdMs, after.createdAt), lt(registrationInvites.jti, after.jti)),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(createdMs), desc(registrationInvites.jti))
+        .limit(input.limit);
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (err) {
+      return this.mapDbError('inviteStore.listOpen', err, start);
     }
   }
 
@@ -137,8 +170,9 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
   }
 
   /**
-   * Shared CAS `pending → next` used by consume/revoke. Returns the row on a
-   * winning swap, `null` when the invite was not pending.
+   * Atomically moves a pending invite to `next`; used by consume and revoke.
+   *
+   * Returns `null` when the invite was not pending.
    */
   private async casTerminal(
     op: string,
@@ -158,13 +192,16 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
     }
   }
 
+  /** Maps a driver error to `DB_UNAVAILABLE`. Never echoes the driver message: it holds query parameters. */
   private mapDbError(op: string, err: unknown, start: number): InviteStoreResult<never> {
-    const message = err instanceof Error ? err.message : 'unknown';
+    const code = pgErrorCode(err);
+    const errType = errorType(err);
+    const message = code ? `database error ${code}` : errType;
     logger.error({
       operation: op,
       status: 'failure',
       error: message,
-      error_type: err instanceof Error ? err.constructor.name : undefined,
+      error_type: errType,
       latency_ms: Date.now() - start,
     });
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message } };

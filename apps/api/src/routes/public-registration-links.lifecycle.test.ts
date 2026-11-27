@@ -19,11 +19,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -140,7 +136,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   let fakeDb: ReturnType<typeof buildFakeDb>;
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
 
   beforeEach(async () => {
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
@@ -149,11 +145,11 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
     process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
 
-    // Aggregator seeded with a signalstackOrgId so the route doesn't bail
+    // Coordinator seeded with a signalstackOrgId so the route doesn't bail
     // with SIGNALSTACK_ORG_NOT_REGISTERED before it gets to onboard().
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore = new UserStoreFake();
+    userStore.seed([
+      buildCoordinator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,
         name: 'Acme Aggregator',
@@ -161,7 +157,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         signalstackOrgId: ORG_ID,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
@@ -170,11 +166,12 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
 
     const liveLink: RegistrationLink = {
       id: LINK_ID,
-      aggregatorId: AGG_ID,
+      userId: AGG_ID,
       slug: LINK_SLUG,
       domain: 'seeker',
       context: {},
       registrationMode: 'form',
+      voiceBotKey: null,
       qrObjectKey: null,
       status: 'live',
       expiresAt: null,
@@ -194,7 +191,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setRegistrationLinksStore(null);
@@ -366,7 +363,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('404s when the live link points at an aggregator that no longer exists', async () => {
-    _setAggregatorStore(new AggregatorStoreFake());
+    _setUserStore(new UserStoreFake());
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -377,7 +374,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('503s (DB_UNAVAILABLE) when the aggregator lookup fails', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -391,8 +388,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('503s (SIGNALSTACK_ORG_NOT_REGISTERED) when the aggregator has no signalstack org id on file', async () => {
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,
         name: 'Acme Aggregator',
@@ -456,6 +453,43 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect(error.fields['upstream_code']).toBe('INVALID_ITEM_STATE');
   });
 
+  it('passes a landline-range number on to Signals, which decides for a new person', async () => {
+    let pushed: string | undefined;
+    signalstack.onboard = async (input) => {
+      pushed = input.phoneNumber;
+      return err(new UpstreamError('stop here', { code: 'SIGNALSTACK_BAD_REQUEST' }));
+    };
+    await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...basePayload, phone: '+918020123456', email: 'landline@example.com' },
+    });
+    expect(pushed).toBe('+918020123456');
+  });
+
+  it("400s INVALID_PHONE when Signals refuses a new person's phone", async () => {
+    signalstack.onboard = async () =>
+      err(
+        new UpstreamError('signalstack onboard returned 400: INVALID_PHONE', {
+          code: 'SIGNALSTACK_BAD_REQUEST',
+          details: {
+            status: 400,
+            upstreamCode: 'INVALID_PHONE',
+            signalsMessage: 'phone must be a mobile number',
+          },
+        }),
+      );
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...basePayload, phone: '+918020123456', email: 'landline2@example.com' },
+    });
+    expect(r.statusCode).toBe(400);
+    const error = (r.json() as { error: { code: string; detail: string } }).error;
+    expect(error.code).toBe('INVALID_PHONE');
+    expect(error.detail).toBe('phone must be a mobile number');
+  });
+
   it('400s (U18_REGISTRATION_REDIRECT) when signalstack maps the push to U18_NOT_ALLOWED', async () => {
     // Defensive belt-and-braces mapping: the route's own U18 gate already
     // strips age/compliance for a derived-minor submit, so this exercises
@@ -504,11 +538,12 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     _setRegistrationLinksStore(
       new StubRegistrationLinksStore({
         id: LINK_ID,
-        aggregatorId: AGG_ID,
+        userId: AGG_ID,
         slug: LINK_SLUG,
         domain: 'seeker',
         context: {},
         registrationMode: 'form',
+        voiceBotKey: null,
         qrObjectKey: null,
         status: 'draft',
         expiresAt: null,

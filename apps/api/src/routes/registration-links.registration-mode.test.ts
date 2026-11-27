@@ -17,15 +17,18 @@
  * store + the in-memory aggregator fake. Auth is stubbed via
  * `_setAccessTokenVerifier`.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
+import { ACTING_ACCOUNT_HEADER } from '@aggregator-dpg/shared-primitives/user-org';
+import { getIdentityStore } from '../services/identity-store/index.js';
 import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import {
@@ -39,25 +42,8 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
-import type * as ObjectStorageModule from '../services/object-storage/index.js';
 import { _setDbClients } from '../db/client.js';
-
-// #650 regression guard: the QR is no longer persisted — create/activate must
-// never touch object storage. Force the QR write primitives to REJECT (while
-// keeping the real bulk-upload helpers via importActual, so buildApp's other
-// routes still boot). If a putObject/signQrDownloadUrl call is ever
-// reintroduced into the link routes, the "S3 independence" tests below fail.
-vi.mock('../services/object-storage/index.js', async (importActual) => {
-  const actual = await importActual<typeof ObjectStorageModule>();
-  const rejectS3 = () =>
-    Promise.reject(new Error('S3 must not be on the link create/activate path'));
-  return {
-    ...actual,
-    putObject: vi.fn(rejectS3),
-    // Removed in #650; re-declared as a rejecting stub in case it's re-added.
-    signQrDownloadUrl: vi.fn(rejectS3),
-  };
-});
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -66,7 +52,7 @@ const USER_ID = 'kc-user-1';
 
 /**
  * Tracking stub: records every create input and returns a synthetic row.
- * Status forced to 'draft' to keep the route off the QR/S3 path.
+ * Status forced to 'draft' to keep the route off the QR/object-storage path.
  */
 class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
   readonly creates: CreateRegistrationLinkInput[] = [];
@@ -78,11 +64,12 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
     const now = new Date();
     const row: RegistrationLink = {
       id: `link-${this.idCounter}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       slug: input.slug,
       domain: input.domain,
       context: input.context,
       registrationMode: input.registrationMode ?? 'form',
+      voiceBotKey: input.voiceBotKey ?? null,
       qrObjectKey: null,
       status: input.status ?? 'draft',
       expiresAt: input.expiresAt ?? null,
@@ -140,14 +127,14 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
     return {
       sub: USER_ID,
       email: 'a@x.com',
-      aggregator_id: AGG_ID,
+      user_id: AGG_ID,
       aggregator_type: 'seeker',
       decision_made: 'approved',
     };
   });
-  const aggStore = new AggregatorStoreFake();
+  const aggStore = new UserStoreFake();
   aggStore.seed([
-    buildAggregator({
+    buildCoordinator({
       id: AGG_ID,
       orgSlug: ORG_SLUG,
       name: 'Acme',
@@ -155,7 +142,7 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
       signalstackOrgId: ORG_ID,
     }),
   ]);
-  _setAggregatorStore(aggStore);
+  _setUserStore(aggStore);
   const store = new TrackingRegistrationLinksStore();
   _setRegistrationLinksStore(store);
   _setDbClients(null, buildMetricsStubDb() as never);
@@ -173,7 +160,7 @@ describe('POST /v1/links/create — registration_mode', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -226,6 +213,42 @@ describe('POST /v1/links/create — registration_mode', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
+
+  it('creates the link for the coordinator an owner acts as', async () => {
+    const ADMIN = 'adadadad-adad-4ada-8ada-adadadadadad';
+    const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: AGG_ID,
+        orgSlug: ORG_SLUG,
+        name: 'Acme',
+        status: 'active',
+        signalstackOrgId: ORG_ID,
+        serves: ['seeker'],
+        parentOrgId: ORG,
+      }),
+    ]);
+    _setUserStore(users);
+    const orgs = new OrganisationStoreFake();
+    orgs.seed([buildOrganisation({ id: ORG, status: 'active', ownerUserId: ADMIN })]);
+    _setOrganisationStore(orgs);
+    await getIdentityStore().link(ADMIN, 'keycloak', 'kc-owner', 'admin');
+    await getIdentityStore().link(AGG_ID, 'keycloak', 'kc-owner', 'coordinator');
+    _setAccessTokenVerifier(async () => ({ sub: 'kc-owner', email: 'owner@x.com' }));
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/v1/links/create',
+        headers: { authorization: 'Bearer owner', [ACTING_ACCOUNT_HEADER]: AGG_ID },
+        payload: { domain: 'seeker' },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(store.creates[0]!.userId).toBe(AGG_ID);
+    } finally {
+      _setOrganisationStore(null);
+    }
+  });
 });
 
 describe('POST /v1/links/create — AGGREGATOR_ONBOARDING_ENABLED gate (#637)', () => {
@@ -239,7 +262,7 @@ describe('POST /v1/links/create — AGGREGATOR_ONBOARDING_ENABLED gate (#637)', 
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -344,7 +367,7 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -365,7 +388,7 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
 // ---------------------------------------------------------------------------
 // Full CRUD lifecycle — create/list/read/patch/activate/deactivate against a
 // stateful in-memory fake, covering the auth wrapper, aggregator-type
-// enforcement, slug-collision retries, QR/S3 side effects, and every
+// enforcement, slug-collision retries, QR/object-storage side effects, and every
 // upstream-failure branch. `TrackingRegistrationLinksStore` above stays
 // scoped to the registration_mode-specific tests; this fake models the full
 // abstract contract so the rest of the route file's branches are exercised.
@@ -375,11 +398,12 @@ function buildLink(overrides: Partial<RegistrationLink> = {}): RegistrationLink 
   const now = new Date('2026-08-01T00:00:00.000Z');
   return {
     id: 'link-fixed',
-    aggregatorId: AGG_ID,
+    userId: AGG_ID,
     slug: 'my-slug',
     domain: 'seeker',
     context: {},
     registrationMode: 'form',
+    voiceBotKey: null,
     qrObjectKey: null,
     status: 'draft',
     expiresAt: null,
@@ -396,6 +420,11 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   private seq = 0;
   private failNext = new Map<string, StoreError>();
 
+  /** Number of stored links. */
+  size(): number {
+    return this.rows.size;
+  }
+
   seed(rows: RegistrationLink[]): void {
     for (const r of rows) this.rows.set(r.id, r);
   }
@@ -411,9 +440,9 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
     return e;
   }
 
-  private slugTaken(aggregatorId: string, slug: string, excludeId?: string): boolean {
+  private slugTaken(userId: string, slug: string, excludeId?: string): boolean {
     for (const r of this.rows.values()) {
-      if (r.aggregatorId === aggregatorId && r.slug === slug && r.id !== excludeId) return true;
+      if (r.userId === userId && r.slug === slug && r.id !== excludeId) return true;
     }
     return false;
   }
@@ -421,18 +450,19 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('create');
     if (fail) return { ok: false, error: fail };
-    if (this.slugTaken(input.aggregatorId, input.slug)) {
+    if (this.slugTaken(input.userId, input.slug)) {
       return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
     }
     this.seq += 1;
     const now = new Date('2026-08-01T00:00:00.000Z');
     const row: RegistrationLink = {
       id: `link-${this.seq}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       slug: input.slug,
       domain: input.domain,
       context: input.context,
       registrationMode: input.registrationMode ?? 'form',
+      voiceBotKey: input.voiceBotKey ?? null,
       qrObjectKey: null,
       status: input.status ?? 'draft',
       expiresAt: input.expiresAt ?? null,
@@ -444,11 +474,11 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
     return { ok: true, value: row };
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>> {
     const fail = this.take('findById');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
+    if (!row || row.userId !== userId) return { ok: true, value: null };
     return { ok: true, value: row };
   }
 
@@ -462,16 +492,16 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('updateDraft');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId || row.status !== 'draft') {
+    if (!row || row.userId !== userId || row.status !== 'draft') {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'not a draft' } };
     }
-    if (patch.slug !== undefined && this.slugTaken(aggregatorId, patch.slug, id)) {
+    if (patch.slug !== undefined && this.slugTaken(userId, patch.slug, id)) {
       return { ok: false, error: { code: 'SLUG_COLLISION', message: 'slug taken' } };
     }
     const updated: RegistrationLink = {
@@ -486,12 +516,12 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<{ rows: RegistrationLink[]; total: number }>> {
     const fail = this.take('list');
     if (fail) return { ok: false, error: fail };
-    let rows = [...this.rows.values()].filter((r) => r.aggregatorId === aggregatorId);
+    let rows = [...this.rows.values()].filter((r) => r.userId === userId);
     if (options.status) rows = rows.filter((r) => r.status === options.status);
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
@@ -505,13 +535,13 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>> {
     const fail = this.take('updateStatus');
     if (fail) return { ok: false, error: fail };
     const row = this.rows.get(id);
-    if (!row || row.aggregatorId !== aggregatorId) {
+    if (!row || row.userId !== userId) {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
     }
     const updated = { ...row, status: nextStatus, updatedAt: new Date() };
@@ -546,10 +576,11 @@ const TOKEN_SEEKER_APPROVED = 'full-seeker-approved';
 const TOKEN_PROVIDER_APPROVED = 'full-provider-approved';
 const TOKEN_PENDING = 'full-pending';
 const TOKEN_NO_AGG_TYPE = 'full-no-agg-type';
+const TOKEN_BOTH_APPROVED = 'full-both-approved';
 
 async function bootFullApp(opts: {
   store: FullRegistrationLinksStore;
-  aggregatorStore?: AggregatorStoreFake;
+  userStore?: UserStoreFake;
   metricsRows?: MetricsRow[];
 }): Promise<FastifyInstance> {
   _resetJwks();
@@ -560,7 +591,7 @@ async function bootFullApp(opts: {
     if (token === TOKEN_SEEKER_APPROVED) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'approved',
       };
@@ -568,7 +599,7 @@ async function bootFullApp(opts: {
     if (token === TOKEN_PROVIDER_APPROVED) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'provider',
         decision_made: 'approved',
       };
@@ -576,23 +607,31 @@ async function bootFullApp(opts: {
     if (token === TOKEN_PENDING) {
       return {
         sub: USER_ID,
-        aggregator_id: AGG_ID,
+        user_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'pending',
       };
     }
+    if (token === TOKEN_BOTH_APPROVED) {
+      return {
+        sub: USER_ID,
+        user_id: AGG_ID,
+        aggregator_type: ['seeker', 'provider'],
+        decision_made: 'approved',
+      };
+    }
     if (token === TOKEN_NO_AGG_TYPE) {
-      return { sub: USER_ID, aggregator_id: AGG_ID, decision_made: 'approved' };
+      return { sub: USER_ID, user_id: AGG_ID, decision_made: 'approved' };
     }
     throw new Error('invalid token');
   });
 
-  const aggregatorStore =
-    opts.aggregatorStore ??
+  const userStore =
+    opts.userStore ??
     (() => {
-      const s = new AggregatorStoreFake();
+      const s = new UserStoreFake();
       s.seed([
-        buildAggregator({
+        buildCoordinator({
           id: AGG_ID,
           orgSlug: ORG_SLUG,
           name: 'Acme',
@@ -602,7 +641,7 @@ async function bootFullApp(opts: {
       ]);
       return s;
     })();
-  _setAggregatorStore(aggregatorStore);
+  _setUserStore(userStore);
   _setRegistrationLinksStore(opts.store);
   _setDbClients(null, buildMetricsDb(opts.metricsRows ?? []) as never);
 
@@ -612,7 +651,7 @@ async function bootFullApp(opts: {
 async function teardownFullApp(app: FastifyInstance | undefined): Promise<void> {
   await app?.close();
   _setAccessTokenVerifier(null);
-  _setAggregatorStore(null);
+  _setUserStore(null);
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
   _setDbClients(null, null);
@@ -665,7 +704,24 @@ describe('POST /v1/links/create — full lifecycle', () => {
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
 
-  it('403 AGGREGATOR_TYPE_MISSING when the token has no aggregator_type claim', async () => {
+  /** Replaces the seeded coordinator with one serving `serves`. */
+  function seedServes(serves: string[]): void {
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: AGG_ID,
+        orgSlug: ORG_SLUG,
+        name: 'Acme',
+        status: 'active',
+        signalstackOrgId: ORG_ID,
+        serves,
+      }),
+    ]);
+    _setUserStore(users);
+  }
+
+  it('checks the token claim, not the stored row', async () => {
+    seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -673,10 +729,12 @@ describe('POST /v1/links/create — full lifecycle', () => {
       payload: { domain: 'seeker' },
     });
     expect(r.statusCode).toBe(403);
-    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISSING');
+    expect(r.json().error.code).toBe('DOMAIN_NOT_SERVED');
+    expect(store.size()).toBe(0);
   });
 
-  it('403 AGGREGATOR_TYPE_MISMATCH when creating a link for a different domain', async () => {
+  it('403 DOMAIN_NOT_SERVED when creating a link for a domain not served', async () => {
+    seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -684,11 +742,24 @@ describe('POST /v1/links/create — full lifecycle', () => {
       payload: { domain: 'provider' },
     });
     expect(r.statusCode).toBe(403);
-    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISMATCH');
+    expect(r.json().error.code).toBe('DOMAIN_NOT_SERVED');
+    expect(store.size()).toBe(0);
+  });
+
+  it('creates a link for a second profile type the token claim carries', async () => {
+    seedServes(['seeker']);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_BOTH_APPROVED}` },
+      payload: { domain: 'provider' },
+    });
+    expect(r.statusCode).toBe(201);
+    expect((r.json() as { domain: string }).domain).toBe('provider');
   });
 
   it('retries once on a slug collision and succeeds with a suffixed slug', async () => {
-    store.seed([buildLink({ id: 'existing', slug: 'taken-slug', aggregatorId: AGG_ID })]);
+    store.seed([buildLink({ id: 'existing', slug: 'taken-slug', userId: AGG_ID })]);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -734,9 +805,9 @@ describe('POST /v1/links/create — full lifecycle', () => {
   });
 
   it('503 DB_UNAVAILABLE when the caller aggregator row cannot be loaded', async () => {
-    const emptyAggStore = new AggregatorStoreFake();
+    const emptyAggStore = new UserStoreFake();
     await app.close();
-    app = await bootFullApp({ store, aggregatorStore: emptyAggStore });
+    app = await bootFullApp({ store, userStore: emptyAggStore });
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -1133,22 +1204,18 @@ describe('POST /v1/links/:id/activate', () => {
   });
 });
 
-// #650: object storage is mocked to REJECT for this whole file (see the
-// vi.mock at the top). These assert the central promise deterministically:
-// activation is independent of S3 — a create-live and a draft activation both
-// succeed even though every object-storage write would throw. If a QR→S3 write
-// is reintroduced into either path, these fail with 500 INTERNAL.
-describe('S3 independence (#650)', () => {
+describe('object storage independence', () => {
   let app: FastifyInstance;
   let store: FullRegistrationLinksStore;
 
   beforeEach(async () => {
+    _setObjectStorage(null);
     store = new FullRegistrationLinksStore();
     app = await bootFullApp({ store });
   });
   afterEach(async () => teardownFullApp(app));
 
-  it('creates a live link with S3 unreachable — 201, qr_url null', async () => {
+  it('creates a live link without object storage — 201, qr_url null', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -1162,7 +1229,7 @@ describe('S3 independence (#650)', () => {
     expect(body.qr_url).toBeNull();
   });
 
-  it('activates a draft with S3 unreachable — 200, qr_url null', async () => {
+  it('activates a draft without object storage — 200, qr_url null', async () => {
     store.seed([buildLink({ id: 'link-draft', slug: 'act-nos3', status: 'draft' })]);
     const r = await app.inject({
       method: 'POST',

@@ -1,12 +1,12 @@
 /**
  * Unit tests for the shared registration server helpers (#619):
- * `isOrgHierarchyEnabled`, `loadConsentContent`, `loadOrgSchema`.
+ * `loadConsentContent`, `loadOrgSchema`.
  *
  * The page tests mock this module, so its function bodies are exercised
  * directly here — deps (config-loader, fs, schema-path resolver, logger) are
  * mocked so no real I/O happens.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { loadConsentConfig } = vi.hoisted(() => ({ loadConsentConfig: vi.fn() }));
 const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
@@ -20,11 +20,7 @@ vi.mock('node:fs/promises', () => ({ readFile, default: { readFile } }));
 vi.mock('@/lib/aggregator-schema.server', () => ({ resolveAggregatorSchemaPath }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: loggerWarn, error: vi.fn(), info: vi.fn() } }));
 
-import {
-  isOrgHierarchyEnabled,
-  loadConsentContent,
-  loadOrgSchema,
-} from '@/app/(public)/register/register-server';
+import { loadConsentContent, loadOrgSchema } from '@/app/(public)/register/register-server';
 
 function consentCfg() {
   const doc = (title: string, content: string) => ({
@@ -38,30 +34,6 @@ function consentCfg() {
     },
   };
 }
-
-describe('isOrgHierarchyEnabled', () => {
-  let orig: string | undefined;
-  beforeEach(() => {
-    orig = process.env.ORG_HIERARCHY_ENABLED;
-  });
-  afterEach(() => {
-    if (orig === undefined) delete process.env.ORG_HIERARCHY_ENABLED;
-    else process.env.ORG_HIERARCHY_ENABLED = orig;
-  });
-
-  it('true only for the exact string "true"', () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'true';
-    expect(isOrgHierarchyEnabled()).toBe(true);
-  });
-  it('false when unset', () => {
-    delete process.env.ORG_HIERARCHY_ENABLED;
-    expect(isOrgHierarchyEnabled()).toBe(false);
-  });
-  it('false for other values', () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'yes';
-    expect(isOrgHierarchyEnabled()).toBe(false);
-  });
-});
 
 describe('loadConsentContent', () => {
   beforeEach(() => {

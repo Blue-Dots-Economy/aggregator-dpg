@@ -524,10 +524,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const provider = new ErroringVoiceProvider(
       new ValidationError('raya /batch/1/start returned 400', {
         code: 'RAYA_BAD_REQUEST',
-        details: {
-          status: 400,
-          body: JSON.stringify({ message: 'max_concurrent_calls is required' }),
-        },
+        details: { status: 400, message: 'max_concurrent_calls is required' },
       }),
     );
     h.deps.voice!.provider = provider;
@@ -559,7 +556,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const provider = new ErroringVoiceProvider(
       new AuthError('raya /batch returned 401', {
         code: 'RAYA_UNAUTHORIZED',
-        details: { status: 401, body: JSON.stringify({ message: 'invalid api key' }) },
+        details: { status: 401, message: 'invalid api key' },
       }),
     );
     h.deps.voice!.provider = provider;
@@ -633,6 +630,21 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const h = harness(job({ content: {} }));
     await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/agent_id/);
     expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
+  });
+
+  it('throws when job.content has a field of the wrong type', async () => {
+    const h = harness(job({ content: { agent_id: 'agent-1', variables: 'role' } }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/variables/);
+    expect(h.jobStatuses).toEqual(['processing']);
+  });
+
+  it('names the root when job.content is not an object at all', async () => {
+    // A JSONB `null` read back from the row; the column type does not stop it.
+    const content: ProcessingJob['content'] = JSON.parse('null');
+    const h = harness(job({ content }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(
+      'campaign voice job content invalid: (root)',
+    );
   });
 
   it('flattens item_state into string variables, dropping null/undefined entries', async () => {
@@ -760,7 +772,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     });
   });
 
-  it('describeDispatchFailure (C1): falls back to the bare error message when the body is not JSON — never the raw body text', async () => {
+  it('describeDispatchFailure (C1): falls back to the bare error message when details carry no message — never a raw body', async () => {
     const h = harness(job());
     const provider = new ErroringVoiceProvider(
       new ValidationError('raya /batch/1/start returned 400', {
@@ -783,13 +795,12 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     ).not.toContain('Bad Gateway');
   });
 
-  it('describeDispatchFailure (C1): falls back to the bare error message when the JSON body carries no top-level message field — never the raw body', async () => {
-    const body = JSON.stringify({ error: 'bad_request' });
+  it('describeDispatchFailure (C1): ignores a non-string message in details', async () => {
     const h = harness(job());
     const provider = new ErroringVoiceProvider(
       new ValidationError('raya /batch/1/start returned 400', {
         code: 'RAYA_BAD_REQUEST',
-        details: { status: 400, body },
+        details: { status: 400, message: { error: 'bad_request' } },
       }),
     );
     h.deps.voice!.provider = provider;
@@ -806,7 +817,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     ).not.toContain('bad_request');
   });
 
-  it('describeDispatchFailure (C1, PII leak): a Raya 400 body embedding a phone number and data[] never leaks into error_reason — only the parsed top-level message survives', async () => {
+  it('describeDispatchFailure (C1, PII leak): only details.message reaches error_reason, never a raw body in details', async () => {
     // Modelled on Raya's REAL `POST /batch` 400 shape: `errors[].value` echoes
     // the raw rejected phone back, and `data[]` echoes the full submitted
     // contact rows (name/phone) — both PII that must never reach
@@ -824,7 +835,7 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     const provider = new ErroringVoiceProvider(
       new ValidationError('raya /batch/1/start returned 400', {
         code: 'RAYA_BAD_REQUEST',
-        details: { status: 400, body: rawBody },
+        details: { status: 400, message: 'max_concurrent_calls is required', body: rawBody },
       }),
     );
     h.deps.voice!.provider = provider;

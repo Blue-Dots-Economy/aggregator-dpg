@@ -1,59 +1,38 @@
 /**
- * Identity-selector sniffer.
+ * Identity-selector sniffer for the network-config package.
  *
- * Given a JSON Schema for a participant profile (seeker, provider,
- * learner, …) returns the field names the aggregator uses as canonical
- * `name`, `phone`, `email`. The heuristic covers the four signalstack
- * networks we know about (blue_dot, purple_dot, yellow_dot, learner-
- * tutor) without manual overrides; operators who add a new schema
- * with unusual field naming can override via `field_overrides` in the
- * aggregator YAML.
+ * Given a participant profile JSON Schema, returns the field names used as
+ * `name`, `phone` and `email`. Schemas with unusual field names can set
+ * `field_overrides` in the aggregator YAML instead.
  *
  * @module @aggregator-dpg/network-config/sniffer
  */
 
 import type { IdentitySelectors } from './interface.js';
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /**
- * Subset of JSON Schema we look at — keeps the sniffer independent of
- * a particular Ajv version. Unknown keys are ignored.
+ * One property schema. The sniffer reads `type`, `pattern` and `format`, and
+ * checks each one's type before use.
  */
-interface SchemaProperty {
-  type?: string | string[];
-  pattern?: string;
-  format?: string;
-  title?: string;
-  minLength?: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
-interface SchemaShape {
-  properties?: Record<string, SchemaProperty>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
+type SchemaProperty = JsonRecord;
 
 /**
- * Heuristic — try to derive {@link IdentitySelectors} from a JSON
- * Schema's property definitions. Returns `null` when any of the three
- * required selectors cannot be confidently inferred so the caller
- * raises a clear configuration error instead of silently routing data
- * through a wrong field.
+ * Derives {@link IdentitySelectors} from a JSON Schema's properties.
  *
- * Detection rules (in priority order):
- *   - **phone**: schema `pattern` matches a 10-digit or E.164 form;
- *     OR `format: tel`; OR field name contains "phone" or "mobile".
- *   - **email**: schema `format: email`; OR field name contains
- *     "email".
- *   - **name**: field named exactly "name"; OR ends in "_name";
- *     OR contains "name" with a `minLength >= 1` string type
- *     (excluding phone/email matches).
+ * The first matching property wins:
+ *   - phone: `format: tel`, a 10-digit or E.164 `pattern`, or a name
+ *     containing "phone" or "mobile".
+ *   - email: `format: email`, or a name containing "email".
+ *   - name: a string or untyped field named `name`, or with a `name` word in
+ *     snake_case or camelCase. The phone and email fields are excluded.
+ *
+ * @param schema - The profile JSON Schema.
+ * @returns The selectors, or `null` when phone, email or name cannot be found.
  */
 export function sniffIdentitySelectors(schema: unknown): IdentitySelectors | null {
-  if (!schema || typeof schema !== 'object') return null;
-  const props = (schema as SchemaShape).properties;
-  if (!props || typeof props !== 'object') return null;
+  if (!isPlainObject(schema) || !isPlainObject(schema.properties)) return null;
+  const props = schema.properties;
 
   const phone = pickFirstMatch(props, isPhoneField);
   const email = pickFirstMatch(props, isEmailField);
@@ -66,11 +45,12 @@ export function sniffIdentitySelectors(schema: unknown): IdentitySelectors | nul
 }
 
 function pickFirstMatch(
-  props: Record<string, SchemaProperty>,
+  props: Record<string, unknown>,
   predicate: (prop: SchemaProperty, name: string) => boolean,
 ): string | null {
   for (const [name, prop] of Object.entries(props)) {
-    if (predicate(prop, name)) return name;
+    // A non-object property (`true`, `null`) carries no keywords; only its name can match.
+    if (predicate(isPlainObject(prop) ? prop : {}, name)) return name;
   }
   return null;
 }

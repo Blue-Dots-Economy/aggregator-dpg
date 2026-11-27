@@ -1,15 +1,8 @@
 'use client';
 
 /**
- * Pre-form escape hatch (#652): the secondary option on the registration
- * chooser, for a participant who already has a Signals account and does not
- * want to fill the form.
- *
- * This is proactive — it sits in front of the form and leaves the page. It is
- * the only remaining "you may already be registered" affordance on this screen:
- * the reactive `already_registered` alert that used to fire after the identity
- * probe was removed in #780, because a participant is allowed to hold more than
- * one profile and the form no longer refuses a repeat submission.
+ * "Already registered — Sign in" option on the registration chooser, for a
+ * participant who already has a Signals account.
  */
 
 import { useTranslations } from 'next-intl';
@@ -17,11 +10,9 @@ import { resolveSignalsCta } from '@aggregator-dpg/network-config/signals-cta';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
 /**
- * Defence in depth on the hand-off target. The api is the sole source of these
- * URLs and already rejects anything but http(s) at boot (`parseSignalsUiUrls`),
- * so this can only fire if that guarantee is ever broken upstream — but the
- * value lands in an `href` the participant clicks, so re-check it here rather
- * than trust one validator. Valid http(s) URLs are unaffected.
+ * Checks that a hand-off URL is absolute http(s) before it is used as an `href`.
+ *
+ * The API also validates these URLs at boot.
  *
  * @param url - Candidate URL from the `signals_ui_urls` payload.
  * @returns `true` for an absolute http(s) URL, `false` for anything else
@@ -38,21 +29,62 @@ function isSafeHandoffUrl(url: string): boolean {
 }
 
 /**
+ * Sends the participant to the Signals UI in the same tab.
+ *
+ * Do not use `window.open(url, '_blank')`: this runs from a timer, and
+ * browsers block pop-ups opened without a user click. Errors from a blocked
+ * navigation are logged; the button stays on screen.
+ *
+ * @param url - Hand-off URL captured when the countdown started.
+ */
+export function navigateToSignals(url: string): void {
+  try {
+    window.location.assign(url);
+  } catch (err) {
+    console.error(
+      '[signals-handoff] navigation to the Signals UI was blocked; the participant stays on this page',
+      {
+        operation: 'signals-handoff.navigate',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+  }
+}
+
+/**
+ * The domain's Signals UI URL, or `null` when none is configured or it is unsafe.
+ *
+ * Not gated by the link's `signals_cta` setting: the voice page sends an
+ * under-18 participant, and a participant who has called, to Signals either way.
+ *
+ * @param domain - The link's domain id (e.g. `seeker`).
+ * @returns The configured Signals UI URL, or `null`.
+ */
+export function useSignalsUiUrl(domain: string): string | null {
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  const urls = cfg.signals_ui_urls;
+  const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
+  if (!url) return null;
+  if (!isSafeHandoffUrl(url)) {
+    console.error(
+      `[signals-cta] refusing a non-http(s) hand-off URL for domain "${domain}"; the sign-in option will not render`,
+      { operation: 'signals-cta.validate-url', status: 'rejected', domain },
+    );
+    return null;
+  }
+  return url;
+}
+
+/**
  * Resolve the Signals UI URL for this link, or `null` when the hand-off is off.
  *
- * Two independent gates, both config-driven:
- *  - the link's registration mode must have `signals_cta` (resolved
- *    server-side; defaults to full-profile modes only), and
- *  - the link's domain must have a URL in `signals_ui_urls`.
+ * Both must hold: the link's registration mode has `signals_cta` enabled, and
+ * the link's domain has a URL in `signals_ui_urls`. `null` means no chooser is
+ * shown and the form renders directly. An unsafe URL is treated as absent.
  *
- * `null` also means "no chooser": with nowhere to sign in there is nothing to
- * choose between, so the page renders the registration form directly. A URL
- * that fails {@link isSafeHandoffUrl} is treated the same way as an absent one.
- *
- * The returned value is a full URL configured by the operator — normally the
- * Signals UI's `/auth/login`, which mints a fresh Keycloak authorization URL
- * per attempt. A Keycloak URL configured here would carry one-time `state` and
- * `code_challenge` values and fail for every user; see the note in .env.example.
+ * The URL should be the Signals UI `/auth/login` page, not a Keycloak URL
+ * (which carries one-time `state` values); see `.env.example`.
  *
  * @param domain - The link's domain id (e.g. `seeker`).
  * @param registrationMode - The link's registration mode key, or `null`.
@@ -66,24 +98,14 @@ export function useSignalsHandoffUrl(
   submissionShape: 'account_only' | 'account_and_profile',
 ): string | null {
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  const urls = cfg.signals_ui_urls;
-  const url = urls && Object.hasOwn(urls, domain) ? urls[domain] : undefined;
+  const url = useSignalsUiUrl(domain);
   if (!url) return null;
-  if (!isSafeHandoffUrl(url)) {
-    console.error(
-      `[signals-cta] refusing a non-http(s) hand-off URL for domain "${domain}"; the sign-in option will not render`,
-      { operation: 'signals-cta.validate-url', status: 'rejected', domain },
-    );
-    return null;
-  }
   const modes = cfg.registration_modes;
   const mode =
     registrationMode && modes && Object.hasOwn(modes, registrationMode)
       ? modes[registrationMode]
       : undefined;
-  // The server resolves `signals_cta` and bakes it onto the wire payload; an
-  // absent flag means an older api build (or a mode this network dropped), so
-  // fall back to the shared default rule rather than a second local copy of it.
+  // The server sends `signals_cta`; when absent, use the shared default rule.
   const enabled = resolveSignalsCta(mode?.signals_cta, submissionShape);
   return enabled ? url : null;
 }
@@ -91,13 +113,10 @@ export function useSignalsHandoffUrl(
 /**
  * Renders the "Already Registered — Sign In" option of the chooser.
  *
- * Deliberately secondary to the Register button next to it: outlined rather
- * than brand-filled, so the two options never read as equal primaries.
+ * Styled as a secondary (outlined) button next to Register.
  *
- * @param props.href - Resolved Signals UI URL from {@link useSignalsHandoffUrl},
- *   used verbatim with nothing appended.
- * @returns The sign-in link, always opened in a new tab so the registration
- *   page survives behind it.
+ * @param props.href - Signals UI URL from {@link useSignalsHandoffUrl}, used as is.
+ * @returns The sign-in link, opened in a new tab.
  */
 export function SignalsSignInCta({ href }: Readonly<{ href: string }>) {
   const t = useTranslations('profile.public_reg');
@@ -110,5 +129,28 @@ export function SignalsSignInCta({ href }: Readonly<{ href: string }>) {
     >
       {t('signals_cta')}
     </a>
+  );
+}
+
+/**
+ * Renders "Already registered? Sign in with OTP" as one line of small text.
+ *
+ * @param props.href - Signals UI URL from {@link useSignalsHandoffUrl}, used as is.
+ * @returns The sign-in line, its link opened in a new tab.
+ */
+export function SignalsSignInLine({ href }: Readonly<{ href: string }>) {
+  const t = useTranslations('profile.public_reg');
+  return (
+    <p className="text-center text-[13px] text-ink-500">
+      {t('signals_sign_in_prompt')}{' '}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-(--bd-primary-600) underline-offset-2 hover:underline"
+      >
+        {t('signals_sign_in_link')}
+      </a>
+    </p>
   );
 }

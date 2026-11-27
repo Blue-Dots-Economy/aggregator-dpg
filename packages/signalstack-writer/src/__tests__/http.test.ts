@@ -1150,7 +1150,7 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
-    expect(result.error.message).toContain('is not an object');
+    expect(result.error.message).toContain('by_domain.seeker (invalid_type)');
   });
 
   it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_received_action_status', async () => {
@@ -2161,5 +2161,656 @@ describe('HttpSignalStackWriter correlation-id forwarding', () => {
       profile: { occupation: 'carpenter' },
     });
     expect('x-request-id' in headersOf()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Response contract: the shapes Signals sends, and what a bad response carries
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter — Signals response contract', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  /** A participant value that must never reach an error's details. */
+  const PARTICIPANT_PHONE = '+919800000001';
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'platform-org-1',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  const onboardInput = {
+    actingOrgId: 'org-abc',
+    name: 'Asha',
+    phoneNumber: PARTICIPANT_PHONE,
+    channel: 'bulk' as const,
+    source_id: 'src-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: { name: 'Asha' },
+  };
+
+  it('upsertAggregator builds the aggregator from the input when Signals returns { org_id, created }', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ org_id: 'org_1', created: true }));
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+      metadata: { region: 'south' },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({
+      org_id: 'org_1',
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+      metadata: { region: 'south' },
+    });
+  });
+
+  it('onboard accepts the full Signals response, including a null onboarded_at', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        user_existed: false,
+        owned_elsewhere: false,
+        onboarded_at: null,
+        consent_recorded: 2,
+        onboarded_by_org_id: 'org_1',
+        onboarded_by_default: false,
+        items: [
+          {
+            item_id: '0b8c2f7e-1d3a-4c1e-9a4e-6f1b2c3d4e5f',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            lifecycle_status: 'draft',
+            item_state: { phone: PARTICIPANT_PHONE },
+            item_locations: [],
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({
+      user_id: 'user-1',
+      profile_item_id: '0b8c2f7e-1d3a-4c1e-9a4e-6f1b2c3d4e5f',
+      onboarded_at: '',
+      owned_elsewhere: false,
+      lifecycle_status: 'draft',
+    });
+  });
+
+  it('onboard reports the field path and code of a malformed response, never its values', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ items: [{ item_id: 'item-1', item_state: { phone: PARTICIPANT_PHONE } }] }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({ issues: [{ path: 'user_id', code: 'invalid_type' }] });
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('onboard does not put participant data on the "no item" error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        items: [{ item_network: 'blue_dot', item_state: { phone: PARTICIPANT_PHONE } }],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('probeUser does not put participant data on a bad-response error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        compliance: [],
+        items: [
+          {
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_state: { phone: PARTICIPANT_PHONE },
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      phoneNumber: PARTICIPANT_PHONE,
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('probeUser reports the field path of a non-array items field', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: 'user-1', items: 'nope' }));
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({ issues: [{ path: 'items', code: 'invalid_type' }] });
+  });
+
+  it('fetchDashboard accepts a null last_computed_at and keeps fields it does not model', async () => {
+    const payload = {
+      ...CANONICAL_DASHBOARD_PAYLOAD,
+      by_domain: {
+        seeker: {
+          ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker,
+          rollup: { ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker.rollup, extra_metric: 7 },
+          extra_slice_field: 'kept',
+        },
+      },
+      metadata: { last_computed_at: null, ttl_seconds: 3600, refreshed: true },
+      extra_top_field: { kept: true },
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse(payload));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual(payload);
+  });
+
+  it('fetchDashboard rejects a rollup without total_users and names the path', async () => {
+    const { total_users: _omitted, ...rollup } =
+      CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker.rollup;
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        ...CANONICAL_DASHBOARD_PAYLOAD,
+        by_domain: { seeker: { ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker, rollup } },
+      }),
+    );
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({
+      issues: [{ path: 'by_domain.seeker.rollup.total_users', code: 'invalid_type' }],
+    });
+  });
+
+  it('fetchDecryptedProfiles keeps the contact block and locations Signals returns', async () => {
+    const row = {
+      item_id: 'item-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+      item_type: 'profile_1.0',
+      item_state: {},
+      contact: {
+        name: { value: 'Asha', source: 'item' },
+        phone: { value: null, source: null },
+      },
+      locations: [{ lat: 12.9, lng: 77.6 }],
+      created_at: '2026-06-26T12:03:04.686Z',
+      updated_at: '2026-06-26T12:03:04.686Z',
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ profiles: [row], skipped: [] }));
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+      contact: true,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({ profiles: [row], skipped: [] });
+  });
+
+  it('fetchDecryptedProfiles rejects a row whose item_state is not an object, without its values', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        profiles: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: PARTICIPANT_PHONE,
+            created_at: '2026-06-26T12:03:04.686Z',
+            updated_at: '2026-06-26T12:03:04.686Z',
+          },
+        ],
+        skipped: [],
+      }),
+    );
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({
+      issues: [{ path: 'profiles.0.item_state', code: 'invalid_type' }],
+    });
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bodies that must not reach an error, and onboard item selection
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter — error bodies and onboard items', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  /** A participant value that must never reach an error. */
+  const PARTICIPANT_PHONE = '+919800000002';
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'platform-org-1',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  const onboardInput = {
+    actingOrgId: 'org-abc',
+    name: 'Asha',
+    phoneNumber: PARTICIPANT_PHONE,
+    channel: 'bulk' as const,
+    source_id: 'src-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: { name: 'Asha' },
+  };
+
+  /** One call per JSON-reading operation, so each case runs against all of them. */
+  const jsonOperations: Array<
+    [string, (w: HttpSignalStackWriter) => Promise<{ success: boolean }>]
+  > = [
+    ['onboard', (w) => w.onboard(onboardInput)],
+    [
+      'aggregator upsert',
+      (w) => w.upsertAggregator({ external_id: 'ext', name: 'Agg', slug: 'agg' }),
+    ],
+    ['dashboard', (w) => w.fetchDashboard({ actingOrgId: 'org-abc' })],
+    ['decrypt', (w) => w.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: ['item-1'] })],
+    [
+      'probe',
+      (w) =>
+        w.probeUser({
+          actingOrgId: 'org-abc',
+          phoneNumber: PARTICIPANT_PHONE,
+          network: 'blue_dot',
+          domain: 'seeker',
+        }),
+    ],
+  ];
+
+  it.each(jsonOperations)(
+    '%s: a 2xx body that is not JSON is SIGNALSTACK_BAD_RESPONSE without the body text',
+    async (operation, call) => {
+      const bodyText = `<html>proxy error for ${PARTICIPANT_PHONE}</html>`;
+      fetchMock.mockResolvedValueOnce(new Response(bodyText, { status: 200 }));
+
+      const result = await call(writer);
+
+      expect(result.success).toBe(false);
+      if (result.success || !('error' in result) || !(result.error instanceof Error)) return;
+      const error = result.error as unknown as { code: string; toJSON(): unknown };
+      expect(error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+      expect((result.error as Error).message).toContain(operation);
+      expect(JSON.stringify(error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+    },
+  );
+
+  it.each(jsonOperations)(
+    '%s: a non-2xx error does not carry the raw Signals body',
+    async (_operation, call) => {
+      fetchMock.mockResolvedValueOnce(
+        errJsonResponse(400, {
+          error: 'INVALID_ITEM_STATE',
+          message: 'bad',
+          echo: PARTICIPANT_PHONE,
+        }),
+      );
+
+      const result = await call(writer);
+
+      expect(result.success).toBe(false);
+      if (result.success || !('error' in result)) return;
+      const details = (result.error as { details?: Record<string, unknown> }).details;
+      expect(details?.status).toBe(400);
+      expect(details).not.toHaveProperty('body');
+      expect(JSON.stringify(details)).not.toContain(PARTICIPANT_PHONE);
+    },
+  );
+
+  it('onboard keeps the fields the worker reads on a non-2xx error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state',
+        fields: { phone: 'must be E.164' },
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toEqual({
+      status: 400,
+      signalsMessage: 'Invalid item_state',
+      upstreamCode: 'INVALID_ITEM_STATE',
+      signalsFields: { phone: 'must be E.164' },
+    });
+  });
+
+  it('a non-Error AbortError thrown by fetch maps to SIGNALSTACK_TIMEOUT', async () => {
+    fetchMock.mockRejectedValueOnce({ name: 'AbortError', message: 'aborted' });
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_TIMEOUT');
+  });
+
+  it('onboard ignores a malformed item that is not the one for the request', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        items: [
+          { item_id: 7, item_network: null, item_state: 'not-an-object' },
+          {
+            item_id: 'item-ok',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            lifecycle_status: 'live',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profile_item_id).toBe('item-ok');
+    expect(result.value.lifecycle_status).toBe('live');
+  });
+
+  it('onboard ignores extra and unknown fields on the chosen item', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        items: [
+          {
+            item_id: 'item-ok',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: { phone: PARTICIPANT_PHONE },
+            future_field: { nested: [1, 2] },
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.profile_item_id).toBe('item-ok');
+  });
+
+  it('onboard reports the path of a malformed chosen item, without its values', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        items: [
+          { item_id: 'other', item_network: 'purple_dot', item_domain: 'seeker', item_type: 'x' },
+          {
+            item_id: 42,
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: { phone: PARTICIPANT_PHONE },
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({
+      issues: [{ path: 'items.1.item_id', code: 'invalid_type' }],
+    });
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('keeps at most 10 issues for one bad response', async () => {
+    const badRow = { item_id: 1, item_state: {} };
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ profiles: Array.from({ length: 15 }, () => badRow), skipped: [] }),
+    );
+
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: ['i'] });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issues = (result.error.details as { issues: unknown[] }).issues;
+    expect(issues).toHaveLength(10);
+  });
+
+  it('a bad-response message never contains a received value', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        profiles: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: {},
+            contact: { phone: { value: PARTICIPANT_PHONE, source: PARTICIPANT_PHONE } },
+            created_at: '2026-06-26T12:03:04.686Z',
+            updated_at: '2026-06-26T12:03:04.686Z',
+          },
+        ],
+        skipped: [],
+      }),
+    );
+
+    const result = await writer.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: ['i'] });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toContain('profiles.0.contact.phone.source');
+    expect(result.error.message).not.toContain(PARTICIPANT_PHONE);
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('probeUser treats a user_id of "" as a new user', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: '', compliance: [], items: [] }));
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({
+      user_exists: false,
+      owned_elsewhere: false,
+      lifecycle_summary: null,
+    });
+  });
+});
+
+describe('HttpSignalStackWriter.exportDashboardCsv — error body', () => {
+  it('a non-2xx error does not carry the raw Signals body', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(errTextResponse(400, 'echo +919800000003'));
+    const writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+
+    const result = await writer.exportDashboardCsv({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toEqual({ status: 400 });
+  });
+});
+
+describe('HttpSignalStackWriter — non-JSON error bodies and probe items', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  /** A participant value that must never reach an error. */
+  const PARTICIPANT_PHONE = '+919800000004';
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'platform-org-1',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  const calls: Array<[string, (w: HttpSignalStackWriter) => Promise<unknown>]> = [
+    [
+      'onboard',
+      (w) =>
+        w.onboard({
+          actingOrgId: 'org-abc',
+          name: 'Asha',
+          phoneNumber: PARTICIPANT_PHONE,
+          channel: 'bulk',
+          source_id: 'src-1',
+          network: 'blue_dot',
+          domain: 'seeker',
+          item_type: 'profile_1.0',
+          profile: { name: 'Asha' },
+        }),
+    ],
+    ['aggregator upsert', (w) => w.upsertAggregator({ external_id: 'e', name: 'n', slug: 's' })],
+    ['dashboard', (w) => w.fetchDashboard({ actingOrgId: 'org-abc' })],
+    ['dashboard export', (w) => w.exportDashboardCsv({ actingOrgId: 'org-abc' })],
+    ['decrypt', (w) => w.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: ['i'] })],
+    [
+      'probe',
+      (w) =>
+        w.probeUser({
+          actingOrgId: 'org-abc',
+          phoneNumber: PARTICIPANT_PHONE,
+          network: 'blue_dot',
+          domain: 'seeker',
+        }),
+    ],
+  ];
+
+  it.each(calls)(
+    '%s: a non-JSON error body is not copied into the message',
+    async (operation, call) => {
+      fetchMock.mockResolvedValueOnce(
+        errTextResponse(502, `<html>bad gateway for ${PARTICIPANT_PHONE}</html>`),
+      );
+
+      const result = (await call(writer)) as { success: boolean; error?: Error };
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe(`signalstack ${operation} returned 502`);
+    },
+  );
+
+  it('probeUser ignores a malformed item that is not the one for the probed domain', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        compliance: [],
+        items: [
+          { item_id: 9, item_domain: null, item_state: 'x' },
+          {
+            item_id: 'item-ok',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'item-ok', lifecycle_status: 'draft' },
+    });
   });
 });

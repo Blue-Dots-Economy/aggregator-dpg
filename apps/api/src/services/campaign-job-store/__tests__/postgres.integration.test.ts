@@ -15,10 +15,9 @@
  */
 import { afterAll, beforeAll, describe } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import type { ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
+import { eq, sql } from 'drizzle-orm';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
-import { aggregators, campaignJob } from '../../../db/schema.js';
+import { users, campaignJob } from '../../../db/schema.js';
 import { PostgresCampaignJobStore } from '../postgres.js';
 import { linkContact } from '../../../db/contact-writes.js';
 import { runStoreConformance } from './conformance.js';
@@ -28,7 +27,7 @@ import { runStoreConformance } from './conformance.js';
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = realUrl ? describe : describe.skip;
 
-let aggregatorId: string = randomUUID();
+let userId: string = randomUUID();
 
 suite('PostgresCampaignJobStore (integration)', () => {
   beforeAll(async () => {
@@ -44,30 +43,31 @@ suite('PostgresCampaignJobStore (integration)', () => {
       email: `cjs-${suffix}@x.example`,
     });
     const rows = await getDb()
-      .insert(aggregators)
+      .insert(users)
       .values({
-        orgSlug: `cjs-test-${suffix}`,
-        actorType: 'aggregator',
-        name: 'Campaign Job Store Test',
+        userType: 'coordinator',
+        signalstackOrgSlug: `cjs-test-${suffix}`,
+        signalstackOrgName: 'Campaign Job Store Test',
         contactId,
-        consent: {} as unknown as ConsentRecord,
+        // Every coordinator has an org since 0028: the Default org.
+        orgId: sql`(SELECT id FROM organisations WHERE slug = 'default')`,
         createdBy: 'integration-test',
         updatedBy: 'integration-test',
       })
-      .returning({ id: aggregators.id });
-    aggregatorId = rows[0]!.id;
+      .returning({ id: users.id });
+    userId = rows[0]!.id;
   });
 
   afterAll(async () => {
     // campaign_job_item cascades on the job delete; then remove the test aggregator.
-    await getDb().delete(campaignJob).where(eq(campaignJob.aggregatorId, aggregatorId));
-    await getDb().delete(aggregators).where(eq(aggregators.id, aggregatorId));
+    await getDb().delete(campaignJob).where(eq(campaignJob.userId, userId));
+    await getDb().delete(users).where(eq(users.id, userId));
     await closeDb();
   });
 
   runStoreConformance(() => new PostgresCampaignJobStore(), {
-    get aggregatorId() {
-      return aggregatorId;
+    get userId() {
+      return userId;
     },
-  } as { aggregatorId: string });
+  } as { userId: string });
 });

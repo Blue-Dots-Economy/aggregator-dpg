@@ -1,9 +1,9 @@
 /**
  * Returns the public profile of the active session.
  *
- * Tokens never leave the BFF — only safe identity claims are returned.
+ * Tokens never leave the BFF; only identity claims are returned.
  *
- * GET /api/auth/me  → 200 { sub, email?, phone?, name? } | 401
+ * GET /api/auth/me  → 200 { user: { sub, email?, phone?, name? } } | 401
  */
 
 import { NextResponse } from 'next/server';

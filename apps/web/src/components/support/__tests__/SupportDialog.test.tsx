@@ -4,7 +4,9 @@
  * Covers: prefill from the session user, the submit gating (details + at
  * least one contact + consent) that blocks a network call, the happy-path
  * POST + inline success message, and the inline "unavailable" notice shown
- * when the BFF responds 503 (SUPPORT_EMAIL not configured).
+ * when the BFF responds 503 (SUPPORT_EMAIL not configured). The attachment
+ * limits come from `GET /api/support/config`; a failed or malformed reply
+ * keeps the defaults, and the request is cancelled when the dialog unmounts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -14,6 +16,8 @@ import en from '@/i18n/messages/en.json';
 import { SupportDialog } from '@/components/support/SupportDialog';
 import { AuthProvider } from '@/lib/auth-context';
 import type { User } from '@/types';
+import { chooseOption, makeQueryClient } from '@/__tests__/test-utils';
+import { QueryClientProvider } from '@tanstack/react-query';
 
 const prefilledUser: User = {
   id: 'u1',
@@ -24,12 +28,14 @@ const prefilledUser: User = {
 };
 
 function renderDialog(user: User | null = prefilledUser) {
-  render(
-    <NextIntlClientProvider locale="en" messages={en}>
-      <AuthProvider initialUser={user} supportEnabled>
-        <SupportDialog open onOpenChange={() => {}} />
-      </AuthProvider>
-    </NextIntlClientProvider>,
+  return render(
+    <QueryClientProvider client={makeQueryClient()}>
+      <NextIntlClientProvider locale="en" messages={en}>
+        <AuthProvider initialUser={user} supportEnabled>
+          <SupportDialog open onOpenChange={() => {}} />
+        </AuthProvider>
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -77,20 +83,80 @@ describe('SupportDialog', () => {
     renderDialog();
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Asha K');
     expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('asha@example.com');
-    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('+919000000000');
+    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9000000000');
+    expect(screen.getByLabelText('Country code').textContent).toContain('+91');
   });
 
-  it('does not submit until details + a contact + consent are provided', async () => {
+  it('starts from the session user again each time it reopens', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    const client = makeQueryClient();
+    const dialog = (open: boolean) => (
+      <QueryClientProvider client={client}>
+        <NextIntlClientProvider locale="en" messages={en}>
+          <AuthProvider initialUser={prefilledUser} supportEnabled>
+            <SupportDialog open={open} onOpenChange={() => {}} />
+          </AuthProvider>
+        </NextIntlClientProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(dialog(true));
+    await userEvent.clear(screen.getByLabelText('Name'));
+    await userEvent.type(screen.getByLabelText('Details'), 'Half a message');
+    rerender(dialog(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    rerender(dialog(true));
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Asha K');
+    expect(screen.getByLabelText('Details')).toHaveProperty('value', '');
+  });
+
+  it('closes on Escape', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    const onOpenChange = vi.fn();
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <NextIntlClientProvider locale="en" messages={en}>
+          <AuthProvider initialUser={prefilledUser} supportEnabled>
+            <SupportDialog open onOpenChange={onOpenChange} />
+          </AuthProvider>
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.keyboard('{Escape}');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps Send enabled and shows each missing field under it, sending nothing', async () => {
     const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
-    // Contact is prefilled, but details + consent are missing → send blocked.
-    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
     const send = screen.getByRole('button', { name: /send/i });
-    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(send);
+    expect(screen.queryByText('Details is required.')).not.toBeNull();
+    expect(screen.queryByText('Consent is required.')).not.toBeNull();
+    expect(screen.getByLabelText('Details').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Details').getAttribute('aria-describedby')).toBe(
+      'support-details__error',
+    );
+    // The message goes away as soon as the field is filled.
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    expect(screen.queryByText('Details is required.')).toBeNull();
     await userEvent.click(send);
     // The dialog does fetch its attachment config on open, so assert on the
     // absence of a submit rather than the absence of any request.
     expect(submitCalls(fetchSpy)).toHaveLength(0);
+  });
+
+  it('keeps what was typed when sending fails', async () => {
+    mockFetch(
+      new Response(JSON.stringify({ error: { code: 'SUPPORT_SEND_FAILED' } }), { status: 502 }),
+    );
+    renderDialog();
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(await screen.findByText(/could not|couldn|went wrong|try again/i)).toBeTruthy();
+    expect((screen.getByLabelText('Details') as HTMLTextAreaElement).value).toBe('It broke');
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Asha K');
   });
 
   it('POSTs the full body to /api/support and shows success', async () => {
@@ -112,6 +178,18 @@ describe('SupportDialog', () => {
       consent: true,
     });
     expect(await screen.findByText(/message sent/i)).toBeTruthy();
+  });
+
+  it('sends the type the user picks', async () => {
+    const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await chooseOption(screen.getByLabelText('Type'), en.support.type_support_request);
+    await userEvent.type(screen.getByLabelText('Details'), 'Need help');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(submitCalls(fetchSpy)).toHaveLength(1));
+    const body = JSON.parse((submitCalls(fetchSpy)[0]![1] as RequestInit).body as string);
+    expect(body.type).toBe('support_request');
   });
 
   it('shows the unavailable message on 503', async () => {
@@ -141,6 +219,62 @@ describe('SupportDialog attachments (#551)', () => {
     mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
     expect(await screen.findByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('uses the limits the API serves instead of the defaults', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ...SUPPORT_CONFIG, maxFiles: 5 }), { status: 200 }),
+    );
+    renderDialog();
+    expect(await screen.findByText(/Up to 5 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('keeps the default limits when the config request fails', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 500 }));
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('keeps the default limits when the config reply has the wrong shape', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ enabled: true }), { status: 200 }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    // Let the reply settle before checking the hint.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('logs a failed config read without the reply body', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('upstream said: private detail', { status: 500 }),
+    );
+    renderDialog();
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private detail');
+  });
+
+  it('cancels the config request when the dialog unmounts', async () => {
+    let signal: AbortSignal | undefined;
+    vi.spyOn(global, 'fetch').mockImplementation((_url, init) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>(() => {});
+    });
+    const { unmount } = renderDialog();
+    await waitFor(() => expect(signal).toBeDefined());
+    unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('keeps the default limits when the config request cannot be sent', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('offline'));
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
   });
 
   it('lists a chosen file and submits it base64-encoded', async () => {
@@ -185,6 +319,29 @@ describe('SupportDialog attachments (#551)', () => {
     ]);
     await userEvent.click(screen.getByRole('button', { name: /Remove a.png/i }));
     expect(screen.queryByText('a.png')).toBeNull();
+  });
+
+  it('keeps the row of a remaining file when an earlier file is removed', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await waitFor(() => expect(screen.getByText(/Up to 3 files/)).toBeTruthy());
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [
+      file('a.png', 'image/png'),
+      file('b.png', 'image/png'),
+    ]);
+    const rowBefore = screen.getByText('b.png').closest('li');
+    await userEvent.click(screen.getByRole('button', { name: /Remove a.png/i }));
+    expect(screen.getByText('b.png').closest('li')).toBe(rowBefore);
+  });
+
+  it('lists the same file twice when it is picked twice', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await waitFor(() => expect(screen.getByText(/Up to 3 files/)).toBeTruthy());
+    const picked = file('a.png', 'image/png');
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [picked]);
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [picked]);
+    expect(screen.getAllByText('a.png')).toHaveLength(2);
   });
 
   it('refuses a selection over the total size budget', async () => {

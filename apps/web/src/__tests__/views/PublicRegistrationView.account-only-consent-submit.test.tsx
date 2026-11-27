@@ -136,6 +136,34 @@ describe('<PublicRegistrationView /> account-only consent submit', () => {
     expect(body.consent_terms).toBe(true);
   });
 
+  it('shows the consent banner when the API rejects missing consent, not a silent stop', async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'CONSENT_REQUIRED',
+              title: 'Consent required',
+              detail: 'Consent is required.',
+              fields: { missing: ['user_terms', 'user_privacy'] },
+            },
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+
+    renderView();
+    fillAndTickCallConsent();
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    const gateProps = await gateShim.opened();
+    act(() => {
+      gateProps.onAccept();
+    });
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Name/)).toHaveValue('Jane Doe');
+  });
+
   it('POSTs consent_terms/consent_privacy true and omits consent_profile entirely', async () => {
     const fetchMock = vi.fn(
       async () =>

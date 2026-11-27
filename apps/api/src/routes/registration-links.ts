@@ -1,24 +1,29 @@
 /**
- * Registration links endpoints.
+ * Registration links endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
- *   POST /v1/links/create              create a link (QR is client-side, #650)
+ *   POST /v1/links/create              create a link (QR is made client-side)
  *   GET  /v1/links                     list links scoped to aggregator
  *   GET  /v1/links/:id                 read a single link
  *   POST /v1/links/:id/activate        flip a draft link to live (idempotent)
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
- * All endpoints require an authenticated aggregator JWT and scope writes by
- * `aggregator_id` claim — cross-aggregator access is impossible by construction.
+ * All endpoints need an authenticated aggregator JWT and are scoped by the
+ * `user_id` claim.
  */
 
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
-import type { RegistrationLink } from '../services/registration-links-store/index.js';
+import type {
+  RegistrationLink,
+  RegistrationLinkStatus,
+} from '../services/registration-links-store/index.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { config, enabledRegistrationModes } from '../config.js';
@@ -26,23 +31,30 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import {
+  botsForDomain,
+  modeOffersVoice,
+  resolveDefaultVoiceBot,
+  resolveVoiceBot,
+} from '../services/voice-bots/index.js';
+import type { ResolvedNetworkConfig, VoiceBot } from '@aggregator-dpg/network-config/interface';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
-interface LinkMetrics {
+type LinkMetrics = {
   total: number;
   passed: number;
   failed: number;
   skipped: number;
-}
+};
 
 const ZERO_METRICS: LinkMetrics = { total: 0, passed: 0, failed: 0, skipped: 0 };
 
 /**
- * Sums the rolled-up `onboarding` rows (source='link') for one or more link
- * IDs scoped to a single aggregator. Returns a Map keyed by link_id; missing
- * keys mean the link has no rolled-up submissions yet.
+ * Sums the `onboarding` rows (source='link') for the given link ids of one
+ * aggregator. Returns a Map keyed by link_id; a missing key means no submissions yet.
  */
 async function fetchLinkMetrics(
-  aggregatorId: string,
+  userId: string,
   linkIds: string[],
 ): Promise<Map<string, LinkMetrics>> {
   const out = new Map<string, LinkMetrics>();
@@ -58,7 +70,7 @@ async function fetchLinkMetrics(
     .from(onboarding)
     .where(
       and(
-        eq(onboarding.aggregatorId, aggregatorId),
+        eq(onboarding.userId, userId),
         eq(onboarding.source, 'link'),
         inArray(onboarding.linkId, linkIds),
       ),
@@ -79,10 +91,8 @@ async function fetchLinkMetrics(
 const CreateLinkBodySchema = z.object({
   domain: z.string().min(1),
   /**
-   * Optional client-supplied slug. URL-safe lowercase, hyphen-separated,
-   * 3-60 chars. The route appends a short random suffix on collision so the
-   * caller doesn't have to retry — the returned `public_url` carries the
-   * final allocated slug.
+   * Optional slug: lowercase, hyphen-separated, 3-60 chars. On collision a short
+   * random suffix is added; `public_url` carries the final slug.
    */
   slug: z
     .string()
@@ -90,30 +100,34 @@ const CreateLinkBodySchema = z.object({
     .min(3)
     .max(60)
     .optional(),
-  context: z.record(z.unknown()).default({}),
+  context: z.record(z.string(), z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   /**
-   * Per-link admin-facing registration mode key (e.g. `voice`, `form`). The
-   * mode → form-shape mapping lives in network config under
-   * `registration_modes`; the key is validated against the live config in the
-   * handler. Omitted defaults to the network's `form` mode. Open snake_case
-   * identifier. Immutable after creation (PATCH route .strict()-rejects it).
+   * Registration mode key (e.g. `voice`, `form`), checked against the network
+   * config's `registration_modes`. Defaults to `form`. Cannot be changed after creation.
    */
   registration_mode: z
     .string()
     .regex(/^[a-z][a-z0-9_]*$/)
     .optional(),
-  expires_at: z
+  /**
+   * Voice bot callers dial for this link. Only for modes that offer voice; omit it
+   * to take the domain's default (or only) bot, which is stored on the link.
+   * Cannot be changed after creation.
+   */
+  voice_bot_key: z
     .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .optional(),
+  expires_at: z.iso
     .datetime({ offset: true })
     .nullish()
     .transform((v) => (v ? new Date(v) : null)),
 });
 
 /**
- * Patch shape for `PATCH /v1/links/:id`. Only fields editable on a draft are
- * accepted; `domain` + `status` mutations go through dedicated endpoints
- * (signup-time pin and activate/deactivate respectively).
+ * Patch shape for `PATCH /v1/links/:id`. Only draft-editable fields; `domain`
+ * and `status` are not editable here.
  */
 const UpdateLinkBodySchema = z
   .object({
@@ -123,9 +137,8 @@ const UpdateLinkBodySchema = z
       .min(3)
       .max(60)
       .optional(),
-    context: z.record(z.unknown()).optional(),
-    expires_at: z
-      .string()
+    context: z.record(z.string(), z.unknown()).optional(),
+    expires_at: z.iso
       .datetime({ offset: true })
       .nullish()
       .transform((v) => (v === undefined ? undefined : v === null ? null : new Date(v))),
@@ -145,6 +158,26 @@ const LinkParamsSchema = z.object({
   id: z.string().min(1).describe('Registration link id (UUID).'),
 });
 
+/** Query for `GET /v1/links/voice-bots`. */
+const VoiceBotsQuerySchema = z.object({
+  domain: z.string().min(1).describe('Network domain id the link is for.'),
+});
+
+/** Wire shape of a voice bot: the config entry without `domains`. */
+const VoiceBotResponseSchema = z.object({
+  key: z.string(),
+  display_name: z.string(),
+  phone: z.string(),
+  languages: z.array(z.string()),
+  description: z.string().optional(),
+});
+
+/** 200 payload for the coordinator's voice-bot picker. */
+const VoiceBotsResponseSchema = z.object({
+  voice_bots: z.array(VoiceBotResponseSchema),
+  default_voice_bot_key: z.string().nullable(),
+});
+
 /** Canonical wire shape of a registration link (see {@link buildResponse}). */
 const LinkResponseSchema = z
   .object({
@@ -153,7 +186,9 @@ const LinkResponseSchema = z
     domain: z.string(),
     status: z.string(),
     registration_mode: z.string(),
-    context: z.record(z.unknown()),
+    voice_bot_key: z.string().nullable(),
+    voice_bot: VoiceBotResponseSchema.nullable(),
+    context: z.record(z.string(), z.unknown()),
     expires_at: z.string().nullable(),
     public_url: z.string().nullable(),
     qr_url: z.string().nullable(),
@@ -165,11 +200,11 @@ const LinkResponseSchema = z
         failed: z.number(),
         skipped: z.number(),
       })
-      .passthrough(),
+      .loose(),
     created_at: z.string(),
     updated_at: z.string(),
   })
-  .passthrough();
+  .loose();
 
 /** 200 payload for the paginated links list. */
 const ListLinksResponseSchema = z
@@ -179,12 +214,14 @@ const ListLinksResponseSchema = z
     limit: z.number(),
     offset: z.number(),
   })
-  .passthrough();
+  .loose();
 
-export async function registerRegistrationLinksRoutes(app: FastifyInstance): Promise<void> {
+export function registerRegistrationLinksRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/links/create',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Create a shareable registration link',
@@ -199,17 +236,16 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.create',
-        actor: auth.userId,
-        aggregator_id: auth.aggregatorId,
+        actor: auth.subject,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
-      // Body is already validated + transformed by the route schema —
-      // `expires_at` arrives as a Date|null and defaults are applied.
-      const body = req.body as z.infer<typeof CreateLinkBodySchema>;
+      // Validated by the route schema; `expires_at` is a Date or null.
+      const body = req.body;
       const networkCfg = await getNetworkConfig();
       if (!networkCfg.domainIds.includes(body.domain)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -217,27 +253,14 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           fields: { domain: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, body.domain);
+      await requireServedDomain(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
-      // Second enforcement point for `AGGREGATOR_ONBOARDING_ENABLED` (#637).
-      // `GET /v1/aggregator-config` already hides a withheld mode from the
-      // admin dropdown, but that is a UI affordance — this is the gate, so the
-      // allow-list cannot be bypassed by calling the API directly. Unset ⇒
-      // `enabledModes` equals `declaredModes` and nothing below changes.
+      // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
+      // enough. When unset, every declared mode is enabled.
       const enabledModes = enabledRegistrationModes(declaredModes);
-      // Omitted mode preserves the legacy full-profile default: prefer the
-      // `form` key (DB column default) when it is available, else the first
-      // one. Chosen from the *enabled* list, never the declared list — an
-      // omitted mode must not fall back to a mode this deployment withholds.
-      // Note the fallback is *within* the enabled set, so on a deployment that
-      // withholds `form` (or a network that never declared it) an omitted mode
-      // resolves to `voice`, i.e. an account-only channel. Deliberate and
-      // pinned by test: creating a link is better than 400ing, and the caller
-      // gets the mode back in the response. The portal is unaffected — it
-      // always sends an explicit mode and blocks create while it is empty
-      // (`RegistrationLinksSection.tsx`) — so this is an API-contract nuance
-      // for non-web clients only.
+      // No mode given: use `form` if enabled, else the first enabled mode. That can
+      // be `voice` (account-only) when `form` is withheld. The response returns the mode used.
       const modeKey =
         body.registration_mode ??
         (enabledModes.includes('form') ? 'form' : enabledModes[0]) ??
@@ -250,12 +273,11 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           fields: { declared: declaredModes, enabled: enabledModes },
         });
       }
+      const voiceBotKey = checkVoiceBotChoice(body.voice_bot_key, modeKey, body.domain, networkCfg);
       const store = getRegistrationLinksStore();
 
-      // Slug allocation. If the caller supplied a slug, try it first; collisions
-      // are resolved by appending a short random suffix (`-XXXX`) so the user
-      // keeps the readable part of their slug. Without a caller-supplied slug,
-      // a pure-random base62 stem is used.
+      // Try the caller's slug first and add a short random suffix on collision.
+      // Without one, use a random stem.
       let created;
       let slug = '';
       for (let attempt = 0; attempt < SLUG_RETRIES; attempt++) {
@@ -265,14 +287,15 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           slug = generateSlug();
         }
         const result = await store.create({
-          aggregatorId: auth.aggregatorId,
+          userId: auth.userId,
           slug,
           domain: body.domain,
           context: body.context,
           status: body.status,
           registrationMode: modeKey,
+          voiceBotKey,
           expiresAt: body.expires_at,
-          createdBy: auth.userId,
+          createdBy: auth.subject,
         });
         if (result.ok) {
           created = result.value;
@@ -300,11 +323,9 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         });
       }
 
-      // Aggregator org_slug for the URL namespace. Cached per-create only —
-      // worst-case one extra row read per link, which is negligible vs the
-      // alternative of denormalising org_slug onto every registration_links row.
-      const aggregatorStore = getAggregatorStore();
-      const aggLookup = await aggregatorStore.findById(auth.aggregatorId);
+      // Coordinator org_slug for the URL path.
+      const userStore = getUserStore();
+      const aggLookup = await userStore.findById(auth.userId);
       if (!aggLookup.ok || !aggLookup.value) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(
@@ -314,11 +335,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       }
       const callerOrgSlug = aggLookup.value.orgSlug;
 
-      // The public URL is only minted when the link is published (status=live).
-      // Drafts are pure metadata — the slug may still change via PATCH. The QR
-      // is no longer persisted (#650): it is a deterministic function of the
-      // public URL, generated client-side on demand, so activation does no S3
-      // work and never fails on an unreachable bucket.
+      // The public URL exists only once the link is live; a draft slug can still
+      // change. The QR is generated client-side from the URL.
       if (created.status === 'draft') {
         log.info({
           status: 'success',
@@ -331,7 +349,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         return reply.code(201).send(await buildResponse(created, callerOrgSlug));
       }
 
-      // status === 'live' — eager activate-at-create path.
+      // status === 'live': activate at create.
       const publicUrl = buildPublicUrl(callerOrgSlug, slug);
 
       log.info({
@@ -347,8 +365,52 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   );
 
   app.get(
+    '/v1/links/voice-bots',
+    {
+      config: { rbac: { capability: 'profiles.onboard' } },
+      schema: {
+        tags: ['registration-links'],
+        summary: 'List the voice bots a link in a domain can use',
+        description:
+          'Voice bots configured for the domain, plus the key of the domain default (null when several bots serve it and none is the default). Feeds the bot picker on the link form.',
+        security: [{ bearerAuth: [] }],
+        querystring: VoiceBotsQuerySchema,
+        response: {
+          200: VoiceBotsResponseSchema,
+          ...errorResponses(400, 401, 403, 503),
+        },
+      },
+    },
+    async (req, reply) => {
+      const auth = await requireCoordinatorAuth(req);
+      const log = req.log.child({
+        operation: 'registrationLinks.voiceBots',
+        actor: auth.subject,
+        aggregator_id: auth.userId,
+      });
+      const { domain } = req.query;
+      const networkCfg = await getNetworkConfig();
+      if (!networkCfg.domainIds.includes(domain)) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
+          fields: { domain: 'invalid' },
+        });
+      }
+      await requireServedDomain(auth, domain);
+
+      const bots = botsForDomain(domain, networkCfg);
+      log.info({ status: 'success', domain, returned: bots.length });
+      return reply.send({
+        voice_bots: bots.map(toVoiceBotResponse),
+        default_voice_bot_key: resolveDefaultVoiceBot(domain, networkCfg)?.key ?? null,
+      });
+    },
+  );
+
+  app.get(
     '/v1/links',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['registration-links'],
         summary: "List the caller aggregator's registration links",
@@ -362,19 +424,19 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const log = req.log.child({
         operation: 'registrationLinks.list',
-        actor: auth.userId,
-        aggregator_id: auth.aggregatorId,
+        actor: auth.subject,
+        aggregator_id: auth.userId,
       });
       const start = Date.now();
 
-      // Query is already validated + coerced by the route schema (defaults applied).
-      const { status, limit, offset } = req.query as z.infer<typeof ListQuerySchema>;
+      // Validated and defaulted by the route schema.
+      const { status, limit, offset } = req.query;
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      const result = await getRegistrationLinksStore().list(auth.aggregatorId, {
+      const orgSlug = await resolveOrgSlug(auth.userId);
+      const result = await getRegistrationLinksStore().list(auth.userId, {
         ...(status ? { status } : {}),
         limit,
         offset,
@@ -383,10 +445,9 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
       }
 
-      // Single grouped SQL for all link metrics; per-row fallback in
-      // buildResponse would N+1 the list endpoint.
+      // One grouped query for all link metrics, avoiding N+1.
       const metricsById = await fetchLinkMetrics(
-        auth.aggregatorId,
+        auth.userId,
         result.value.rows.map((r) => r.id),
       );
       const items = await Promise.all(
@@ -414,6 +475,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.patch(
     '/v1/links/:id',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Update a registration link',
@@ -429,45 +491,34 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      // Params + body are already validated by the route schemas — the
-      // `.strict()` Update schema rejects unknown keys (incl. registration_mode)
-      // before the handler runs, and `expires_at` arrives as Date|null|undefined.
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const auth = await requireCoordinatorAuth(req);
+      // Validated by the route schemas; the `.strict()` schema rejects unknown keys
+      // such as registration_mode.
+      const { id: linkId } = req.params;
       const log = req.log.child({
         operation: 'registrationLinks.update',
-        actor: auth.userId,
+        actor: auth.subject,
         link_id: linkId,
       });
       const start = Date.now();
 
-      const body = req.body as z.infer<typeof UpdateLinkBodySchema>;
+      const body = req.body;
 
       const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-      if (found.value.status !== 'draft') {
+      const link = await findOwnLink(linkId, auth.userId);
+      if (link.status !== 'draft') {
         throw httpError('CONFLICT', {
           detail: 'Only draft links can be edited. Retire this link and create a new one.',
-          fields: { link_status: found.value.status },
+          fields: { link_status: link.status },
         });
       }
 
-      // Slug-collision retry — mirror create flow. If the caller asks to set a
-      // slug that's already taken by a sibling link, append a short random
-      // suffix and try again. Without a caller-supplied slug, leave the
-      // existing slug in place (omit `slug` from the patch).
+      // Same slug retry as create. Without a requested slug, keep the current one.
       let updated;
-      let slug = found.value.slug;
       if (body.slug !== undefined) {
         for (let attempt = 0; attempt < SLUG_RETRIES; attempt += 1) {
-          slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
-          const result = await store.updateDraft(linkId, auth.aggregatorId, {
+          const slug = attempt === 0 ? body.slug : `${body.slug}-${randomSuffix()}`;
+          const result = await store.updateDraft(linkId, auth.userId, {
             slug,
             ...(body.context !== undefined ? { context: body.context } : {}),
             ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
@@ -503,7 +554,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
           });
         }
       } else {
-        const result = await store.updateDraft(linkId, auth.aggregatorId, {
+        const result = await store.updateDraft(linkId, auth.userId, {
           ...(body.context !== undefined ? { context: body.context } : {}),
           ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
         });
@@ -518,7 +569,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         updated = result.value;
       }
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
+      const orgSlug = await resolveOrgSlug(auth.userId);
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
@@ -532,6 +583,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.get(
     '/v1/links/:id',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Read a registration link',
@@ -545,26 +597,20 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
+      const auth = await requireCoordinatorAuth(req);
+      // Validated by the route schema.
+      const { id: linkId } = req.params;
 
-      const result = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
-      if (!result.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
-      }
-      if (!result.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      return reply.send(await buildResponse(result.value, orgSlug));
+      const link = await findOwnLink(linkId, auth.userId);
+      const orgSlug = await resolveOrgSlug(auth.userId);
+      return reply.send(await buildResponse(link, orgSlug));
     },
   );
 
   app.post(
     '/v1/links/:id/activate',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Activate a registration link',
@@ -579,57 +625,33 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
-      const log = req.log.child({
-        operation: 'registrationLinks.activate',
-        actor: auth.userId,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+      // Validated by the route schema.
+      const change = await beginLinkStatusChange(req, req.params.id, 'registrationLinks.activate');
+      const { link, orgSlug } = change;
+      if (link.status === 'live') {
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_live',
+          latency_ms: Date.now() - change.start,
+        });
+        return reply.send(await buildResponse(link, orgSlug));
       }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
-      }
-
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      if (found.value.status === 'live') {
-        log.info({ status: 'skipped', reason: 'already_live', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
-      }
-      if (found.value.status === 'retired') {
+      if (link.status === 'retired') {
         throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
       }
 
-      // The draft slug is now frozen, so the public URL it encodes is final.
-      // No QR is minted or persisted (#650) — it is generated client-side from
-      // the public URL on demand, so activation no longer touches S3.
-      const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
+      // The slug is now fixed, so the public URL is final. The QR is generated client-side.
+      const publicUrl = buildPublicUrl(orgSlug, link.slug);
 
-      const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: found.value.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug, { publicUrl }));
+      const updated = await commitLinkStatus(change, 'live');
+      return reply.send(await buildResponse(updated, orgSlug, { publicUrl }));
     },
   );
 
   app.post(
     '/v1/links/:id/deactivate',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Deactivate a registration link',
@@ -644,54 +666,114 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
-      const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
-      const log = req.log.child({
-        operation: 'registrationLinks.deactivate',
-        actor: auth.userId,
-        link_id: linkId,
-      });
-      const start = Date.now();
-
-      const store = getRegistrationLinksStore();
-      const found = await store.findById(linkId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+      // Validated by the route schema.
+      const change = await beginLinkStatusChange(
+        req,
+        req.params.id,
+        'registrationLinks.deactivate',
+      );
+      const { link, orgSlug } = change;
+      if (link.status === 'retired') {
+        change.log.info({
+          status: 'skipped',
+          reason: 'already_retired',
+          latency_ms: Date.now() - change.start,
+        });
+        return reply.send(await buildResponse(link, orgSlug));
       }
 
-      const orgSlug = await resolveOrgSlug(auth.aggregatorId);
-      if (found.value.status === 'retired') {
-        log.info({ status: 'skipped', reason: 'already_retired', latency_ms: Date.now() - start });
-        return reply.send(await buildResponse(found.value, orgSlug));
-      }
-
-      const updated = await store.updateStatus(linkId, auth.aggregatorId, 'retired');
-      if (!updated.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
-      }
-
-      log.info({
-        status: 'success',
-        latency_ms: Date.now() - start,
-        previous_status: found.value.status,
-      });
-
-      return reply.send(await buildResponse(updated.value, orgSlug));
+      const updated = await commitLinkStatus(change, 'retired');
+      return reply.send(await buildResponse(updated, orgSlug));
     },
   );
 }
 
+/** A status change on one of the caller's own links, started by {@link beginLinkStatusChange}. */
+interface LinkStatusChange {
+  auth: AuthContext;
+  linkId: string;
+  log: FastifyBaseLogger;
+  /** When the request started, for `latency_ms`. */
+  start: number;
+  link: RegistrationLink;
+  orgSlug: string;
+}
+
 /**
- * Resolves the caller's aggregator org_slug. Used by the public-URL builder
- * which needs the slug as a path segment. Wrapped in a helper so handlers
- * don't repeat the lookup-or-throw boilerplate.
+ * Starts a status change: verifies the coordinator, then reads its link and its org slug.
+ *
+ * @param req - The incoming request.
+ * @param linkId - The link id from the path.
+ * @param operation - The log operation name.
+ * @returns The verified caller, the link and the request logger.
+ * @throws The sign-in and link-read errors of {@link requireCoordinatorAuth} and {@link findOwnLink}.
  */
-async function resolveOrgSlug(aggregatorId: string): Promise<string> {
-  const result = await getAggregatorStore().findById(aggregatorId);
+async function beginLinkStatusChange(
+  req: FastifyRequest,
+  linkId: string,
+  operation: string,
+): Promise<LinkStatusChange> {
+  const auth = await requireCoordinatorAuth(req);
+  const log = req.log.child({ operation, actor: auth.subject, link_id: linkId });
+  const start = Date.now();
+  const link = await findOwnLink(linkId, auth.userId);
+  const orgSlug = await resolveOrgSlug(auth.userId);
+  return { auth, linkId, log, start, link, orgSlug };
+}
+
+/**
+ * Writes the link's new status and logs the change.
+ *
+ * @param change - The started change.
+ * @param nextStatus - The status to set.
+ * @returns The updated link.
+ * @throws DB_UNAVAILABLE if the store write fails.
+ */
+async function commitLinkStatus(
+  change: LinkStatusChange,
+  nextStatus: RegistrationLinkStatus,
+): Promise<RegistrationLink> {
+  const updated = await getRegistrationLinksStore().updateStatus(
+    change.linkId,
+    change.auth.userId,
+    nextStatus,
+  );
+  if (!updated.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(updated.error.message) });
+  }
+  change.log.info({
+    status: 'success',
+    latency_ms: Date.now() - change.start,
+    previous_status: change.link.status,
+  });
+  return updated.value;
+}
+
+/**
+ * Reads one of the caller's own registration links.
+ *
+ * @param linkId - The link id from the path.
+ * @param userId - The caller's `users.id`; the store returns only that user's links.
+ * @returns The link.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws FORBIDDEN if no link of the caller has this id, so other coordinators' links cannot be enumerated.
+ */
+async function findOwnLink(linkId: string, userId: string): Promise<RegistrationLink> {
+  const found = await getRegistrationLinksStore().findById(linkId, userId);
+  if (!found.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
+  }
+  if (!found.value) {
+    throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
+  }
+  return found.value;
+}
+
+/**
+ * Resolves the caller's org_slug, used as a path segment in the public URL.
+ */
+async function resolveOrgSlug(userId: string): Promise<string> {
+  const result = await getUserStore().findById(userId);
   if (!result.ok || !result.value) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(result.ok ? 'aggregator row missing for caller' : result.error.message),
@@ -706,45 +788,39 @@ interface ResponseOverrides {
 }
 
 /**
- * Renders a registration link as the canonical API response shape. The public
- * URL is re-minted per request from `org_slug` (never a persisted snapshot).
+ * Renders a registration link as the API response shape. The public URL is
+ * built per request from `org_slug`.
  *
- * `qr_url` / `qr_expires_at` are retained in the shape but always `null`
- * (#650): the QR is now generated client-side on demand from `public_url`.
- * The fields stay for one release so existing clients don't hard-break on a
- * missing key; they will be dropped in a follow-up.
+ * `qr_url` / `qr_expires_at` are always `null`; the QR is generated
+ * client-side from `public_url`. They will be removed later.
  *
- * @param orgSlug - The owning aggregator's `org_slug`. The public URL is
- *   namespaced under it (`<base>/<org_slug>/<link_slug>`), so we need it to
- *   re-mint the URL each request rather than persisting a stale snapshot.
+ * @param orgSlug - The owning aggregator's `org_slug`, used in the public URL.
  */
 async function buildResponse(
   row: RegistrationLink,
   orgSlug: string,
   overrides: ResponseOverrides = {},
-): Promise<Record<string, unknown>> {
-  // Drafts are metadata-only — the public URL is minted at activation and
-  // never published while the row is still in draft. Retired links lose
-  // visibility for the same reason: the underlying poster is no longer
-  // authoritative.
+): Promise<z.input<typeof LinkResponseSchema>> {
+  // Drafts and retired links have no public URL.
   const isPublished = row.status === 'live';
   const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
-  // #650: QR is derived client-side from public_url — no server-side URL.
+  // No server-side QR URL.
   const qrUrl: string | null = null;
   const qrExpiresAt: string | null = null;
-  // `metrics` may be supplied by the caller when responding to a list (one
-  // grouped SQL aggregation per request); otherwise fall back to a per-link
-  // lookup so single-link reads still surface counters.
+  // List calls pass `metrics` from one grouped query; single reads look them up.
   const metrics =
-    overrides.metrics ??
-    (await fetchLinkMetrics(row.aggregatorId, [row.id])).get(row.id) ??
-    ZERO_METRICS;
+    overrides.metrics ?? (await fetchLinkMetrics(row.userId, [row.id])).get(row.id) ?? ZERO_METRICS;
+  // Only modes that offer voice carry a bot; old `form`/`voice` links never show one.
+  const cfg = await getNetworkConfig();
+  const bot = modeOffersVoice(row.registrationMode, cfg) ? resolveVoiceBot(row, cfg).bot : null;
   return {
     link_id: row.id,
     slug: row.slug,
     domain: row.domain,
     status: row.status,
     registration_mode: row.registrationMode,
+    voice_bot_key: row.voiceBotKey,
+    voice_bot: bot ? toVoiceBotResponse(bot) : null,
     context: row.context,
     expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
     public_url: publicUrl,
@@ -757,59 +833,86 @@ async function buildResponse(
 }
 
 /**
- * Generates a URL-safe random slug. 8 random bytes → 16 hex chars; collisions
- * across a single aggregator are vanishingly unlikely but the route still
- * retries on the unique-violation error from the store as defence in depth.
+ * Drops `domains` from a configured bot for the wire.
+ */
+function toVoiceBotResponse(bot: VoiceBot): z.infer<typeof VoiceBotResponseSchema> {
+  return {
+    key: bot.key,
+    display_name: bot.display_name,
+    phone: bot.phone,
+    languages: bot.languages,
+    ...(bot.description !== undefined ? { description: bot.description } : {}),
+  };
+}
+
+/**
+ * Validates the coordinator's voice-bot choice against the mode and domain.
+ *
+ * @param requested - `voice_bot_key` from the create body, if any.
+ * @param modeKey - The resolved registration mode.
+ * @param domain - The link's domain.
+ * @param cfg - The resolved network config.
+ * @returns The key to store: the chosen one, else the domain's default or only bot,
+ *   or `null` only when no bot serves the domain.
+ * @throws SCHEMA_VALIDATION when the mode does not offer voice and a key was sent.
+ * @throws INVALID_VOICE_BOT when the key is unknown or serves another domain.
+ * @throws VOICE_BOT_REQUIRED when several bots serve the domain and none is the default.
+ */
+function checkVoiceBotChoice(
+  requested: string | undefined,
+  modeKey: string,
+  domain: string,
+  cfg: ResolvedNetworkConfig,
+): string | null {
+  if (!modeOffersVoice(modeKey, cfg)) {
+    if (requested !== undefined) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `voice_bot_key is not allowed for registration_mode '${modeKey}'`,
+        fields: { voice_bot_key: 'not allowed for this mode' },
+      });
+    }
+    return null;
+  }
+  const serving = botsForDomain(domain, cfg);
+  if (requested !== undefined) {
+    if (!serving.some((b) => b.key === requested)) {
+      throw httpError('INVALID_VOICE_BOT', {
+        detail: `voice_bot_key '${requested}' does not serve domain '${domain}'`,
+        fields: { configured: serving.map((b) => b.key) },
+      });
+    }
+    return requested;
+  }
+  // Store the bot the link resolves to now, not `null`: a later second bot or a
+  // changed default must not move or drop the voice option on a live link.
+  const resolved = resolveDefaultVoiceBot(domain, cfg);
+  if (serving.length > 1 && resolved === null) {
+    throw httpError('VOICE_BOT_REQUIRED', {
+      fields: { configured: serving.map((b) => b.key) },
+    });
+  }
+  return resolved?.key ?? null;
+}
+
+/**
+ * Generates the short hex suffix added to a slug on a collision.
  */
 function randomSuffix(bytes = 2): string {
   return randomBytes(bytes).toString('hex');
 }
 
+/**
+ * Generates a random URL-safe slug (16 hex chars). The route still retries on
+ * a unique-violation.
+ */
 function generateSlug(): string {
   return randomBytes(8).toString('hex');
 }
 
 /**
- * Build the public URL for a registration link. The URL is namespaced under
- * the aggregator's `org_slug` so two aggregators can use the same per-link
- * slug without collision: `${base}/<org_slug>/<slug>`.
+ * Builds the public URL for a link: `${base}/<org_slug>/<slug>`.
  */
 function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
   return `${base}/${orgSlug}/${slug}`;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  return result.context;
-}
-
-/**
- * Reject when the requested link domain (seeker | provider) does not match
- * the aggregator's registered type (JWT `aggregator_type` claim). An
- * aggregator may only create registration links for the type it registered as.
- */
-function enforceAggregatorType(auth: AuthContext, domain: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== domain) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: domain,
-      },
-    });
-  }
 }

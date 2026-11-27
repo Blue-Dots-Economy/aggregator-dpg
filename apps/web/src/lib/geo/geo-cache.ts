@@ -1,5 +1,5 @@
 /**
- * Ported verbatim from Signals-DPG `apps/ui/src/lib/geo/geo-cache.ts`.
+ * Session cache for geo lookups. Same as Signals-DPG `apps/ui/src/lib/geo/geo-cache.ts`.
  *
  * @module apps/web/lib/geo/geo-cache
  */
@@ -9,25 +9,53 @@ import type { GeoProvider, GeoSuggestion } from './types';
 const DEFAULT_CACHE_CAP = 500;
 
 /**
- * Normalize a place query so case/spacing variants share one cache entry:
- * trim, lowercase, and collapse internal whitespace runs to a single space.
+ * Normalises a place query (trim, lowercase, single spaces) for use as a cache key.
+ *
+ * @param query - The raw query.
+ * @returns The normalised key.
  */
 export function normalizeGeoKey(query: string): string {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /**
- * Session-scoped memoizing wrapper for an async geo lookup. Bounded LRU
- * (insertion-order, `cap` entries) keyed by `normalizeGeoKey(query)`, with
- * in-flight dedup so concurrent identical lookups collapse to one call. Only
- * results for which `shouldCache(value)` is true are stored (so a transient
- * empty/error result is not cached).
+ * Calls `fn` at once and returns its result as a promise, so a synchronous
+ * throw arrives as a rejection.
+ */
+async function callNow<T>(
+  fn: (query: string, signal?: AbortSignal) => Promise<T>,
+  query: string,
+  signal: AbortSignal,
+): Promise<T> {
+  return fn(query, signal);
+}
+
+/**
+ * Runs `cleanup` once `promise` settles, and never rejects.
  *
- * Abort is ref-counted: the shared underlying call runs against an internal
- * AbortController, and that controller is aborted only once EVERY current
- * waiter has aborted its own signal. So a single caller aborting (e.g. the user
- * typing the next keystroke) cancels the still-running fetch, while a caller
- * that shares the in-flight request — or one with no signal — keeps it alive.
+ * The lookup's caller receives any rejection; this side task must not raise a
+ * second, unhandled one.
+ */
+async function afterSettled(promise: Promise<unknown>, cleanup: () => void): Promise<void> {
+  try {
+    await promise;
+  } catch {
+    // The caller of the lookup handles the error.
+  } finally {
+    cleanup();
+  }
+}
+
+/**
+ * Wraps an async geo lookup with a session LRU cache and in-flight dedup.
+ *
+ * Only results where `shouldCache(value)` is true are stored. The shared call
+ * is aborted only when every waiting caller has aborted.
+ *
+ * @param fn - The lookup to wrap.
+ * @param shouldCache - Whether a result may be cached.
+ * @param cap - Maximum cache entries.
+ * @returns The memoised lookup.
  */
 export function memoizeGeoLookup<T>(
   fn: (query: string, signal?: AbortSignal) => Promise<T>,
@@ -42,6 +70,25 @@ export function memoizeGeoLookup<T>(
     waiters: Set<object>;
   }
   const inFlight = new Map<string, InFlight>();
+
+  /** Runs one lookup, stores a cacheable result, and clears its in-flight entry. */
+  async function lookup(key: string, query: string, signal: AbortSignal): Promise<T> {
+    try {
+      // `callNow` turns a synchronous throw into a rejection, so the `finally`
+      // below runs after the caller has stored this entry and removes it.
+      const value = await callNow(fn, query, signal);
+      if (shouldCache(value)) {
+        resolved.set(key, value);
+        if (resolved.size > cap) {
+          const oldest = resolved.keys().next();
+          if (!oldest.done) resolved.delete(oldest.value);
+        }
+      }
+      return value;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
 
   return (query: string, signal?: AbortSignal): Promise<T> => {
     const key = normalizeGeoKey(query);
@@ -59,27 +106,13 @@ export function memoizeGeoLookup<T>(
       const created: InFlight = {
         controller,
         waiters: new Set<object>(),
-        promise: fn(query, controller.signal)
-          .then((value) => {
-            if (shouldCache(value)) {
-              resolved.set(key, value);
-              if (resolved.size > cap) {
-                const oldest = resolved.keys().next().value as string;
-                resolved.delete(oldest);
-              }
-            }
-            return value;
-          })
-          .finally(() => {
-            inFlight.delete(key);
-          }),
+        promise: lookup(key, query, controller.signal),
       };
       inFlight.set(key, created);
       entry = created;
     }
 
-    // Register this caller as a waiter. The shared fetch is aborted only when
-    // every waiter has aborted; a no-signal waiter is released on settle.
+    // Abort the shared fetch only when every waiter has aborted.
     const current = entry;
     const token = {};
     current.waiters.add(token);
@@ -93,10 +126,10 @@ export function memoizeGeoLookup<T>(
         onAbort();
       } else {
         signal.addEventListener('abort', onAbort, { once: true });
-        void current.promise.finally(() => signal.removeEventListener('abort', onAbort));
+        void afterSettled(current.promise, () => signal.removeEventListener('abort', onAbort));
       }
     }
-    void current.promise.finally(() => {
+    void afterSettled(current.promise, () => {
       current.waiters.delete(token);
     });
 
@@ -105,9 +138,10 @@ export function memoizeGeoLookup<T>(
 }
 
 /**
- * Wraps a GeoProvider so `suggest` is transparently session-cached (see
- * memoizeGeoLookup). suggest results are cached only when non-empty, so a
- * transient empty/error result is not stuck for the session.
+ * Wraps a GeoProvider so `suggest` results are session-cached when non-empty.
+ *
+ * @param base - The provider to wrap.
+ * @returns The cached provider.
  */
 export function withGeoCache(base: GeoProvider): GeoProvider {
   const cachedSuggest = memoizeGeoLookup<GeoSuggestion[]>(

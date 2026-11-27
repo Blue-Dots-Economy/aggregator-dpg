@@ -1,26 +1,39 @@
 /**
- * Onboarding metrics endpoints.
+ * Onboarding metrics endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET /v1/onboarding/summary       totals across both sources
  *   GET /v1/onboarding/by-source     bulk vs link breakdown
  *
  * Reads only from the `onboarding` rollup table. Bulk rows are written by
  * the Finaliser (one per upload). Link rows are written by the Metrics
- * Aggregator (one per (aggregator, link, hour-bucket)).
+ * Coordinator (one per (aggregator, link, hour-bucket)).
+ *
+ * `?domain=` narrows both reads to one profile type, taken from the row's
+ * upload (`bulk_uploads.participant_type`) or registration link
+ * (`registration_links.domain`).
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { and, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { getDb } from '../db/client.js';
-import { onboarding } from '../db/schema.js';
-import { httpError } from '../errors/http-error.js';
+import { bulkUploads, onboarding, registrationLinks } from '../db/schema.js';
 import { errorResponses } from '../errors/openapi.js';
+import { getNetworkConfig } from '../services/network-config.js';
+import { servedDomains } from '../services/user-store/serves.js';
+import { resolveRequestedDomain } from './served-domains-shared.js';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 const RangeQuerySchema = z.object({
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
+  domain: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Profile type (network domain id) to count; omitted counts every profile type.'),
 });
 
 /** Shared counter columns summed from the onboarding rollup table. */
@@ -32,29 +45,31 @@ const OnboardingCountersSchema = z.object({
 });
 
 const OnboardingSummaryResponseSchema = OnboardingCountersSchema.extend({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
-}).passthrough();
+}).loose();
 
 const OnboardingBySourceResponseSchema = z
   .object({
-    aggregator_id: z.string(),
+    user_id: z.string(),
     from: z.string().nullable(),
     to: z.string().nullable(),
-    by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).passthrough()),
+    by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).loose()),
   })
-  .passthrough();
+  .loose();
 
-export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
+export function registerOnboardingRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/onboarding/summary',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['onboarding'],
         summary: 'Aggregated onboarding totals',
         description:
-          'Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates.',
+          'Sum of total / passed / failed / skipped onboarding attempts for the caller aggregator, optionally constrained by ?from=&to= ISO dates and narrowed to one profile type by ?domain=.',
         security: [{ bearerAuth: [] }],
         querystring: RangeQuerySchema,
         response: {
@@ -64,11 +79,8 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
-      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
-      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+      const auth = await requireCoordinatorAuth(req);
+      const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
         .select({
@@ -78,11 +90,11 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
           skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
         })
         .from(onboarding)
-        .where(and(...conditions));
+        .where(where);
 
       const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         ...r,
@@ -93,11 +105,12 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
   app.get(
     '/v1/onboarding/by-source',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['onboarding'],
         summary: 'Onboarding totals grouped by source',
         description:
-          'Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to=.',
+          'Per-source breakdown of onboarding counters for the caller aggregator (e.g. by_link / by_bulk_upload), optionally date-bounded by ?from=&to= and narrowed to one profile type by ?domain=.',
         security: [{ bearerAuth: [] }],
         querystring: RangeQuerySchema,
         response: {
@@ -107,11 +120,8 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
-      const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
-      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
-      if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
-      if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+      const auth = await requireCoordinatorAuth(req);
+      const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
         .select({
@@ -122,11 +132,11 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
           skipped: sql<number>`COALESCE(SUM(${onboarding.skipped}), 0)::int`,
         })
         .from(onboarding)
-        .where(and(...conditions))
+        .where(where)
         .groupBy(onboarding.source);
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         by_source: rows,
@@ -136,10 +146,53 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
 }
 
 /**
- * Converts the route-validated `?from=&to=` query into Date bounds.
+ * The filter both metrics reads share: the caller's rows, the date range and the profile type.
  *
- * The route's `querystring: RangeQuerySchema` already validated and replaced
- * `req.query`, so this only coerces the ISO strings to Dates.
+ * @param auth - The verified caller.
+ * @param query - The validated query.
+ * @returns The parsed range, echoed in the response, and the where clause.
+ * @throws SCHEMA_VALIDATION if `domain` is not a network domain.
+ * @throws DOMAIN_NOT_SERVED if the caller does not serve `domain`.
+ */
+async function metricsFilter(
+  auth: AuthContext,
+  query: z.infer<typeof RangeQuerySchema>,
+): Promise<{ range: { from?: Date; to?: Date }; where: SQL | undefined }> {
+  const range = parseRange(query);
+  const conditions = [eq(onboarding.userId, auth.userId)];
+  if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
+  if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
+  const byType = await profileTypeCondition(auth, query.domain);
+  if (byType) conditions.push(byType);
+  return { range, where: and(...conditions) };
+}
+
+/**
+ * The condition that keeps only rows of the requested profile type.
+ *
+ * A row's type comes from its upload or registration link. With one served
+ * type every row counts, so the totals match the unfiltered read; this also
+ * keeps rollups whose upload was removed by the retention purge.
+ *
+ * @param auth - The verified caller.
+ * @param requested - The `?domain=` value, if any.
+ * @returns The condition, or `undefined` when no filtering is needed.
+ * @throws SCHEMA_VALIDATION if `requested` is not a network domain.
+ * @throws DOMAIN_NOT_SERVED if the caller does not serve `requested`.
+ */
+async function profileTypeCondition(
+  auth: AuthContext,
+  requested: string | undefined,
+): Promise<SQL | undefined> {
+  if (requested === undefined) return undefined;
+  const domain = await resolveRequestedDomain(auth, requested);
+  const { domainIds } = await getNetworkConfig();
+  if (servedDomains(auth.serves, domainIds).length <= 1) return undefined;
+  return sql`(${onboarding.batchId} IN (SELECT ${bulkUploads.id} FROM ${bulkUploads} WHERE ${bulkUploads.participantType} = ${domain}) OR ${onboarding.linkId} IN (SELECT ${registrationLinks.id} FROM ${registrationLinks} WHERE ${registrationLinks.domain} = ${domain}))`;
+}
+
+/**
+ * Converts the validated `?from=&to=` query into Date bounds.
  *
  * @param query - The zod-validated range query from `req.query`.
  * @returns Optional from/to Date bounds.
@@ -149,18 +202,4 @@ function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?
   if (query.from) out.from = new Date(query.from);
   if (query.to) out.to = new Date(query.to);
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  return result.context;
 }

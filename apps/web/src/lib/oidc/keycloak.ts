@@ -1,15 +1,13 @@
 /**
  * Keycloak adapter for the OIDC port.
  *
- * Wraps openid-client (panva) to speak standard OIDC Authorization Code +
- * PKCE. Public client — no client secret. Discovery is cached on first use
- * so subsequent requests skip the metadata fetch.
+ * Uses openid-client for the OIDC Authorization Code + PKCE flow. Sends a
+ * client secret only when one is configured. Discovery is cached after first use.
  */
 
 import { Issuer, generators, custom, type Client, type IssuerMetadata } from 'openid-client';
 
-// Cap every IdP HTTP call so a hung Keycloak cannot exhaust the Node.js
-// thread pool. Applies to discovery, token exchange, refresh, and userinfo.
+// Timeout for every IdP HTTP call (discovery, token exchange, refresh, userinfo).
 const HTTP_TIMEOUT_MS = 10_000;
 Issuer[custom.http_options] = (_url, options) => ({ ...options, timeout: HTTP_TIMEOUT_MS });
 import {
@@ -21,7 +19,9 @@ import {
   type OidcResult,
   type TokenSet,
 } from './interface';
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
 import { logger } from '../logger';
+import { decodeJwtClaims } from '../jwt';
 
 export interface KeycloakAdapterOptions {
   issuerUrl: string;
@@ -30,8 +30,18 @@ export interface KeycloakAdapterOptions {
   defaultScope?: string;
 }
 
+/** The `events` member that marks a back-channel logout token (OIDC Back-Channel Logout 1.0, §2.4). */
+const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'; // NOSONAR typescript:S5332 — an event name fixed by the OIDC spec, never fetched
+
+/**
+ * Oldest logout token accepted, by its `iat`. Keycloak sends the token the
+ * moment a session ends, so anything older is a replay, not a delivery.
+ */
+const LOGOUT_TOKEN_MAX_AGE_SECONDS = 120;
+
 export class KeycloakAdapter extends IdentityProviderAdapter {
   private clientPromise: Promise<Client> | null = null;
+  private jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
   private readonly defaultScope: string;
 
   constructor(private readonly opts: KeycloakAdapterOptions) {
@@ -56,9 +66,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
       });
       return client;
     })();
-    // Cache the in-flight promise for concurrent callers, but evict on
-    // rejection so a transient KC outage doesn't permanently disable the
-    // adapter.
+    // Share the in-flight promise; clear it on failure so a later call retries.
     promise.catch(() => {
       if (this.clientPromise === promise) this.clientPromise = null;
     });
@@ -75,6 +83,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
       code_challenge: input.codeChallenge,
       code_challenge_method: 'S256',
       redirect_uri: input.redirectUri,
+      ...(input.loginHint ? { login_hint: input.loginHint } : {}),
     });
   }
 
@@ -90,8 +99,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
     let tokenSet;
     try {
       const client = await this.getClient();
-      // Pass the full set of callback params so openid-client receives `iss`
-      // (RFC 9207) and `session_state` alongside `code` + `state`.
+      // Pass all callback params so `iss` (RFC 9207) and `session_state` are included.
       const callbackParams: Record<string, string> = {
         ...(input.callbackParams ?? {}),
         code: input.code,
@@ -103,8 +111,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
         nonce: input.expectedNonce,
       });
     } catch (err) {
-      // openid-client OPError carries the IdP's response in `.error` and
-      // `.error_description`. Surface both so logs/diagnostics are useful.
+      // OPError carries the IdP's `error` and `error_description`; log both.
       const e = err as {
         message?: string;
         name?: string;
@@ -203,11 +210,68 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
   async buildLogoutUrl(input: LogoutUrlInput): Promise<string> {
     const client = await this.getClient();
     return client.endSessionUrl({
-      // No token to hint with: identify the RP so Keycloak still validates the
-      // post-logout URI, and accept its confirmation page.
+      // Without a token, send `client_id` so Keycloak validates the redirect URI.
       ...(input.idToken ? { id_token_hint: input.idToken } : { client_id: this.opts.clientId }),
       post_logout_redirect_uri: input.postLogoutRedirectUri,
     });
+  }
+
+  /**
+   * Verifies a Keycloak back-channel logout token: signature against the
+   * realm's published keys, `iss`, an `aud` naming this client, a recent
+   * `iat`, the logout event, and no `nonce` (OIDC Back-Channel Logout 1.0, §2.6). Only a token
+   * naming a Keycloak session (`sid`) is accepted, because sessions are looked
+   * up by it.
+   */
+  async verifyLogoutToken(logoutToken: string): Promise<OidcResult<{ sid: string }>> {
+    let payload: JWTPayload;
+    try {
+      const client = await this.getClient();
+      const { issuer, jwks_uri: jwksUri } = client.issuer.metadata;
+      if (!jwksUri) {
+        return {
+          ok: false,
+          error: { code: 'KEYS_UNAVAILABLE', message: 'issuer publishes no jwks_uri' },
+        };
+      }
+      this.jwks ??= createRemoteJWKSet(new URL(jwksUri), { timeoutDuration: HTTP_TIMEOUT_MS });
+      ({ payload } = await jwtVerify(logoutToken, this.jwks, {
+        issuer,
+        audience: this.opts.clientId,
+        requiredClaims: ['iat', 'jti'],
+        maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
+      }));
+    } catch (err) {
+      const unavailable =
+        err instanceof joseErrors.JWKSTimeout ||
+        err instanceof joseErrors.JWKSInvalid ||
+        !(err instanceof joseErrors.JOSEError);
+      return {
+        ok: false,
+        error: {
+          code: unavailable ? 'KEYS_UNAVAILABLE' : 'LOGOUT_TOKEN_INVALID',
+          message: err instanceof Error ? err.message : 'logout token rejected',
+        },
+      };
+    }
+
+    const events = payload.events;
+    if (typeof events !== 'object' || events === null || !(BACKCHANNEL_LOGOUT_EVENT in events)) {
+      return { ok: false, error: { code: 'LOGOUT_TOKEN_INVALID', message: 'not a logout event' } };
+    }
+    if ('nonce' in payload) {
+      return {
+        ok: false,
+        error: { code: 'LOGOUT_TOKEN_INVALID', message: 'logout token carries a nonce' },
+      };
+    }
+    if (typeof payload.sid !== 'string' || !payload.sid) {
+      return {
+        ok: false,
+        error: { code: 'LOGOUT_TOKEN_INVALID', message: 'logout token has no sid' },
+      };
+    }
+    return { ok: true, value: { sid: payload.sid } };
   }
 
   /** Test helper — exposes the underlying issuer metadata once discovered. */
@@ -227,21 +291,22 @@ export const oidcGenerators = {
   codeChallenge: (verifier: string) => generators.codeChallenge(verifier),
 };
 
+/**
+ * Refresh-token lifetime assumed when the token carries no readable `exp`.
+ * Matches the realm's `ssoSessionIdleTimeout` (1800 s).
+ */
+const FALLBACK_REFRESH_TTL_MS = 30 * 60_000;
+
+/**
+ * Reads the refresh token's expiry in epoch ms.
+ *
+ * Reads `exp` without verifying the signature; the token came straight from
+ * the Keycloak token endpoint.
+ */
 function extractRefreshExp(refreshToken: string): number {
-  // Refresh tokens from Keycloak are JWTs. Decode payload.exp without
-  // verifying signature — we trust the token because it just came from a
-  // verified token endpoint over TLS.
-  const parts = refreshToken.split('.');
-  if (parts.length !== 3) return Date.now() + 30 * 60_000;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1] ?? '', 'base64url').toString('utf8')) as {
-      exp?: number;
-    };
-    if (typeof payload.exp === 'number') return payload.exp * 1000;
-  } catch {
-    /* fall through */
-  }
-  return Date.now() + 30 * 60_000;
+  const exp =
+    refreshToken.split('.').length === 3 ? decodeJwtClaims(refreshToken)?.['exp'] : undefined;
+  return typeof exp === 'number' ? exp * 1000 : Date.now() + FALLBACK_REFRESH_TTL_MS;
 }
 
 function mapClaims(claims: Record<string, unknown>): IdClaims {
@@ -254,5 +319,6 @@ function mapClaims(claims: Record<string, unknown>): IdClaims {
   if (typeof claims.name === 'string') out.name = claims.name;
   if (typeof claims.preferred_username === 'string')
     out.preferredUsername = claims.preferred_username;
+  if (typeof claims.sid === 'string') out.sid = claims.sid;
   return out;
 }

@@ -1,3 +1,4 @@
+import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Providers } from '../lib/providers';
@@ -8,32 +9,30 @@ import { EnabledLocalesProvider } from '../i18n/EnabledLocalesProvider';
 import { getFormRuntimeConfig } from '../lib/form-runtime-config';
 import { FormRuntimeConfigProvider } from '../lib/FormRuntimeConfigProvider';
 import { getLocale, getMessages, getTranslations } from 'next-intl/server';
+import { z } from 'zod';
+
+/** The brand fields of `/v1/aggregator-config` that the page metadata reads. */
+const MetadataConfigSchema = z.object({
+  brand: BrandConfigSchema.pick({ long_name: true, tagline: true }),
+});
 
 /**
  * Generates the page metadata from the active aggregator config.
  *
- * Fetched server-side from the api at build/render time so the browser
- * tab title reflects whichever signalstack network this deployment is
- * bound to. Falls back to a generic title on fetch failure so a cold
- * boot before the api is healthy still renders something readable.
+ * Falls back to a translated generic title if the api fetch fails.
  */
 export async function generateMetadata(): Promise<Metadata> {
   try {
     const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
     const res = await fetch(`${base}/v1/aggregator-config`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`${res.status}`);
-    const cfg = (await res.json()) as {
-      brand: { long_name: string; tagline?: string };
-    };
+    const cfg = MetadataConfigSchema.parse(await res.json());
     return {
       title: `${cfg.brand.long_name}`,
       description:
         cfg.brand.tagline ?? `${cfg.brand.long_name} — track every participant in your network.`,
-      // Brand-coloured favicon. Served by `app/brand-icon/route.ts`
-      // which re-tints the network-mark SVG to the active
-      // `primary_color`. Pointed at via metadata so Next emits the
-      // right <link rel="icon"> without needing a static
-      // `app/icon.svg` (which would short-circuit the dynamic route).
+      // Brand-coloured favicon from `app/brand-icon/route.ts`. Do not add a
+      // static `app/icon.svg`; it would override this route.
       icons: { icon: { url: '/brand-icon', type: 'image/svg+xml' } },
     };
   } catch {
@@ -46,9 +45,8 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-// Inline no-flash script: applies the stored theme mode to <html>
-// before React hydrates so a dark-preferring user never sees a flash
-// of the light theme. Default is light if no preference is stored.
+// Applies the stored theme mode to <html> before hydration to avoid a
+// light-theme flash. Defaults to light.
 const themeNoFlashScript = `
 (function () {
   try {
@@ -61,13 +59,10 @@ const themeNoFlashScript = `
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   const messages = await getMessages();
-  // Resolved here, not in the switcher: this is a server component, so
-  // `ENABLED_LANGUAGES` is read per request rather than inlined at build time.
+  // Read on the server per request so `ENABLED_LANGUAGES` is not inlined at build time.
   const enabledLocales = getEnabledLocales();
-  // Same reason as the locales above: the Maps key and the reference-dataset
-  // settings must stay runtime values, so they are read here (server) and handed
-  // to the form widgets through a provider rather than a `NEXT_PUBLIC_*` name
-  // that `next build` would inline.
+  // Runtime form settings (Maps key, reference datasets), passed via a provider
+  // instead of `NEXT_PUBLIC_*` so they are not inlined at build time.
   const formRuntimeConfig = getFormRuntimeConfig();
   return (
     <html lang={locale} suppressHydrationWarning>

@@ -11,6 +11,9 @@
               method="post"
               novalidate="novalidate">
             <div class="${properties.kcFormGroupClass!}">
+                <#if otpValidMinutes??>
+                    <p class="bd-otp-sent"><#if otpSentTo??>${msg("emailOtpSentTo", otpSentTo)} </#if><#if otpValidMinutes == 1>${msg("emailOtpValidForOneMinute")}<#else>${msg("emailOtpValidForMinutes", otpValidMinutes?c)}</#if></p>
+                </#if>
                 <label class="${properties.kcLabelClass!}" for="bd-otp-0">${msg("emailOtpLabel")}</label>
                 <div class="bd-otp-grid" role="group" aria-label="${msg('emailOtpLabel')}">
                     <#list 0..5 as i>

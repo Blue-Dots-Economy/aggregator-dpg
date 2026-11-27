@@ -43,8 +43,8 @@ const { _setAccessTokenVerifier, _resetJwks } = await import('../services/auth/a
 const { _setSignalStackWriter } = await import('../services/signalstack.js');
 const { _setNetworkConfig } = await import('../services/network-config.js');
 const { buildBlueDotConfig } = await import('@aggregator-dpg/network-config/testing');
-const { AggregatorStoreFake, _setAggregatorStore, buildAggregator } =
-  await import('../services/aggregator-store/index.js');
+const { UserStoreFake, _setUserStore, buildCoordinator } =
+  await import('../services/user-store/index.js');
 const { IdpAdminFake, _setIdpAdmin } = await import('../services/idp-admin/index.js');
 const { SignalStackWriterFake } = await import('@aggregator-dpg/signalstack-writer/testing');
 
@@ -83,13 +83,13 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
     await idp.createUser({
       email: 'kc-1@x.com',
       enabled: true,
-      attributes: { aggregator_id: AGG_A, decision_made: 'approved' },
+      attributes: { user_id: AGG_A, decision_made: 'approved' },
     });
     _setIdpAdmin(idp);
 
-    const aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
-      buildAggregator({
+    const userStore = new UserStoreFake();
+    userStore.seed([
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',
@@ -97,7 +97,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
         signalstackOrgId: ORG_A,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     writer = new SignalStackWriterFake();
     _setSignalStackWriter(writer);
@@ -107,8 +107,9 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
+          aggregator_type: ['seeker', 'provider'],
           signalstack_org_id: ORG_A,
         };
       }
@@ -121,7 +122,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
   afterAll(async () => {
     await app?.close();
     _setSignalStackWriter(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);

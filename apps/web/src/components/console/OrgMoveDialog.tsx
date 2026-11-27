@@ -1,0 +1,223 @@
+'use client';
+
+/**
+ * "Move" action on the organisation page (network admin): moves an
+ * organisation, with every organisation below it, under a new parent.
+ *
+ * The dialog reads the candidate parents when it opens. A candidate the move
+ * would fail for is disabled and shows the reason. The moved org keeps its
+ * "known as" value when the new parent's list has it; otherwise the API gives
+ * it the new parent's default. With "known as" turned off the dialog does not
+ * mention it.
+ */
+
+import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { FolderInput } from 'lucide-react';
+import {
+  OrgParentOptionsResponseSchema,
+  OrgSchema,
+  type OrgParentOptionsResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
+import { Button } from '../ui/Button';
+import { Label } from '../ui/Label';
+import { errorKey, getConsole, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
+import { SelectField } from '@/components/ui/SelectField';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
+import { FieldMessage, useHandFieldErrors } from '../forms/useHandFieldErrors';
+
+type ParentOption = OrgParentOptionsResponse['options'][number];
+
+/** Message keys for the reasons a candidate parent is refused. */
+const REASONS: Record<string, string> = {
+  INVALID_PARENT: 'org.move_reason_invalid',
+  PARENT_CYCLE: 'org.move_reason_cycle',
+  CHILD_LIMIT: 'org.move_reason_full',
+  DEPTH_LIMIT: 'org.move_reason_depth',
+};
+
+/**
+ * Renders the "Move" button and, when open, the move dialog.
+ *
+ * @param orgId - The organisation to move.
+ * @param orgName - Its name, for the dialog title.
+ * @param parentId - Its current parent, marked in the list.
+ */
+export function OrgMoveDialog({
+  orgId,
+  orgName,
+  parentId,
+  showKnownAs,
+}: Readonly<{
+  orgId: string;
+  orgName: string;
+  parentId: string | null;
+  /** Whether "known as" is turned on for the deployment (`ORG_KNOWN_AS_ENABLED`). */
+  showKnownAs: boolean;
+}>) {
+  const t = useTranslations('console');
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        kind="soft"
+        icon={<FolderInput size={15} aria-hidden="true" />}
+        onClick={() => setOpen(true)}
+      >
+        {t('org.move')}
+      </Button>
+      {open ? (
+        <MoveDialog
+          orgId={orgId}
+          orgName={orgName}
+          currentParentId={parentId}
+          showKnownAs={showKnownAs}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The open dialog: candidate parents and the submit. */
+function MoveDialog({
+  orgId,
+  orgName,
+  currentParentId,
+  showKnownAs,
+  onClose,
+}: Readonly<{
+  orgId: string;
+  orgName: string;
+  currentParentId: string | null;
+  showKnownAs: boolean;
+  onClose: () => void;
+}>) {
+  const t = useTranslations('console');
+  const router = useRouter();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [data, setData] = useState<OrgParentOptionsResponse | null>(null);
+  const [parentId, setParentId] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Native <dialog> gives focus trapping, focus restore, and Esc-to-close.
+  useEffect(() => {
+    const el = dialogRef.current;
+    el?.showModal?.();
+    return () => el?.close?.();
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const r = await getConsole(
+        `/api/console/org/parent/options/${orgId}`,
+        OrgParentOptionsResponseSchema,
+      );
+      if (!live) return;
+      if (r.ok) setData(r.data);
+      else setMessage(t(errorKey(r)));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [orgId, t]);
+
+  const parent = data?.options.find((o) => o.id === parentId);
+  const copy = useFieldErrorCopy();
+  const fe = useHandFieldErrors<'parent'>('move', {
+    parent: parent ? null : { kind: 'required', message: copy.required(t('org.move_parent')) },
+  });
+
+  const optionText = (o: ParentOption) => {
+    const label = showKnownAs && o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const name = o.id === currentParentId ? `${label} — ${t('org.move_current')}` : label;
+    if (o.ok) return name;
+    return `${name} — ${t(REASONS[o.reason ?? ''] ?? 'org.move_reason_other')}`;
+  };
+
+  async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!fe.validate()) return;
+    setBusy(true);
+    const r = await sendConsole(`/api/console/org/parent/${orgId}`, 'PATCH', OrgSchema, {
+      parent_id: parentId,
+    });
+    setBusy(false);
+    if (r.ok) {
+      dialogRef.current?.close?.();
+      onClose();
+      router.refresh();
+    } else {
+      // The change may have been saved: reload the page's copy.
+      if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
+      setMessage(t(errorKey(r)));
+    }
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label={t('org.move_title', { name: orgName })}
+      // Escape fires "cancel". The effect cleanup's close() also fires "close",
+      // so closing the React state on "close" would unmount the dialog at once.
+      onCancel={onClose}
+      className="m-auto w-full max-w-[460px] rounded-[14px] bg-white p-5 shadow-xl backdrop:bg-black/40"
+    >
+      <h3 className="mb-3 font-display text-[15px] font-bold text-ink-900">
+        {t('org.move_title', { name: orgName })}
+      </h3>
+      <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+        {data ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="move-parent">{t('org.move_parent')}</Label>
+              <SelectField
+                {...fe.controlProps('parent')}
+                value={parentId}
+                aria-required
+                placeholder={t('org.move_parent_placeholder')}
+                onChange={(v) => {
+                  setParentId(v);
+                  setMessage(null);
+                }}
+                options={data.options.map((o) => ({
+                  value: o.id,
+                  label: optionText(o),
+                  disabled: !o.ok,
+                }))}
+              />
+              <FieldMessage id={fe.errorId('parent')} message={fe.message('parent')} />
+            </div>
+            {showKnownAs ? (
+              <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
+            ) : null}
+            <p className="text-[13px] text-ink-600">
+              {t('org.move_count', { count: data.subtree_size })}
+            </p>
+          </>
+        ) : null}
+        {!data && !message ? (
+          <p className="text-[13px] text-ink-500">{t('org.move_loading')}</p>
+        ) : null}
+        {message ? <output className="text-[13px] text-rose-600">{message}</output> : null}
+        <div className="flex items-center justify-end gap-3">
+          <Button
+            kind="ghost"
+            onClick={() => {
+              dialogRef.current?.close?.();
+              onClose();
+            }}
+          >
+            {t('org.move_cancel')}
+          </Button>
+          <Button type="submit" disabled={busy || !data}>
+            {t('org.move_submit')}
+          </Button>
+        </div>
+      </form>
+    </dialog>
+  );
+}

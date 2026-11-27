@@ -1,10 +1,8 @@
 /**
  * SMTP-backed mailer using nodemailer.
  *
- * Targets MailHog in dev (host `mailhog`, port `1025`, no auth) and any
- * standard SMTP server in production (Postmark, Mailgun, AWS SES SMTP
- * endpoint, customer relay, etc.). Connection is created once per adapter
- * instance and pooled by nodemailer internally.
+ * Works with MailHog in dev and any standard SMTP server in production.
+ * Each adapter instance holds one pooled nodemailer transport.
  */
 
 import { createRequire } from 'node:module';
@@ -38,8 +36,7 @@ export class SmtpMailer extends MailerAdapter {
       port: opts.port,
       secure: opts.secure ?? false,
       ...(opts.user && opts.pass ? { auth: { user: opts.user, pass: opts.pass } } : {}),
-      // Use a small connection pool so concurrent sends don't open a fresh
-      // TCP for each one.
+      // Small pool so concurrent sends reuse connections.
       pool: true,
       maxConnections: 3,
     });
@@ -54,9 +51,7 @@ export class SmtpMailer extends MailerAdapter {
       text: input.text,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       ...(input.cc ? { cc: input.cc } : {}),
-      // nodemailer's attachment shape matches SendAttachment exactly, so this
-      // is a straight passthrough — unlike the SES adapter, which has to build
-      // raw MIME (#551).
+      // nodemailer accepts SendAttachment as is.
       ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     };
     try {

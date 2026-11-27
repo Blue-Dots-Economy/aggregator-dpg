@@ -37,7 +37,7 @@ export type Unsubscribe = () => void;
  * type MyConfig = ConfigSlice<typeof mySchema>;
  * // { baseUrl: string; timeout: number }
  */
-export type ConfigSlice<S extends z.ZodTypeAny> = z.infer<S>;
+export type ConfigSlice<S extends z.ZodType> = z.infer<S>;
 
 /**
  * Abstract base class for the config service.

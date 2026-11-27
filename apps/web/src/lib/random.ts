@@ -1,11 +1,9 @@
 /**
  * CSPRNG-backed uniform random source for the aggregator web app.
  *
- * `Math.random()` is a non-cryptographic PRNG and is therefore banned
- * repo-wide, including in decorative code. This module draws 32-bit words
- * from the platform CSPRNG (`crypto.getRandomValues`) in blocks and hands
- * them out as normalised floats, so animation code can call it once per
- * particle without paying a CSPRNG call per value.
+ * `Math.random()` is banned repo-wide. This module reads 32-bit words from
+ * `crypto.getRandomValues` in blocks and returns them as floats, so callers
+ * do not pay one CSPRNG call per value.
  *
  * @module @aggregator-dpg/web
  */
@@ -22,8 +20,7 @@ let cursor = POOL_WORDS;
 /**
  * Returns a uniformly distributed float in the half-open interval [0, 1).
  *
- * Drop-in replacement for `Math.random()` backed by the platform CSPRNG.
- * The internal block is refilled transparently once exhausted.
+ * Drop-in replacement for `Math.random()`, backed by the platform CSPRNG.
  *
  * @returns A float `n` such that `0 <= n < 1`.
  */

@@ -1,65 +1,131 @@
 'use client';
 
 /**
- * Shared presentational pieces for the public registration forms.
- *
- * The coordinator (`RegisterView`) and org (`OrgRegisterForm`) forms render an
- * identical error banner and a structurally-identical success panel (only the
- * copy differs). These components hold that markup so the two forms cannot
- * drift. Belongs to `@aggregator-dpg/web`.
+ * Shared UI pieces and hooks for the coordinator and org registration forms.
+ * Belongs to `@aggregator-dpg/web`.
  *
  * @module apps/web/src/app/(public)/register/registration-ui
  */
 
-import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
-import type { RJSFSchema } from '@rjsf/utils';
-import { I } from '../../../icons';
+import type { FormValidation } from '@rjsf/utils';
+import { refusedNameCharacters } from '@aggregator-dpg/shared-primitives/person-name';
 import type { ConsentDoc } from '../../../components/consent/consent-docs';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
-import {
-  humaniseValidationErrors,
-  type AjvLikeError,
-  type SubmitState,
-} from './registration-shared';
+import { useFieldErrorCopy, type FieldErrors } from '@/components/forms/useFieldErrors';
+import { requestErrorKind } from '@/lib/request-errors';
+import type { SubmitError, SubmitState } from './registration-shared';
 
 /** Local form lifecycle shared by the coordinator + org registration forms. */
 export interface RegistrationFormState {
   state: SubmitState;
   setState: (s: SubmitState) => void;
-  canSubmit: boolean;
-  setCanSubmit: (v: boolean) => void;
-  /**
-   * React 19 folded `MutableRefObject` into `RefObject` and types
-   * `useRef<T>(null)` as `RefObject<T | null>` — `.current` genuinely is null
-   * until the error banner mounts, so the null belongs in the declared type.
-   */
+  /** Ref to the error banner; `null` until it mounts. */
   errorRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
- * Holds the submit lifecycle both registration forms share: the `SubmitState`,
- * the validity gate, and an error ref that is scrolled + focused on failure.
+ * Whether a state needs the error banner.
+ *
+ * @param state - The form's submit state.
+ */
+export function showsErrorBanner(
+  state: SubmitState,
+): state is Extract<SubmitState, { status: 'error' }> {
+  return state.status === 'error';
+}
+
+/**
+ * Holds the submit state and the error banner ref.
+ *
+ * On failure the error banner is scrolled into view and focused; server field
+ * errors are focused by `setServerErrors`.
  *
  * @returns The form state handles.
  */
 export function useRegistrationFormState(): RegistrationFormState {
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
-  const [canSubmit, setCanSubmit] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (state.status === 'error' && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      errorRef.current.focus();
-    }
+    if (state.status !== 'error') return;
+    const target = errorRef.current;
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.focus({ preventScroll: true });
   }, [state]);
-  return { state, setState, canSubmit, setCanSubmit, errorRef };
+  return { state, setState, errorRef };
 }
 
-/** The park-then-gate submit cycle shared by the coordinator + org forms. */
+/** Dot paths of the form fields a registration API error can name. */
+export interface RegistrationFieldPaths {
+  email: string;
+  phone: string;
+  /** Organisation name, for the org form. */
+  name?: string;
+}
+
+/**
+ * Turns a rejected registration into field errors, else one readable banner.
+ *
+ * @param paths - Where the email, phone and name fields live in the form data.
+ * @param bannerKeys - Extra `register.*` message keys for specific API codes.
+ */
+export function useRegistrationError(
+  fieldErrors: FieldErrors,
+  paths: RegistrationFieldPaths,
+  bannerKeys: Readonly<Record<string, string>> = {},
+): (error: SubmitError) => SubmitState {
+  const t = useTranslations('register');
+  const tRequest = useTranslations('form.request_error');
+  const tForm = useTranslations('form');
+  const copy = useFieldErrorCopy();
+  return (error) => {
+    const onField: Record<string, string> = {};
+    if (error.code === 'USER_EXISTS' || error.code === 'OWNER_ALREADY_REGISTERED') {
+      onField[paths.email] = t('error_email_exists');
+    } else if (error.code === 'PHONE_EXISTS') {
+      onField[paths.phone] = t('error_phone_exists');
+    } else if (error.code === 'INVALID_PHONE') {
+      onField[paths.phone] = copy.invalid(t('error_phone_invalid'));
+    } else if (error.code === 'ORG_NAME_TAKEN' && paths.name) {
+      onField[paths.name] = t('error_org_name_taken');
+    }
+    // Field messages and the code's own message are placed together, so neither overwrites the other.
+    const { complete, unmapped } = fieldErrors.setServerErrors(error.fields, onField);
+    if (complete) return { status: 'idle' };
+    const key = bannerKeyFor(error.code, bannerKeys);
+    const status = error.status ?? 0;
+    const reference =
+      status >= 500 && error.requestId ? [tForm('request_reference', { id: error.requestId })] : [];
+    return {
+      status: 'error',
+      title: key ? t(key) : tRequest(requestErrorKind(status)),
+      // Messages no field on this form owns, and the request id support needs for a server fault.
+      detail: [...unmapped, ...reference].join('\n'),
+      code: error.code,
+      requestId: error.requestId,
+    };
+  };
+}
+
+/** The `register.*` banner key for an API code: the form's own keys first, then the shared ones. */
+function bannerKeyFor(code: string, own: Readonly<Record<string, string>>): string | undefined {
+  if (Object.hasOwn(own, code)) return own[code];
+  if (Object.hasOwn(REGISTRATION_BANNER_KEYS, code)) return REGISTRATION_BANNER_KEYS[code];
+  return undefined;
+}
+
+/** `register.*` banner messages for API codes that name no field. */
+const REGISTRATION_BANNER_KEYS: Readonly<Record<string, string>> = {
+  REGISTRATION_COOLING: 'error_cooling',
+  TARGET_ORG_INACTIVE: 'error_org_inactive',
+  INVITE_ALREADY_USED: 'error_invite_used',
+};
+
+/** Submit flow that holds the form values until consent is accepted. */
 export interface ConsentGateSubmit {
   /** True while the blocking consent gate is open. */
   gateOpen: boolean;
@@ -72,14 +138,10 @@ export interface ConsentGateSubmit {
 }
 
 /**
- * Holds the park-then-gate submit cycle both registration forms share.
+ * Holds the form values on submit and opens the consent gate.
  *
- * Neither form POSTs straight from `onSubmit`: consent is collected in the
- * blocking `ConsentGate` first, so the values are parked in a ref for the
- * caller's own accept handler to replay. When the consent copy failed to load
- * (`consentDocs` is empty) the gate would render nothing at all and the form
- * would be stuck with no way to finish or explain why — that case surfaces an
- * error rather than opening a dead gate.
+ * The caller's accept handler posts the held values. When `consentDocs` is
+ * empty (loading failed), it sets an error instead of opening the gate.
  *
  * @param consentDocs - Ordered consent documents; empty when loading failed.
  * @param setState - Submit-lifecycle setter from {@link useRegistrationFormState}.
@@ -115,69 +177,94 @@ export function useConsentGateSubmit(
 export interface SharedFormWiring {
   formData: Record<string, unknown>;
   setFormData: (data: Record<string, unknown>) => void;
-  setCanSubmit: (valid: boolean) => void;
-  setState: (s: SubmitState) => void;
   handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
-  /** The schema the form validates against — used to name fields in errors. */
-  formSchema: RJSFSchema;
-  // `| undefined` is load-bearing under `exactOptionalPropertyTypes`: both
-  // callers pass the prop through explicitly, which an optional-only type
-  // rejects.
+  /** Error timing, messages and server field errors from `useFieldErrors`. */
+  fieldErrors: FieldErrors;
+  // `| undefined` is required by `exactOptionalPropertyTypes`; callers pass it explicitly.
   consentContent?: ConsentDocContent | undefined;
   /** Where the address widget reports the coordinate it resolved. */
   onLocationResolved: (place: ResolvedPlace | null) => void;
-  /** Localised heading for the client-side validation banner. */
-  validationErrorTitle: string;
+  /**
+   * The person's name field (a dotted path such as `owner.name`) and the
+   * message for symbols the sign-in system refuses, given those symbols.
+   */
+  personName?: { path: string; message: (symbols: string) => string } | undefined;
+  /** The form's own checks; they run before the name check, not instead of it. */
+  customValidate?: FormValidator | undefined;
+}
+
+type FormValidator = (
+  data: Record<string, unknown> | undefined,
+  errors: FormValidation,
+) => FormValidation;
+
+/** The form's own checks and the name check, run one after the other. */
+function combinedValidator(wiring: SharedFormWiring): FormValidator | null {
+  const checks = [
+    wiring.customValidate,
+    wiring.personName ? personNameValidator(wiring.personName) : undefined,
+  ].filter((c): c is FormValidator => c !== undefined);
+  if (checks.length === 0) return null;
+  return (data, errors) => checks.reduce((acc, check) => check(data, acc), errors);
+}
+
+/**
+ * Adds an error to the person's name field when it holds a symbol the sign-in
+ * system refuses, so the form shows it on that field instead of failing later.
+ */
+function personNameValidator(
+  personName: NonNullable<SharedFormWiring['personName']>,
+): (data: Record<string, unknown> | undefined, errors: FormValidation) => FormValidation {
+  return (data, errors) => {
+    const keys = personName.path.split('.');
+    let value: unknown = data;
+    let field: unknown = errors;
+    for (const k of keys) {
+      value = (value as Record<string, unknown> | undefined)?.[k];
+      field = (field as Record<string, unknown> | undefined)?.[k];
+    }
+    const symbols = typeof value === 'string' ? refusedNameCharacters(value) : [];
+    if (symbols.length > 0 && field && typeof (field as FormValidation).addError === 'function') {
+      (field as FormValidation).addError(personName.message(symbols.join(' ')));
+    }
+    return errors;
+  };
 }
 
 /**
  * Builds the RJSF props the coordinator and org registration forms share.
  *
- * The two forms pass an identical block of wiring — form data, validity gate,
- * submit, and the client-side validation banner — differing only in the values
- * they close over. Keeping it here is the same reason the rest of this module
- * exists: the forms are structurally identical and silently drifting apart is
- * the failure that actually happens.
- *
- * Spread the result onto `<RjsfThemedForm>`; `schema` and `uiSchema` stay with
- * the caller, since those genuinely differ.
+ * Spread the result onto `<RjsfThemedForm>`. The caller passes `schema` and `uiSchema`.
  *
  * @param wiring - The calling form's state setters, schema and copy.
  * @returns Props to spread onto the themed RJSF form.
  */
-export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
+export function sharedRegistrationFormProps(wiring: SharedFormWiring): FieldErrors['formProps'] & {
   formData: Record<string, unknown>;
   formContext: Record<string, unknown>;
-  onChange: (e: IChangeEvent<Record<string, unknown>>) => void;
-  onValidityChange: (valid: boolean) => void;
+  onChange: (e: IChangeEvent<Record<string, unknown>>, id?: string) => void;
   onSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
-  onError: (errs: AjvLikeError[]) => void;
+  customValidate?: FormValidator;
   showErrorList: false;
   focusOnFirstError: true;
   noHtml5Validate: true;
 } {
+  const validate = combinedValidator(wiring);
   return {
+    ...wiring.fieldErrors.formProps,
     formData: wiring.formData,
-    // RJSF v6 exposes this to widgets only as `registry.formContext`, never as
-    // a prop — see the note in LocationAutocompleteWidget.
+    // Widgets read this as `registry.formContext`, not as a prop.
     formContext: {
       consentContent: wiring.consentContent,
       onLocationResolved: wiring.onLocationResolved,
     },
-    onChange: (e) => wiring.setFormData(e.formData as Record<string, unknown>),
-    onValidityChange: wiring.setCanSubmit,
-    onSubmit: wiring.handleSubmit,
-    onError: (errs) => {
-      wiring.setState({
-        status: 'error',
-        title: wiring.validationErrorTitle,
-        detail: humaniseValidationErrors(errs, wiring.formSchema).join('\n'),
-        code: 'CLIENT_VALIDATION',
-        // The raw errors are the only actionable detail for a client-side
-        // failure, so they stand in for a server request id.
-        requestId: JSON.stringify(errs, null, 2),
-      });
+    onChange: (e, id) => {
+      wiring.setFormData(e.formData as Record<string, unknown>);
+      wiring.fieldErrors.onFormChange(id, { before: wiring.formData, after: e.formData });
     },
+    onSubmit: wiring.handleSubmit,
+    // The person-name check runs alongside RJSF; its message shows under the name field.
+    ...(validate ? { customValidate: validate } : {}),
     showErrorList: false,
     focusOnFirstError: true,
     noHtml5Validate: true,
@@ -187,8 +274,8 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
 export interface RegistrationSubmitButtonProps {
   /** True while a submit is in flight. */
   submitting: boolean;
-  /** True when the form is valid + otherwise submittable. */
-  canSubmit: boolean;
+  /** Runs before the form validates, so every field shows its error. */
+  onAttempt: () => void;
   /** Idle button label. */
   label: string;
   /** In-flight button label. */
@@ -196,33 +283,28 @@ export interface RegistrationSubmitButtonProps {
 }
 
 /**
- * The primary submit button shared by both registration forms — same size,
- * brand colours, and disabled styling.
+ * Primary submit button shared by both registration forms. Disabled only
+ * while a submit is in flight; a click shows each field's own error.
  *
- * @param props - Submitting/validity flags + labels.
- * @returns The submit button element.
+ * @param props - Submitting flag, attempt callback and labels.
+ * @returns The submit button.
  */
 export function RegistrationSubmitButton({
   submitting,
-  canSubmit,
+  onAttempt,
   label,
   submittingLabel,
 }: RegistrationSubmitButtonProps): JSX.Element {
-  const disabled = submitting || !canSubmit;
+  const disabled = submitting;
   return (
     <div className="mt-4 flex flex-col gap-3">
       <button
         type="submit"
         disabled={disabled}
-        // Same fix as ConsentGate's CTA: `text-white` here and
-        // `text-(--bd-primary-600)` in the disabled branch are both "text
-        // color" utilities, so which one actually renders depends on
-        // Tailwind's internal stylesheet order, not on their order in this
-        // string — here `text-white` was winning, leaving white-on-pale
-        // (effectively invisible) instead of the intended indigo label.
-        // Keeping one background + one text colour always, and only fading
-        // opacity when disabled, sidesteps that class-precedence trap
-        // entirely and matches the sibling Signals gate's CTA.
+        onClick={onAttempt}
+        // One background and one text colour in both states; disabled only
+        // lowers opacity. Two conflicting text-colour classes would resolve by
+        // Tailwind stylesheet order, not class order.
         className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white bg-(--bd-primary) transition-all
           ${
             disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-(--bd-primary-600) bd-shadow-lg'
@@ -241,21 +323,18 @@ export interface RegistrationErrorBannerProps {
   detail: string;
   /** Focus/scroll target so the banner can be pulled into view on submit. */
   errorRef: RefObject<HTMLDivElement | null>;
-  /** Raw Ajv dump shown behind a `<details>` for client-validation errors. */
-  rawErrors?: string;
 }
 
 /**
- * Red alert banner shown on submit failure (server or client validation).
+ * Red alert banner shown when the server rejects a submit.
  *
- * @param props - Title, detail lines, focus ref, optional raw-error dump.
+ * @param props - Title, detail lines and focus ref.
  * @returns The error banner element.
  */
 export function RegistrationErrorBanner({
   title,
   detail,
   errorRef,
-  rawErrors,
 }: RegistrationErrorBannerProps): JSX.Element {
   return (
     <div
@@ -275,55 +354,6 @@ export function RegistrationErrorBanner({
             ))}
         </ul>
       ) : null}
-      {rawErrors ? (
-        <details className="mt-2 text-[11px] text-red-500/80">
-          <summary className="cursor-pointer">Show raw validation errors</summary>
-          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded-sm p-2 max-h-[200px] overflow-auto">
-            {rawErrors}
-          </pre>
-        </details>
-      ) : null}
-    </div>
-  );
-}
-
-export interface RegistrationSuccessPanelProps {
-  /** Panel heading. */
-  heading: string;
-  /** Label preceding the reference id (e.g. "Reference ID:"). */
-  refLabel: string;
-  /** The reference id (aggregator id or org slug). */
-  refId: string;
-  /** Body copy explaining next steps (review/approval). */
-  message: string;
-}
-
-/**
- * Emerald success panel shown after a registration submits, with the reference
- * id and a back-to-sign-in link.
- *
- * @param props - Heading, reference label + id, and next-steps copy.
- * @returns The success panel element.
- */
-export function RegistrationSuccessPanel({
-  heading,
-  refLabel,
-  refId,
-  message,
-}: RegistrationSuccessPanelProps): JSX.Element {
-  return (
-    <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-      <div className="font-display font-bold text-[18px] text-emerald-800">{heading}</div>
-      <p className="text-[14px] text-emerald-700 mt-2">
-        {refLabel} <code className="font-mono text-[12.5px]">{refId}</code>
-      </p>
-      <p className="text-[14px] text-emerald-700 mt-3">{message}</p>
-      <Link
-        href="/login"
-        className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
-      >
-        <I.arrowL size={15} /> Back to sign in
-      </Link>
     </div>
   );
 }

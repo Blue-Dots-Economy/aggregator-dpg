@@ -1,13 +1,8 @@
 /**
- * Worker-side singleton for the resolved aggregator + signalstack
- * network config. Mirrors `apps/api/src/services/network-config.ts`
- * because the worker process boots independently and cannot share the
- * api's in-memory cache.
+ * Resolved network config singleton for the worker app.
  *
- * Loaded once on first access from `AGGREGATOR_CONFIG_PATH` (default
- * `/app/config/aggregator.config.yaml`). Bulk-row processor reads it
- * to pick the right identity field, item_type, and array delimiter for
- * the active signalstack network.
+ * Loaded once on first use from `AGGREGATOR_CONFIG_PATH`. The bulk row
+ * processor uses it for identity fields, item_type and the array delimiter.
  *
  * @module apps/worker/services/network-config
  */
@@ -16,6 +11,7 @@ import path from 'node:path';
 import { FileNetworkConfigLoader } from '@aggregator-dpg/network-config/loader';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
 import { resolveConfigPath } from '@aggregator-dpg/network-config/paths';
+import { groupWarnings } from '@aggregator-dpg/network-config/warnings';
 import { logger } from '../logger.js';
 
 let cached: ResolvedNetworkConfig | null = null;
@@ -31,10 +27,7 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
     const loader = new FileNetworkConfigLoader({ configPath, cacheDir });
     const result = await loader.load();
     if (!result.success) {
-      const message =
-        'error' in result && typeof result.error === 'object' && result.error
-          ? ((result.error as { message?: string }).message ?? 'unknown error')
-          : 'unknown error';
+      const message = failureMessage(result.error);
       logger.error({
         operation: 'network-config.load',
         status: 'failure',
@@ -44,6 +37,17 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
+    for (const group of groupWarnings(cached.warnings)) {
+      logger.warn(
+        {
+          operation: 'network-config.load',
+          status: 'skipped',
+          finding: group.finding,
+          warnings: group.warnings,
+        },
+        group.message,
+      );
+    }
     logger.info(
       {
         operation: 'network-config.load',
@@ -60,6 +64,21 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
   } finally {
     inflight = null;
   }
+}
+
+/**
+ * Reads the message from a failed load's error.
+ *
+ * @param error - The loader's error value.
+ * @returns The `message` string, or `unknown error` when there is none.
+ */
+function failureMessage(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+    ? error.message
+    : 'unknown error';
 }
 
 /** Test helper. */

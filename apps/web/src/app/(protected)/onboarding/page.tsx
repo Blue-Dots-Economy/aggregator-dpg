@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '../../../components/ui/Button';
 import { Topbar } from '../../../components/shell/Topbar';
+import { ActingBanner } from '@/components/shell/ActingBanner';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../hooks/useProfile';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { useActiveDomain } from '../../../hooks/useActiveDomain';
+import { DomainAccessGate } from '../../../components/access/DomainAccessGate';
+import { ActiveDomainTabs } from '@/components/ui/ActiveDomainTabs';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 import { OnboardingMetrics } from './_components/OnboardingMetrics';
@@ -33,23 +35,28 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      {/* Onboarding summary + joins-by-entry-mode at the top of the page,
-          above the per-flow cards. */}
-      <OnboardingMetrics />
-      <BulkUploadCard />
-      <RegistrationLinkCard />
+      <ActingBanner />
+      <DomainAccessGate>
+        <ActiveDomainTabs className="-mt-2 mb-3" />
+        {/* Onboarding summary and joins by entry mode. */}
+        <OnboardingMetrics />
+        <BulkUploadCard />
+        <RegistrationLinkCard />
+      </DomainAccessGate>
     </div>
   );
 }
 
 /**
- * Summary card for the bulk upload sub-flow. Counts come from the recent
- * uploads list (same hook the detail page uses). Click → /onboarding/bulk-uploads.
+ * Summary card for bulk uploads, linking to /onboarding/bulk-uploads.
+ *
+ * Counts come from the recent uploads list.
  */
 function BulkUploadCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
-  const recent = useRecentBulkUploads(50);
+  const { active } = useActiveDomain();
+  const recent = useRecentBulkUploads(50, active);
   const metrics = useMemo(() => {
     const items = recent.data?.items ?? [];
     let total = 0;
@@ -93,19 +100,16 @@ function BulkUploadCard() {
 }
 
 /**
- * Summary card for the registration link sub-flow. Counts come from the
- * existing links list (scoped to the aggregator's type). Click →
- * /onboarding/links.
+ * Summary card for registration links, linking to /onboarding/links.
+ *
+ * Counts come from the links list for the active domain.
  */
 function RegistrationLinkCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
-  const rawProfile = useProfileRaw();
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Default to the network's first declared domain (networks.json order)
-  // until the profile's scoped type loads.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
-  const links = useRegistrationLinks(aggregatorType);
+  // Counts follow the active domain.
+  const { active } = useActiveDomain();
+  const links = useRegistrationLinks(active ?? '');
   const metrics = useMemo(() => {
     const items = links.data ?? [];
     let total = 0;

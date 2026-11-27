@@ -21,6 +21,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type { ParticipantConsent } from '@/components/consent/consent-types';
 import { RjsfShim } from './publicRegistrationView.testHelpers';
+import { chooseOption } from '@/__tests__/test-utils';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -62,7 +63,7 @@ interface RenderOpts {
  * (when `birthYear` is given) types it into the Year-of-birth select so the
  * view's own `isMinor` derivation reflects it before the submit fires.
  */
-function renderView(opts: RenderOpts) {
+async function renderView(opts: RenderOpts) {
   const domain: Record<string, unknown> = { id: 'seeker', label: 'Seeker' };
   if (opts.showConsent) domain['go_live_required'] = ['schema_required', 'consent_required'];
   if (opts.birthYear !== undefined) domain['guardian_consent_required'] = true;
@@ -98,9 +99,7 @@ function renderView(opts: RenderOpts) {
   );
 
   if (opts.birthYear !== undefined) {
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(opts.birthYear) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(opts.birthYear));
   }
 
   return result;
@@ -109,14 +108,14 @@ function renderView(opts: RenderOpts) {
 // ResizeObserver is stubbed globally in src/__tests__/setup.ts.
 
 describe('<PublicRegistrationView /> consent gate', () => {
-  it('renders no inline consent checkbox on the form', () => {
-    renderView({ showConsent: true });
+  it('renders no inline consent checkbox on the form', async () => {
+    await renderView({ showConsent: true });
     expect(screen.queryByRole('checkbox', { name: /consent/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   it('opens the gate with all three documents when submitting without consent', async () => {
-    renderView({ showConsent: true });
+    await renderView({ showConsent: true });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.getByTestId('consent-node-privacy')).toBeInTheDocument();
@@ -125,7 +124,7 @@ describe('<PublicRegistrationView /> consent gate', () => {
   });
 
   it('never opens the gate for a minor', async () => {
-    renderView({ showConsent: true, birthYear: new Date().getFullYear() - 15 });
+    await renderView({ showConsent: true, birthYear: new Date().getFullYear() - 15 });
     expect(screen.getByText(messages.profile.public_reg.u18_notice)).toBeInTheDocument();
     // The probe short-circuits synchronously when `network` is unset, but
     // still resolves through a promise chain that updates state — flush it
@@ -138,7 +137,7 @@ describe('<PublicRegistrationView /> consent gate', () => {
   });
 
   it('never opens the gate when the domain does not require consent', async () => {
-    renderView({ showConsent: false });
+    await renderView({ showConsent: false });
     await act(async () => {
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await Promise.resolve();
@@ -165,7 +164,7 @@ describe('<PublicRegistrationView /> consent gate', () => {
     }) as unknown as typeof fetch;
 
     try {
-      renderView({ showConsent: true });
+      await renderView({ showConsent: true });
 
       // --- Person #1: complete the gate for real. ---
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
@@ -227,7 +226,7 @@ describe('<PublicRegistrationView /> consent gate', () => {
   });
 
   it('shows a visible error instead of a dead submit when consent copy failed to load', async () => {
-    renderView({ showConsent: true, consentContent: null });
+    await renderView({ showConsent: true, consentContent: null });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(messages.register.consent.load_failed_title)).toBeInTheDocument();

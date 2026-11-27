@@ -203,6 +203,21 @@ describe('LocationAutocompleteWidget', () => {
     expect(onLocationResolved).not.toHaveBeenCalled();
   });
 
+  it('shows a value the form sets from outside, such as a prefill', () => {
+    const props = makeProps();
+    const { rerender } = render(
+      <Wrapper>
+        <LocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    rerender(
+      <Wrapper>
+        <LocationAutocompleteWidget {...({ ...props, value: JAYANAGAR.label } as never)} />
+      </Wrapper>,
+    );
+    expect(screen.getByRole('combobox')).toHaveValue(JAYANAGAR.label);
+  });
+
   it('does not query the geocoder for a query shorter than three characters', async () => {
     render(
       <Wrapper>
@@ -227,6 +242,28 @@ describe('LocationAutocompleteWidget', () => {
 
     await waitFor(() => expect(suggestMock).toHaveBeenCalled());
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('keeps a suggestion row when a newer search drops the rows before it', async () => {
+    const BASAVANAGUDI: GeoSuggestion = {
+      label: 'Basavanagudi, Bengaluru, Karnataka, India',
+      lat: 12.9416,
+      lng: 77.5737,
+    };
+    suggestMock.mockResolvedValueOnce([BASAVANAGUDI, JAYANAGAR]).mockResolvedValueOnce([JAYANAGAR]);
+    render(
+      <Wrapper>
+        <LocationAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+
+    await typeAndAwaitSuggestions('bengaluru');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+    const rowBefore = screen.getByRole('option', { name: JAYANAGAR.label });
+
+    await typeAndAwaitSuggestions('jayanagar');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+    expect(screen.getByRole('option', { name: JAYANAGAR.label })).toBe(rowBefore);
   });
 
   it('commits the keyboard-highlighted option on Enter', async () => {

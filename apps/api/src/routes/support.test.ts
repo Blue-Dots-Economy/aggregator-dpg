@@ -2,9 +2,7 @@
 // `config` (config.ts parses env once, at first import). The unset-flag
 // scenarios live in the sibling `support.disabled.test.ts` file instead of
 // toggling this env var mid-file, since the parsed `config` singleton can't
-// be swapped once app.js has been imported. Mirrors the
-// `aggregator-org-approvals.test.ts` / `.org.test.ts` split for
-// ORG_HIERARCHY_ENABLED.
+// be swapped once app.js has been imported.
 //
 // Multiple TO addresses + a CC address exercise the comma-separated
 // normalisation in `supportEmail()` / `supportCc()` (both read live env).
@@ -17,6 +15,12 @@ import { buildApp } from '../app.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSupportRateChecker } from '../services/support-rate.js';
+import {
+  ActorResolverFake,
+  buildAdminActor,
+  buildCoordinatorActor,
+  _setActorResolver,
+} from '../services/auth/actor/index.js';
 
 /** A complete, valid submission body; override per-test. */
 function validBody(overrides: Record<string, unknown> = {}) {
@@ -43,11 +47,21 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       if (token === 'good-token') {
         return {
           sub: 'u1',
-          aggregator_id: 'agg-9',
+          user_id: 'agg-9',
           email: 'asha@example.com',
           preferred_username: 'Asha K',
           phone_number: '+919000000000',
         };
+      }
+      // An organisation owner signed in to the console: no `user_id`.
+      if (token === 'owner-token') {
+        return { sub: 'owner-sub', email: 'owner@org.com', preferred_username: 'owner@org.com' };
+      }
+      if (token === 'pending-token') {
+        return { sub: 'p1', user_id: 'agg-pending', email: 'p@org.com' };
+      }
+      if (token === 'stranger-token') {
+        return { sub: 'stranger-sub', email: 'x@org.com', preferred_username: 'x@org.com' };
       }
       throw new Error('invalid token');
     });
@@ -61,6 +75,12 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     // limit itself is covered in `support.attachments.test.ts`.
     _setSupportRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
+    const resolver = new ActorResolverFake();
+    resolver.seed('owner-sub', buildAdminActor());
+    resolver.seed('agg-9', buildCoordinatorActor());
+    resolver.seed('agg-pending', buildCoordinatorActor({ active: false }));
+    _setActorResolver(resolver);
+
     app = await buildApp();
   });
 
@@ -69,6 +89,50 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     _setMailer(null);
     _setAccessTokenVerifier(null);
     _setSupportRateChecker(null);
+    _setActorResolver(null);
+  });
+
+  it('lets an organisation owner read the config and send a message', async () => {
+    const config = await app.inject({
+      method: 'GET',
+      url: '/v1/support/config',
+      headers: { authorization: 'Bearer owner-token' },
+    });
+    expect(config.statusCode).toBe(200);
+    expect(config.json()).toMatchObject({ enabled: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer owner-token' },
+      payload: validBody({ name: 'Org Owner', email: 'owner@org.com' }),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mailer.outbox).toHaveLength(1);
+    expect(mailer.outbox[0]!.replyTo).toBe('owner@org.com');
+  });
+
+  it('refuses a coordinator who has not activated yet', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer pending-token' },
+      payload: validBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: { code: 'NOT_APPROVED' } });
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('refuses a token with no user_id that belongs to no account', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer stranger-token' },
+      payload: validBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('sends the support email to all TO + CC recipients and returns 201, with Reply-To + reference', async () => {
@@ -102,7 +166,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       payload: validBody({
         name: 'Different Name',
         email: 'typed@example.com',
-        phone: '+911112223334',
+        phone: '+918012345678',
         type: 'support_request',
       }),
     });
@@ -111,7 +175,7 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
     expect(sent.subject).toContain('Support Request from Different Name');
     expect(sent.replyTo).toBe('typed@example.com');
     expect(sent.text).toContain('typed@example.com');
-    expect(sent.text).toContain('+911112223334');
+    expect(sent.text).toContain('+918012345678');
   });
 
   it('returns 400 when consent is not true and does not send anything', async () => {
@@ -134,6 +198,42 @@ describe('support routes (SUPPORT_EMAIL configured)', () => {
       url: '/v1/support',
       headers: { authorization: 'Bearer good-token' },
       payload: body,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('accepts a landline but refuses a +91 number without 10 digits', async () => {
+    const send = (phone: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/support',
+        headers: { authorization: 'Bearer good-token' },
+        payload: validBody({ phone }),
+      });
+    expect((await send('+911123456789')).statusCode).toBe(201);
+    expect((await send('+91935350600')).statusCode).toBe(400);
+  });
+
+  it('emails the phone in E.164 form, however it was typed', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer good-token' },
+      payload: validBody({ phone: '098765 43210' }),
+    });
+    expect(res.statusCode).toBe(201);
+    const sent = mailer.outbox[0]!;
+    expect(sent.text).toContain('+919876543210');
+    expect(sent.text).not.toContain('098765 43210');
+  });
+
+  it('refuses a phone with letters in it', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/support',
+      headers: { authorization: 'Bearer good-token' },
+      payload: validBody({ phone: '9876543210abc' }),
     });
     expect(res.statusCode).toBe(400);
     expect(mailer.outbox).toHaveLength(0);

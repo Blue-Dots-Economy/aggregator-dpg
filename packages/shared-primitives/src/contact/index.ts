@@ -1,31 +1,28 @@
 /**
  * Contact identity primitives shared by every aggregator process.
  *
- * A contact is one person's reachable identity — name, email, phone — stored
- * once in the `contact` table and referenced by FK (`contact_id`) from every
- * row that belongs to that person (coordinators, org owners). The row id is a
- * deterministic one-way hash of the canonical email + phone, so "does this
- * contact already exist?" is a single keyed lookup / `INSERT … ON CONFLICT`.
+ * A contact is one person's name, email and phone, stored once in the
+ * `contact` table and referenced by `contact_id` from coordinators and org
+ * owners. The id is a deterministic hash of the canonical email + phone.
  *
- * The same formula is implemented in SQL as `contact_id_of(email, phone)`
- * (migration 0025); the golden-vector tests pin the two together. Change one
- * and you must change the other in the same commit.
+ * The SQL function `contact_id_of(email, phone)` uses the same formula. Tests
+ * check that both match. Change both together.
  *
- * The id is PII-derived (an unsalted hash of email + phone can be brute-forced),
- * so it must never be logged, sent to telemetry, or placed in a URL.
+ * The id is derived from PII and can be brute-forced. Never log it, send it to
+ * telemetry, or put it in a URL.
  *
  * @module @aggregator-dpg/shared-primitives
  */
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { normaliseEmail } from '../phone/index.js';
+import { normaliseEmail, STORED_PHONE_REGEX } from '../phone/index.js';
 
 /**
- * Canonical phone shape stored on a contact — exactly what `normalisePhone`
- * produces (`+` then 10–15 digits). Mirrors the SQL `contact_phone_chk`.
+ * Canonical contact phone: `+` then 10–15 digits, as produced by `parsePhone`.
+ * Matches the SQL `contact_phone_chk`.
  */
-export const CONTACT_PHONE_REGEX = /^\+\d{10,15}$/;
+export const CONTACT_PHONE_REGEX = STORED_PHONE_REGEX;
 
 /** Hex sha-256 id shape. Mirrors the SQL `contact_id_hex_chk`. */
 export const CONTACT_ID_REGEX = /^[0-9a-f]{64}$/;
@@ -46,13 +43,9 @@ export type Contact = z.infer<typeof ContactSchema>;
 /**
  * Computes the deterministic contact id for an email + phone pair.
  *
- * Inputs must already be canonical — the email as produced by
- * `normaliseEmail`, the phone as produced by `normalisePhone` (or `null` when
- * the contact has none). The function re-applies the email normalisation so a
- * caller holding a raw address gets the same id the database computes, but it
- * does NOT normalise phones: a bare `9876543210` and `+919876543210` are
- * different inputs and would split one person across two ids, so a
- * non-canonical phone is rejected instead.
+ * The email is normalised here. The phone is not: it must already be
+ * canonical (from `parsePhone`), or `null`. A non-canonical phone is
+ * rejected so one person does not get two ids.
  *
  * @param email - The contact's email address.
  * @param phone - The contact's canonical phone, or `null`/`undefined` when absent.

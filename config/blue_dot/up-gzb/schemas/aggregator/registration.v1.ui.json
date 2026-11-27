@@ -46,9 +46,10 @@
     "ui:autofocus": true
   },
   "type": {
-    "ui:widget": "select",
-    "ui:placeholder": "Select aggregator type",
-    "ui:enumNames": ["Seeker", "Provider", "Service Provider"]
+    "ui:widget": "checkboxes",
+    "items": {
+      "ui:enumNames": ["Seeker", "Provider", "Service Provider"]
+    }
   },
   "sub_org_name": {
     "ui:placeholder": "e.g. GarvSe Centre, Ghaziabad"

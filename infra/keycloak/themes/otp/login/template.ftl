@@ -15,7 +15,11 @@
     says nothing about how it wants to be introduced gets no subtitle, so an
     inherited page cannot silently pick up copy written for a different step.
 -->
-<#macro registrationLayout displayInfo=false displayMessage=true displayRequiredFields=false showAnotherWayIfPresent=true bodyClass="" subtitleKey="">
+<#--
+    `showBack` — render the Back arrow. Pages where going back reopens a form
+    Keycloak has already used (the error page) turn it off.
+-->
+<#macro registrationLayout displayInfo=false displayMessage=true displayRequiredFields=false showAnotherWayIfPresent=true bodyClass="" subtitleKey="" showBack=true>
     <#-- Loop variable `section` is bound by the caller's `<@layout.registrationLayout; section>` syntax. -->
 <!DOCTYPE html>
 <html lang="${locale.currentLanguageTag!'en'}">
@@ -115,6 +119,7 @@
                     </div>
                 </#if>
 
+                <#if showBack>
                 <a href="javascript:history.back()" class="bd-back" aria-label="Back">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -122,6 +127,7 @@
                     </svg>
                     Back
                 </a>
+                </#if>
 
                 <h2 class="bd-title"><#nested "header"></h2>
                 <#if subtitleKey?has_content>
@@ -181,6 +187,7 @@
         </main>
     </div>
     <script src="${url.resourcesPath}/js/blue-dots.js" defer></script>
+    <script src="${url.resourcesPath}/js/switch-account.js" defer></script>
 </body>
 </html>
 </#macro>

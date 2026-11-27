@@ -1,15 +1,14 @@
 /**
- * Protected route group layout.
+ * Layout for the protected coordinator pages.
  *
- * Server Component — runs on every request to a `/(protected)/*` page.
- * If no session is present, redirects to the BFF login endpoint with a
- * `returnTo` query so the user lands back on the deep-linked page after
- * authenticating.
+ * Server Component that runs on every `/(protected)/*` request. Without a
+ * session it redirects to the BFF login with a `returnTo` back to the page.
+ * It passes the session user, `supportEnabled`, and capabilities to the
+ * client `AuthProvider`.
  *
- * Hydrates the client `AuthProvider` with the session snapshot so child
- * client components (Sidebar, etc.) can read user info without an extra
- * fetch. Also fetches `supportEnabled` server-side so the Sidebar's
- * "Contact support" row can be gated without a client round-trip.
+ * An org owner whose session holds an acting account uses these pages as that
+ * coordinator account. When `/me` refuses the account, the layout ends acting
+ * mode and sends the owner to the console with a notice.
  */
 
 import { redirect } from 'next/navigation';
@@ -18,30 +17,14 @@ import type { ReactNode } from 'react';
 import { Sidebar } from '../../components/shell/Sidebar';
 import { AuthProvider } from '../../lib/auth-context';
 import { getSession } from '../../lib/server-session';
-import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '../../lib/jwt';
+import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenUserId } from '../../lib/jwt';
 import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
-import { callApi } from '../../lib/upstream-client';
 import type { User } from '../../types';
-
-/**
- * Fetches whether contact-support is enabled (`SUPPORT_EMAIL` configured
- * upstream) via the aggregator API's `GET /v1/support/config`, reusing the
- * session's access token through `callApi`. Fails safe to `false` on any
- * upstream error, timeout, or unexpected response shape so a support outage
- * only hides the entry point rather than breaking the protected shell.
- *
- * @returns `true` if contact-support should be shown; `false` otherwise.
- */
-async function fetchSupportEnabled(): Promise<boolean> {
-  try {
-    const res = await callApi('/v1/support/config', { method: 'GET' });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { enabled?: unknown };
-    return Boolean(data.enabled);
-  } catch {
-    return false;
-  }
-}
+import { getConsoleActor, type ConsoleActorResult } from '../../lib/console-actor';
+import { fetchSupportEnabled } from '@/lib/support-enabled.server';
+import { ACTING_ENDED_HREF } from '@/lib/acting';
+import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type { SessionData } from '@/lib/session';
 
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -51,45 +34,43 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
   }
 
-  // Refresh token dead = unrecoverable session even if the Redis record
-  // still exists. Force a clean logout flow so the cookie is cleared and
-  // the user lands on /login?reason=expired&return=<path>.
+  // An expired refresh token ends the session. Log out to clear the cookie.
   const now = Date.now();
   if (session.refreshTokenExp && session.refreshTokenExp <= now) {
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
-  // Portal is coordinator-only. A coordinator's token carries `aggregator_id`;
-  // org owners / network admins do not. Gate every protected page on it so a
-  // non-coordinator can never reach the portal even if a session was minted
-  // (e.g. before the callback gate, or via another path). Sign them out with a
-  // clear message rather than showing a data-less, broken shell.
-  if (!tokenAggregatorId(session.accessToken)) {
-    // Classify rather than assume org owner: this gate exists for a session
-    // minted before the callback gate or by another route, and those users are
-    // the same three populations the callback distinguishes (#753). Hardcoding
-    // one reason here told a Signals participant to go looking for approval
-    // emails that do not exist for them.
+  // Only coordinators (tokens with `user_id`) and org owners acting as
+  // their own coordinator account use this portal. Other org owners go to the
+  // console; everyone else is logged out with a reason.
+  const acting = session.actingAccountId !== undefined;
+  if (!acting && !tokenUserId(session.accessToken)) {
     const population = classifyNonCoordinator(
       session.accessToken,
       await resolveSignalsRealmRoles(),
     );
+    if (population === 'org_owner') redirect('/console');
     redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
 
-  const user: User = {
-    id: session.sub,
-    name: session.name ?? session.email ?? session.phone ?? session.sub,
-    org: session.email ?? '',
-    ...(session.email ? { email: session.email } : {}),
-    ...(session.phone ? { phone: session.phone } : {}),
-  };
   const supportEnabled = await fetchSupportEnabled();
+  // Capabilities hide UI the coordinator cannot use. On failure nothing is
+  // hidden; the API still checks every request.
+  const actor = await getConsoleActor();
+  if (acting && !actingActorUsable(actor)) redirect(ACTING_ENDED_HREF);
+  const capabilities = actor.ok ? (actor.me.capabilities ?? null) : null;
+  const user = acting && actor.ok ? accountUser(actor.me) : sessionUser(session);
+  // Acting mode stays visible on a transient `/me` failure; only the org name is missing then.
+  const actingInfo = acting ? { orgName: actor.ok ? coordinatorOrgName(actor.me) : null } : null;
 
   return (
-    <AuthProvider initialUser={user} supportEnabled={supportEnabled}>
-      {/* Column below `lg` (slim menu bar stacked above the page), row from
-          `lg` up (fixed sidebar beside it) — see Sidebar (#793). */}
+    <AuthProvider
+      initialUser={user}
+      supportEnabled={supportEnabled}
+      capabilities={capabilities}
+      acting={actingInfo}
+    >
+      {/* Column layout below `lg`, row layout from `lg` up. */}
       <div className="flex flex-col lg:flex-row min-h-dvh">
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-x-hidden">
@@ -98,4 +79,43 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
       </div>
     </AuthProvider>
   );
+}
+
+/** The shell's user while acting: the coordinator account from `/me`. */
+function accountUser(me: MeResponse): User {
+  const { contact } = me.user;
+  return {
+    id: me.user.id,
+    name: contact.name ?? contact.email,
+    org: contact.email,
+    email: contact.email,
+    ...(contact.phone ? { phone: contact.phone } : {}),
+  };
+}
+
+/** The shell's user from the signed-in session. */
+function sessionUser(session: SessionData): User {
+  return {
+    id: session.sub,
+    name: session.name ?? session.email ?? session.phone ?? session.sub,
+    org: session.email ?? '',
+    ...(session.email ? { email: session.email } : {}),
+    ...(session.phone ? { phone: session.phone } : {}),
+  };
+}
+
+/**
+ * Whether `/me` still answers as the acting coordinator account.
+ *
+ * A refused account, or an answer as anyone else, ends acting mode. Other
+ * failures keep it: the API still checks every request.
+ */
+function actingActorUsable(actor: ConsoleActorResult): boolean {
+  if (actor.ok) return actor.me.kind === 'coordinator';
+  return actor.reason !== 'acting_invalid';
+}
+
+/** The coordinator account's organisation name, for the shell and the onboarding banner; null when unknown. */
+function coordinatorOrgName(me: MeResponse): string | null {
+  return (me.orgs.find((o) => o.org_type === 'aggregator') ?? me.orgs[0])?.name || null;
 }

@@ -19,19 +19,20 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1141.0",
+    "@aws-sdk/client-sesv2": "^3.1151.0",
     "nodemailer": "^10.1.4"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^26.6.3",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

@@ -1,15 +1,9 @@
 /**
- * Lazy voice-provider factory for the worker process (aggregator-dpg#577).
+ * Voice provider factory for the worker app.
  *
- * Returns a singleton {@link VoiceProviderBase} built from `config.RAYA_*`,
- * wired with the fail-closed Raya egress gate (`acquireRayaSlot`) over this
- * process's shared Redis connection. Mirrors `signalstack.ts`'s lazy-init
- * shape, but voice has no "push disabled" opt-out — `CAMPAIGN_VOICE_PROVIDER`
- * always names a provider, so a missing `RAYA_API_KEY` is a hard
- * misconfiguration, not a silent skip: it throws `ConfigError` the first time
- * a voice job actually needs the provider, rather than at process boot (a
- * deployment that never runs a voice campaign shouldn't fail to start over an
- * unset Raya key).
+ * Builds a singleton provider from `config.RAYA_*` with the fail-closed Raya
+ * rate gate on the shared Redis connection. A missing `RAYA_API_KEY` throws on
+ * first use, not at boot.
  *
  * @module @aggregator-dpg/worker
  */
@@ -29,8 +23,7 @@ let provider: VoiceProviderBase | undefined;
  * Returns the singleton voice provider, constructing it on first use.
  *
  * @returns The configured {@link VoiceProviderBase} instance.
- * @throws {ConfigError} If `RAYA_API_KEY` is unset — required to actually
- *   call the provider, even though it's optional at process boot.
+ * @throws {ConfigError} If `RAYA_API_KEY` is unset.
  */
 export function getVoiceProvider(): VoiceProviderBase {
   if (provider) return provider;
@@ -55,7 +48,7 @@ export function getVoiceProvider(): VoiceProviderBase {
   return provider;
 }
 
-/** Test helper — inject a fake or reset to force reconstruction. */
+/** Replaces the provider, for tests. Pass `undefined` to rebuild on next use. */
 export function _setVoiceProvider(p: VoiceProviderBase | undefined): void {
   provider = p;
 }

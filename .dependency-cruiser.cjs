@@ -41,6 +41,7 @@ module.exports = {
         path: '(^|/)src/interface\\.ts$',
       },
       to: {
+        dependencyTypesNot: ['core'],
         pathNot: [
           '^node:', // Node built-ins (node:path, node:fs, …)
           '[/\\\\]node_modules[/\\\\]zod[/\\\\]', // zod

@@ -15,7 +15,7 @@
  * @module @aggregator-dpg/network-config/field-errors
  */
 
-type JsonRecord = Record<string, unknown>;
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /** The subset of an ajv `ErrorObject` this module reads. */
 export interface SchemaIssue {
@@ -42,10 +42,6 @@ const FIELD_ERROR_MESSAGE_MARKER = 'x-error-message';
 /** How many allowed values an enum message lists before eliding (matches Signals). */
 const ENUM_VALUES_SHOWN = 10;
 
-function isPlainObject(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Walks `schema` along a value path and returns the property schemas visited,
  * outermost first. Numeric segments step into `items`.
@@ -54,17 +50,21 @@ function schemaTrail(schema: unknown, segments: string[]): JsonRecord[] {
   const trail: JsonRecord[] = [];
   let node: unknown = schema;
   for (const seg of segments) {
-    if (!isPlainObject(node)) break;
-    if (/^\d+$/.test(seg) && isPlainObject(node.items)) {
-      node = node.items;
-    } else if (isPlainObject(node.properties) && isPlainObject(node.properties[seg])) {
-      node = node.properties[seg];
-    } else {
-      break;
-    }
-    trail.push(node as JsonRecord);
+    const next = childSchema(node, seg);
+    if (!next) break;
+    trail.push(next);
+    node = next;
   }
   return trail;
+}
+
+/** The schema one path segment below `node`, or undefined when there is none. */
+function childSchema(node: unknown, seg: string): JsonRecord | undefined {
+  if (!isPlainObject(node)) return undefined;
+  if (/^\d+$/.test(seg) && isPlainObject(node.items)) return node.items;
+  if (!isPlainObject(node.properties)) return undefined;
+  const prop = node.properties[seg];
+  return isPlainObject(prop) ? prop : undefined;
 }
 
 /** The nearest schema on the trail with a title: an array item has none, its list does. */

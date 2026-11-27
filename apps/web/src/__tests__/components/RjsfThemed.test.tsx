@@ -29,6 +29,7 @@ import { useState, type ReactNode } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import messages from '@/i18n/messages/en.json';
 import { RjsfThemedForm, type RjsfThemedFormProps } from '@/components/forms/RjsfThemed';
+import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -306,6 +307,37 @@ describe('<RjsfThemedForm /> widgets', () => {
     fireEvent.change(input, { target: { value: '' } });
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
     expect(lastCall.formData.tags).toBeUndefined();
+  });
+
+  it('CommaSeparatedArrayWidget: keeps a trailing comma while typing', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { tags: { type: 'array', items: { type: 'string' }, title: 'Tags' } },
+    };
+    const uiSchema: UiSchema = { tags: { 'ui:widget': 'CommaSeparatedArrayWidget' } };
+    render(
+      <Wrapper>
+        <ControlledThemedForm schema={schema} uiSchema={uiSchema} />
+      </Wrapper>,
+    );
+    const input = screen.getByLabelText('Tags');
+    fireEvent.change(input, { target: { value: 'red, ' } });
+    expect((input as HTMLInputElement).value).toBe('red, ');
+  });
+
+  it('CommaSeparatedArrayWidget: shows a list the form sets from outside', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { tags: { type: 'array', items: { type: 'string' }, title: 'Tags' } },
+    };
+    const uiSchema: UiSchema = { tags: { 'ui:widget': 'CommaSeparatedArrayWidget' } };
+    const { rerender } = renderThemed({ schema, uiSchema, formData: { tags: ['a'] } });
+    rerender(
+      <Wrapper>
+        <RjsfThemedForm schema={schema} uiSchema={uiSchema} formData={{ tags: ['x', 'y'] }} />
+      </Wrapper>,
+    );
+    expect((screen.getByLabelText('Tags') as HTMLInputElement).value).toBe('x, y');
   });
 
   it('CheckboxesWidget: renders a MultiSelect for array-of-enum and reports selections', async () => {
@@ -742,5 +774,44 @@ describe('<RjsfThemedForm /> wrapper behaviour', () => {
     expect(onSubmit).toHaveBeenCalled();
     const arg = onSubmit.mock.calls[0]![0];
     expect(arg.formData).toEqual({ name: 'Asha' });
+  });
+});
+
+describe('<RjsfThemedForm /> phone fields', () => {
+  const schemaWith = (pattern?: string): RJSFSchema => ({
+    type: 'object',
+    properties: { phone: { type: 'string', title: 'Phone', ...(pattern ? { pattern } : {}) } },
+  });
+  const hasPhoneBox = () => screen.queryByLabelText('Country code') !== null;
+
+  it('gives the phone box to a field whose pattern takes an Indian number', () => {
+    renderThemed({
+      schema: schemaWith('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9})$'),
+      formData: {},
+      onChange: () => {},
+    });
+    expect(hasPhoneBox()).toBe(true);
+  });
+
+  it('keeps a plain text box when the field has no pattern', () => {
+    renderThemed({ schema: schemaWith(), formData: {}, onChange: () => {} });
+    expect(hasPhoneBox()).toBe(false);
+  });
+
+  it('gives the phone box to a +44 pattern only when GB is configured', () => {
+    const schema = schemaWith('^\\+44[0-9]{10}$');
+    const { unmount } = renderThemed({ schema, formData: {}, onChange: () => {} });
+    expect(hasPhoneBox()).toBe(false);
+    unmount();
+    render(
+      <Wrapper>
+        <FormRuntimeConfigProvider
+          value={{ collegeDataset: 'ka', phoneCountries: 'IN:+91,GB:+44' }}
+        >
+          <RjsfThemedForm schema={schema} formData={{}} onChange={() => {}} />
+        </FormRuntimeConfigProvider>
+      </Wrapper>,
+    );
+    expect(hasPhoneBox()).toBe(true);
   });
 });

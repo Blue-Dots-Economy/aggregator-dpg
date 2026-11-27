@@ -1,25 +1,23 @@
-// Stale-pending cleanup with the org hierarchy ON. Flag must be set before any
-// import that pulls in `config` (read once at import).
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Stale-pending cleanup of orgs.
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorOrgStoreFake,
-  buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
-describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
+describe('cleanup-stale — org prune', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -27,14 +25,18 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    _setAggregatorStore(new AggregatorStoreFake());
-    orgStore = new AggregatorOrgStoreFake();
+    _setUserStore(new UserStoreFake());
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
-        return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
+        return {
+          sub: '3f1c2b9e-0000-4000-8000-00000000b0ff',
+          azp: 'aggregator-bff',
+          preferred_username: 'service-account-aggregator-bff',
+        };
       }
       throw new Error('invalid token');
     });
@@ -44,8 +46,8 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
   });
@@ -63,7 +65,7 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     if (!group.ok) throw new Error('seed group');
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-stale',
         slug: 'stale',
         ownerEmail: 'stale.owner@x.org',
@@ -74,7 +76,7 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
       // A fresh pending org (updated now) that must survive the cutoff.
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-fresh',
         slug: 'fresh',
         ownerEmail: 'fresh@x.org',
@@ -104,9 +106,55 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     expect(idp.getGroup(group.value.id)).toBeUndefined();
   });
 
+  it('keeps the owner KC user when the owner owns another org (0027, F11)', async () => {
+    const owner = await idp.createUser({
+      email: 'two.orgs@x.org',
+      username: 'two.orgs@x.org',
+      phone: '+912222222222',
+      enabled: true,
+    });
+    if (!owner.ok) throw new Error('seed owner');
+    const group = await idp.createGroup('org-stale2', { org_id: 'o-stale2' });
+    if (!group.ok) throw new Error('seed group');
+    // Same owner person: a stale pending org and a live, approved one.
+    orgStore.seed([
+      buildOrganisation({
+        id: 'o-stale2',
+        slug: 'stale2',
+        ownerEmail: 'two.orgs@x.org',
+        ownerKcSub: owner.value.id,
+        kcGroupId: group.value.id,
+        status: 'pending',
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+      buildOrganisation({
+        id: 'o-live2',
+        slug: 'live2',
+        displayName: 'Live Two',
+        ownerEmail: 'two.orgs@x.org',
+        ownerKcSub: owner.value.id,
+        status: 'active',
+        updatedAt: new Date(),
+      }),
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { orgsPrunedIds: string[] }).orgsPrunedIds).toEqual(['o-stale2']);
+    // The stale org and its group go; the owner's KC user stays for the live org.
+    const kept = await idp.findById(owner.value.id);
+    expect(kept.ok && kept.value?.id).toBe(owner.value.id);
+    const live = await orgStore.findById('o-live2');
+    expect(live.ok && live.value?.status).toBe('active');
+  });
+
   it('prunes a stale pending org with no owner KC user on file (ownerKcSub unset)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-no-owner',
         slug: 'no-owner',
         ownerEmail: 'never-signed-in@x.org',
@@ -144,7 +192,7 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     });
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-group-fail',
         slug: 'group-fail',
         ownerEmail: 'group-fail-owner@x.org',
