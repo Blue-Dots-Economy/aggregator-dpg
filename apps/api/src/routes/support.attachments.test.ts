@@ -62,7 +62,7 @@ describe('POST /v1/support — attachments', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good-token') {
-        return { sub: 'u1', aggregator_id: 'agg-9', email: 'asha@example.com' };
+        return { sub: 'u1', user_id: 'agg-9', email: 'asha@example.com' };
       }
       throw new Error('invalid token');
     });
@@ -253,7 +253,7 @@ describe('POST /v1/support — rate limit', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
     _setAccessTokenVerifier(async () => ({
       sub: 'u1',
-      aggregator_id: 'agg-9',
+      user_id: 'agg-9',
       email: 'asha@example.com',
     }));
     mailer = new FakeMailer();

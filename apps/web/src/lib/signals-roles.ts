@@ -2,7 +2,7 @@
  * Which Keycloak realm roles mark a Signals participant.
  *
  * The portal and the Signals app share one realm, so a token without
- * `aggregator_id` may be a valid Signals account. The login screen uses this
+ * `user_id` may be a valid Signals account. The login screen uses this
  * list to say so.
  *
  * The list is read server-side from `aggregator.signals.realm_roles` in the

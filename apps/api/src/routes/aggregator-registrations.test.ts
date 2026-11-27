@@ -156,15 +156,15 @@ describe('POST /v1/user/invite/accept', () => {
     const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
     const body = res.json() as {
-      aggregator_id: string;
+      user_id: string;
       org_slug: string;
       message: string;
     };
-    expect(body.aggregator_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.user_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.org_slug).toMatch(/^trrain-[0-9a-f]{4}$/);
     expect(body.message).toContain('Registration received');
 
-    const stored = await userStore.findById(body.aggregator_id);
+    const stored = await userStore.findById(body.user_id);
     if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
 
     const kcUser = await idp.findByEmail(validBody.contact.email);
@@ -172,7 +172,8 @@ describe('POST /v1/user/invite/accept', () => {
     if (kcUser.ok && kcUser.value) {
       expect(kcUser.value.enabled).toBe(true);
       expect(kcUser.value.emailVerified).toBe(false);
-      expect(kcUser.value.attributes?.aggregator_id?.[0]).toBe(body.aggregator_id);
+      expect(kcUser.value.attributes?.aggregator_id).toBeUndefined();
+      expect(kcUser.value.attributes?.user_id?.[0]).toBe(body.user_id);
       expect(kcUser.value.attributes?.aggregator_type?.[0]).toBe(validBody.type);
       expect(kcUser.value.attributes?.phoneNumber?.[0]).toBe(validBody.contact.phone);
       expect(kcUser.value.attributes?.decision_made?.[0]).toBe('invited');
@@ -188,7 +189,7 @@ describe('POST /v1/user/invite/accept', () => {
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
     expect(consentRow?.subjectType).toBe('user');
-    expect(consentRow?.subjectId).toBe(body.aggregator_id);
+    expect(consentRow?.subjectId).toBe(body.user_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.source).toBe('registration');
@@ -196,6 +197,33 @@ describe('POST /v1/user/invite/accept', () => {
     // different config var) so the recorded version matches what the web layer displayed.
     expect(consentRow?.network).toBe('blue_dot'); // default when AGGREGATOR_NETWORK unset
     expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
+  });
+
+  it.each([['+91 98765 43210'], ['987-654-3210'], ['(987) 654 3210'], ['098765 43210']])(
+    'stores a phone typed as %j as +919876543210',
+    async (typed) => {
+      const res = await acceptInvite({
+        ...validBody,
+        contact: { ...validBody.contact, phone: typed },
+      });
+      expect(res.statusCode).toBe(201);
+      const { user_id } = res.json() as { user_id: string };
+      const stored = await userStore.findById(user_id);
+      expect(stored.ok && stored.value?.contactPhone).toBe('+919876543210');
+      const kcUser = await idp.findByEmail(validBody.contact.email);
+      expect(kcUser.ok && kcUser.value?.attributes?.phoneNumber?.[0]).toBe('+919876543210');
+    },
+  );
+
+  it('400 INVALID_PHONE with the reason for a number outside the deployment countries', async () => {
+    const res = await acceptInvite({
+      ...validBody,
+      contact: { ...validBody.contact, phone: '+44 7911 123456' },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; detail: string } };
+    expect(body.error.code).toBe('INVALID_PHONE');
+    expect(body.error.detail).toBe('phone numbers starting +44 are not accepted');
   });
 
   it('rejects a type that is not one of the network domains (400)', async () => {
@@ -212,12 +240,12 @@ describe('POST /v1/user/invite/accept', () => {
   it('records aggregator consent in the ledger on successful registration', async () => {
     const res = await acceptInvite(validBody);
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const { user_id } = res.json() as { user_id: string };
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     expect(ledgerRows[0]?.subjectType).toBe('user');
-    expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
+    expect(ledgerRows[0]?.subjectId).toBe(user_id);
   });
 
   it('records the resolved AGGREGATOR_NETWORK and AGGREGATOR_BRAND in the consent ledger', async () => {
@@ -312,7 +340,7 @@ describe('POST /v1/user/invite/accept', () => {
     await idp.createUser({
       email: 'someone-else@trrain.org',
       phone: '+919876543210',
-      attributes: { aggregator_id: 'other-agg' },
+      attributes: { user_id: 'other-agg' },
     });
     const res = await acceptInvite({
       ...validBody,
@@ -400,7 +428,7 @@ describe('POST /v1/user/invite/accept', () => {
       phone: '+919876543210',
       enabled: false,
       attributes: {
-        aggregator_id: id,
+        user_id: id,
         aggregator_type: 'seeker',
         phoneNumber: '+919876543210',
         decision_made: overrides?.status === 'inactive' ? 'rejected' : 'pending',
@@ -534,8 +562,8 @@ describe('POST /v1/user/invite/accept', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const { aggregator_id } = res.json() as { aggregator_id: string };
-    const stored = await userStore.findById(aggregator_id);
+    const { user_id } = res.json() as { user_id: string };
+    const stored = await userStore.findById(user_id);
     if (stored.ok && stored.value) {
       const validTill = new Date(stored.value.consent?.valid_till ?? 0).getTime();
       const now = Date.now();
@@ -545,7 +573,7 @@ describe('POST /v1/user/invite/accept', () => {
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
     // What the ledger row itself stores (0029: the only home of consent).
-    const row = consentLedger.list().find((r) => r.subjectId === aggregator_id);
+    const row = consentLedger.list().find((r) => r.subjectId === user_id);
     const ledgerTill = row?.validTill?.getTime() ?? 0;
     const fiveYears = 5 * 365 * 24 * 60 * 60 * 1000;
     expect(ledgerTill).toBeGreaterThan(Date.now() + fiveYears - 60_000);

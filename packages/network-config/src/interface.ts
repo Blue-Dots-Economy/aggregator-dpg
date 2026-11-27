@@ -14,7 +14,7 @@
 
 import { z } from 'zod';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import { normaliseContactPhone } from '@aggregator-dpg/shared-primitives/phone';
+import { ALL_PHONE_COUNTRIES, parsePhone } from '@aggregator-dpg/shared-primitives/phone';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 // ─── Coordinator YAML schema ──────────────────────────────────────────────────
@@ -356,7 +356,7 @@ export const VoiceBotSchema = z.object({
   key: VoiceBotKey,
   display_name: z.string().min(1),
   phone: z.string().transform((raw, ctx) => {
-    const normalised = normaliseContactPhone(raw);
+    const normalised = parsePhone(raw, { countries: ALL_PHONE_COUNTRIES, kind: 'any' }); // any country; bots may be landlines
     if (!normalised.ok) {
       ctx.addIssue({ code: 'custom', message: normalised.error.message });
       return z.NEVER;

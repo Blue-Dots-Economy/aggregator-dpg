@@ -94,6 +94,15 @@ describe('<MinimalIdentityForm />', () => {
     expect(screen.getByText(`Invalid entry. ${errors.phone_invalid}`)).toBeInTheDocument();
   });
 
+  it('accepts a landline-range number, since it may identify someone already registered', async () => {
+    renderForm();
+    await fillCommon(screen.getByLabelText.bind(screen));
+    const phone = screen.getByLabelText(/Phone/);
+    fireEvent.change(phone, { target: { value: '8020123456' } });
+    fireEvent.blur(phone);
+    expect(screen.queryByText(`Invalid entry. ${errors.phone_invalid}`)).toBeNull();
+  });
+
   it('shows an invalid email under the field once it is left', async () => {
     renderForm();
     await fillCommon(screen.getByLabelText.bind(screen));

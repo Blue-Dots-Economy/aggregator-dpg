@@ -32,7 +32,7 @@ export function QrCode({ size = 180 }: QrCodeProps) {
     </g>
   );
   return (
-    <svg width={size} height={size} viewBox="0 0 126 126" className="rounded-md">
+    <svg width={size} height={size} viewBox="0 0 126 126" className="rounded-md" aria-hidden="true">
       <rect width="126" height="126" fill="#fff" />
       {cells}
       <rect x="0" y="0" width="42" height="42" fill="#fff" />

@@ -34,7 +34,8 @@ import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
-import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
+import { parseKnownPhone, phoneForSchema } from '../services/phone.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -100,6 +101,29 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
 
+  // Identity field names come from the network config.
+  const networkCfg = await getNetworkConfig();
+  const domainCfg = networkCfg.domains[job.participantType];
+  if (!domainCfg) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
+      },
+      log,
+    );
+  }
+
+  // 1a. Check the phone; it is written back in the schema's form once the schema loads.
+  const phoneSourceKey = domainCfg.identity.phone;
+  const { phone: phoneNormalised, failure: phoneFailure } = checkRowPhone(
+    job.payload,
+    phoneSourceKey,
+  );
+  if (phoneFailure) return await commit(job, phoneFailure, log);
+
   // 1. Schema validation. Load the schema too, so array cells can be split
   // before Ajv runs; Ajv does not split delimited strings.
   const ref = { id: job.schemaId, version: job.schemaVersion };
@@ -119,13 +143,31 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       log,
     );
   }
+  // The schema is needed too: the phone is written back in the form its pattern takes.
+  if (!schemaResult.success) {
+    return await commit(
+      job,
+      {
+        outcome: 'failed',
+        category: 'system_error',
+        reasons: [`schema_load_failed: ${schemaResult.error.code}`],
+      },
+      log,
+    );
+  }
+  // 1a, continued. A spaced or dashed phone would fail the pattern, and networks that
+  // store bare digits need the number without its code.
+  if (phoneNormalised) {
+    job.payload[phoneSourceKey] = phoneForSchema(
+      phoneNormalised,
+      schemaResult.value,
+      phoneSourceKey,
+    );
+  }
   // 1b. Remove the well-known geo column before Ajv runs. It is not a schema
   // property, so it would fail `additionalProperties: false` and would leak
   // into `item_state`. If the schema declares the column itself, leave it.
-  const schemaOwnsGeo = schemaOwnsColumn(
-    schemaResult.success ? schemaResult.value : null,
-    GEO_LOCATION_COLUMN,
-  );
+  const schemaOwnsGeo = schemaOwnsColumn(schemaResult.value, GEO_LOCATION_COLUMN);
   const geoRaw = schemaOwnsGeo ? undefined : job.payload[GEO_LOCATION_COLUMN];
   if (!schemaOwnsGeo) delete job.payload[GEO_LOCATION_COLUMN];
   const geo = parseGeoLocation(geoRaw);
@@ -140,24 +182,21 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     });
   }
 
-  if (schemaResult.success) {
-    const cfg = await getNetworkConfig();
-    preprocessArrayCells(
-      job.payload,
-      schemaResult.value,
-      cfg.aggregator.network.csv_array_delimiter,
-    );
-    // Drop empty cells so Ajv does not fail type/enum/length checks on
-    // fields the operator left blank. Signals accepts partial item_state.
-    stripAllEmptyCells(job.payload);
-  }
+  preprocessArrayCells(
+    job.payload,
+    schemaResult.value,
+    networkCfg.aggregator.network.csv_array_delimiter,
+  );
+  // Drop empty cells so Ajv does not fail type/enum/length checks on
+  // fields the operator left blank. Signals accepts partial item_state.
+  stripAllEmptyCells(job.payload);
 
   // Missing required fields do not fail the row; Signals stores it as a
   // draft. Type, format, pattern and enum errors do fail the row, since
   // Signals would reject them too.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
-    const rowSchema = schemaResult.success ? schemaResult.value : undefined;
+    const rowSchema = schemaResult.value;
     const issues = blockingIssues(validate.errors ?? []);
     if (issues.length > 0) {
       const delimiter = (await getNetworkConfig()).aggregator.network.csv_array_delimiter;
@@ -183,40 +222,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
-  // Identity field names come from the network config.
-  const networkCfg = await getNetworkConfig();
-  const domainCfg = networkCfg.domains[job.participantType];
-  if (!domainCfg) {
-    return await commit(
-      job,
-      {
-        outcome: 'failed',
-        category: 'system_error',
-        reasons: [`unknown domain '${job.participantType}' for network ${networkCfg.network.id}`],
-      },
-      log,
-    );
-  }
-  const phoneSourceKey = domainCfg.identity.phone;
   const emailSourceKey = domainCfg.identity.email;
-  const phoneRaw = stringCell(job.payload, phoneSourceKey) ?? '';
-  let phoneNormalised: string | null = null;
-  if (phoneRaw) {
-    const phone = normalisePhone(phoneRaw);
-    if (!phone.ok) {
-      return await commit(
-        job,
-        {
-          outcome: 'failed',
-          category: 'normalisation',
-          reasons: [`phone: ${phone.error.message}`],
-          advice: [adviceForPhone(phoneSourceKey)],
-        },
-        log,
-      );
-    }
-    phoneNormalised = phone.value;
-  }
   // Some domains have no email field.
   const emailNormalised = normaliseEmail(
     emailSourceKey ? (stringCell(job.payload, emailSourceKey) ?? null) : null,
@@ -363,6 +369,8 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   // through the portal, so the operator removes the row.
   U18_NOT_ALLOWED: 'validation',
   LOCATION_OUTSIDE_COUNTRY: 'validation',
+  // A new person's phone that is not a mobile in PHONE_COUNTRIES.
+  INVALID_PHONE: 'validation',
   // The person already exists in another domain or with a clashing identity.
   DOMAIN_LOCKED: 'duplicate',
   USER_ALREADY_EXISTS: 'duplicate',
@@ -512,10 +520,11 @@ export async function pushToSignalStack(
   if (!ss) return { success: true };
 
   // The worker has no JWT, so read the aggregator's Signals org id from the DB.
+  const { userId } = job;
   const orgIdRow = await getDb()
     .select({ signalstackOrgId: schema.users.signalstackOrgId })
     .from(schema.users)
-    .where(eq(schema.users.id, job.aggregatorId))
+    .where(eq(schema.users.id, userId))
     .limit(1);
   const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
   if (!signalstackOrgId) {
@@ -523,7 +532,7 @@ export async function pushToSignalStack(
       status: 'failure',
       sub: 'signalstack.push',
       code: 'SIGNALSTACK_ORG_NOT_REGISTERED',
-      aggregator_id: job.aggregatorId,
+      aggregator_id: userId,
     });
     return {
       success: false,
@@ -551,10 +560,8 @@ export async function pushToSignalStack(
     };
   }
   const nameSourceKey = domainCfg.identity.name;
-  const phoneSourceKey = domainCfg.identity.phone;
   const name = stringCell(job.payload, nameSourceKey) ?? participantId;
-  const phoneFromBody = stringCell(job.payload, phoneSourceKey) ?? phone;
-  const pushPhone = phone ?? phoneFromBody;
+  const pushPhone = phone;
   // The bulk CSV has no per-row consent column. Consent is sent only via
   // `compliance`, which Signals treats as accept-only: a `false` value is
   // rejected with CONSENT_DECLINED.
@@ -734,6 +741,30 @@ async function bumpHeartbeat(uploadId: string): Promise<void> {
 function stringCell(payload: Record<string, unknown>, key: string): string | undefined {
   const value = payload[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Checks a row's phone cell.
+ *
+ * @returns The phone in E.164 form (null for a blank cell), or the failed outcome to commit.
+ */
+function checkRowPhone(
+  payload: Record<string, unknown>,
+  key: string,
+): { phone: string | null; failure: RowOutcome | null } {
+  const raw = stringCell(payload, key)?.trim();
+  if (!raw) return { phone: null, failure: null };
+  const phone = parseKnownPhone(raw);
+  if (phone.ok) return { phone: phone.value, failure: null };
+  return {
+    phone: null,
+    failure: {
+      outcome: 'failed',
+      category: 'normalisation',
+      reasons: [`phone: ${phone.error.message}`],
+      advice: [adviceForPhone(key)],
+    },
+  };
 }
 
 /** True for a plain JSON object (not null, not an array). */

@@ -121,6 +121,7 @@ vi.mock('../config.js', () => ({
     SIGNALSTACK_ITEM_NETWORK: 'blue_dot',
     LOG_LEVEL: 'silent',
     NODE_ENV: 'test',
+    PHONE_COUNTRIES: ['IN'],
   },
 }));
 
@@ -179,7 +180,7 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
 function makeJob(overrides: Partial<BulkRowProcessJob> = {}): BulkRowProcessJob {
   return {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
@@ -275,6 +276,37 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     expect(result.reasons[0]).toContain('schema_load_failed: SCHEMA_NOT_FOUND');
   });
 
+  it('fails when only the schema fails to load, rather than guessing the phone form', async () => {
+    schemaResultVal = { success: false, error: { code: 'SCHEMA_NOT_FOUND' } };
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('system_error');
+    expect(result.reasons[0]).toContain('schema_load_failed: SCHEMA_NOT_FOUND');
+  });
+
+  it('passes a landline-range number on to Signals, which knows whether the person exists', async () => {
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+918020123456' } }),
+    );
+    expect(result.outcome).toBe('passed');
+  });
+
+  it("gives Signals' reason for an out-of-country number in errors.csv", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_PHONE: phone numbers starting +44 are not accepted',
+        'phone numbers starting +44 are not accepted',
+        { code: 'INVALID_PHONE' },
+      ),
+    );
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+447400123456' } }),
+    );
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['phone numbers starting +44 are not accepted']);
+  });
+
   it('fails a row with a blocking (non-required) schema validation error', async () => {
     validatorResult = {
       success: true,
@@ -306,6 +338,40 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     expect(result.reasons[0]).toContain("unknown domain 'ghost'");
   });
 
+  it('cleans a spaced or dashed phone before the schema check sees it', async () => {
+    const seen: unknown[] = [];
+    const validate = ((data: Record<string, unknown>) => {
+      seen.push(data['phone']);
+      return true;
+    }) as FakeValidate;
+    validate.errors = null;
+    validatorResult = { success: true, value: validate };
+    for (const phone of ['+91 98765 43210', '+91-98765-43210', '(98765) 43210']) {
+      const result = await processBulkRow(makeJob({ payload: { name: 'Asha', phone } }));
+      expect(result.outcome).toBe('passed');
+    }
+    expect(seen).toEqual(['+919876543210', '+919876543210', '+919876543210']);
+  });
+
+  it('writes the bare number where the schema stores bare digits', async () => {
+    const seen: unknown[] = [];
+    const validate = ((data: Record<string, unknown>) => {
+      seen.push(data['phone']);
+      return true;
+    }) as FakeValidate;
+    validate.errors = null;
+    validatorResult = { success: true, value: validate };
+    schemaResultVal = {
+      success: true,
+      value: { required: [], properties: { phone: { type: 'string', pattern: '^[0-9]{10}$' } } },
+    };
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '+91 98765 43210' } }),
+    );
+    expect(result.outcome).toBe('passed');
+    expect(seen).toEqual(['9876543210']);
+  });
+
   it('fails on an unnormalisable phone number', async () => {
     const result = await processBulkRow(
       makeJob({ payload: { name: 'Asha', phone: '123', email: 'a@x.com' } }),
@@ -326,6 +392,42 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     expect(result.reasons).toEqual(['phone: is required']);
     expect(result.advice?.[0]).toMatch(/^Fill in the "phone"/);
     expect(writer.inputs).toHaveLength(0);
+  });
+});
+
+describe('processBulkRow — a network that takes only + numbers', () => {
+  beforeEach(() => {
+    schemaResultVal = {
+      success: true,
+      value: {
+        required: [],
+        properties: { phone: { type: 'string', pattern: '^\\+[1-9][0-9]{9,14}$' } },
+      },
+    };
+  });
+
+  it.each(['9876543210', '+91 98765 43210', '919876543210', '09876543210'])(
+    'sends %s to Signals as +919876543210, as the login phone and in the profile',
+    async (typed) => {
+      const writer = new RecordingSignalStackWriter();
+      _setSignalStackWriter(writer);
+      const result = await processBulkRow(makeJob({ payload: { name: 'Asha', phone: typed } }));
+      expect(result.outcome).toBe('passed');
+      expect(writer.inputs).toHaveLength(1);
+      expect(writer.inputs[0]?.phoneNumber).toBe('+919876543210');
+      expect(writer.inputs[0]?.profile['phone']).toBe('+919876543210');
+    },
+  );
+
+  it('sends no phone for an empty cell when the row has an email', async () => {
+    const writer = new RecordingSignalStackWriter();
+    _setSignalStackWriter(writer);
+    const result = await processBulkRow(
+      makeJob({ payload: { name: 'Asha', phone: '', email: 'asha@example.com' } }),
+    );
+    expect(result.outcome).toBe('passed');
+    expect(writer.inputs[0]?.phoneNumber).toBeUndefined();
+    expect(writer.inputs[0]?.profile['phone']).toBeFalsy();
   });
 });
 
@@ -562,10 +664,7 @@ describe('pushToSignalStack — direct-call edge cases not reachable through pro
     expect(result.success).toBe(true);
   });
 
-  it('overrides an empty/missing raw phone cell with the already-normalised pushPhone', async () => {
-    // domainCfg.identity.phone === 'phone'; omit it from the payload entirely
-    // so buildSignalStackItemState's override branch (rawPhone undefined,
-    // pushPhone truthy) is exercised.
+  it('fills a missing phone cell with the cleaned phone', async () => {
     const result = await pushToSignalStack(
       { ...job, payload: { name: 'Asha' } },
       'pid-phone-override',

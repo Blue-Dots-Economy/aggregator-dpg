@@ -57,6 +57,13 @@ jobs:
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
+      - name: Phone test cases match bluedots-schemas
+        shell: bash # -o pipefail, so a failed download fails the step
+        run: >-
+          curl -fsS --proto '=https' --tlsv1.2 --retry 3
+          https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/main/schemas/phone-cases.json
+          | diff - packages/shared-primitives/src/__tests__/fixtures/phone-cases.json
+
   typecheck:
     permissions:
       contents: read
@@ -404,10 +411,10 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: aggregator-${{ matrix.app }}:pr
-          # Shares the gha cache scope with build-images.yml, so this is usually
-          # a warm build rather than a second cold one.
+          # Reads the cache but does not write it: `COPY . .` sits before the
+          # install, so a PR reuses almost nothing from it, and exporting it
+          # (mode=max) took about 50s of each build.
           cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 
       - name: Explain the skip
         if: env.DOCKERHUB_TOKEN == ''

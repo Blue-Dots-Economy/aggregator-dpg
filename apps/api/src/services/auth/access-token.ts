@@ -17,6 +17,7 @@ import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { readUserIdClaim } from '@aggregator-dpg/shared-primitives/user-id-claim';
 import { recordLoginIdentity } from '../identity-store/record.js';
 import type { Coordinator } from '../user-store/interface.js';
 import { logActing, readActingHeader, resolveActingAccount } from './acting.js';
@@ -26,10 +27,10 @@ let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
 export interface AuthContext {
-  /** Keycloak `sub` claim — stable user id. */
+  /** Keycloak `sub` claim: the login's stable id (not `users.id`). */
+  subject: string;
+  /** The `user_id` claim: the user's `users.id`. */
   userId: string;
-  /** Custom claim mapped from the `aggregator_id` user attribute. */
-  aggregatorId: string;
   /**
    * The profile types the coordinator serves, from the multivalued
    * `aggregator_type` claim; `[]` when absent. Set when the token is issued; a
@@ -71,7 +72,7 @@ export interface AuthContext {
 export type AuthError =
   | { code: 'MISSING_TOKEN'; message: string }
   | { code: 'INVALID_TOKEN'; message: string }
-  | { code: 'MISSING_AGGREGATOR_ID'; message: string }
+  | { code: 'MISSING_USER_ID'; message: string }
   | { code: 'NOT_APPROVED'; message: string }
   /** `x-acting-account` names an account this login may not act as (403). */
   | { code: 'ACTING_ACCOUNT_INVALID'; message: string }
@@ -94,9 +95,9 @@ export interface AnyAuthContext {
    * `azp` and `sub` cannot.
    */
   preferredUsername?: string;
-  /** Whether this token is bound to an end user (has `aggregator_id`). */
+  /** Whether this token is bound to an end user (has `user_id`). */
   isUser: boolean;
-  aggregatorId?: string;
+  userId?: string;
   email?: string;
 }
 
@@ -121,9 +122,9 @@ export async function authenticate(
   const verified = await verifyRequest(req, opts);
   if (!verified.ok) return verified;
   const { sub, payload } = verified;
-  const aggregatorId = readAggregatorId(payload);
-  if (!aggregatorId) return missingAggregatorId();
-  return { ok: true, context: hydrateContext(sub, aggregatorId, payload) };
+  const claim = readUserIdClaim(payload);
+  if (claim.kind === 'absent') return missingUserId();
+  return { ok: true, context: hydrateContext(sub, claim.userId, payload) };
 }
 
 /** A verified Bearer token: its `sub` and claims. */
@@ -169,10 +170,10 @@ async function verifyRequest(
   return { ok: true, sub: payload.sub, payload };
 }
 
-function missingAggregatorId(): AuthResult {
+function missingUserId(): AuthResult {
   return {
     ok: false,
-    error: { code: 'MISSING_AGGREGATOR_ID', message: 'token has no aggregator_id claim' },
+    error: { code: 'MISSING_USER_ID', message: 'token has no user_id claim' },
   };
 }
 
@@ -183,16 +184,16 @@ function actingInvalid(message: string): AuthResult {
 /**
  * Builds an {@link AuthContext} from a verified token's optional claims.
  *
- * @param userId - The token `sub`.
- * @param aggregatorId - The resolved `aggregator_id`.
+ * @param subject - The token `sub`.
+ * @param userId - The user's `users.id`, from the `user_id` claim.
  * @param payload - The verified JWT payload.
  * @returns The auth context; optional fields set only when present.
  */
-function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
+function hydrateContext(subject: string, userId: string, payload: JWTPayload): AuthContext {
   const claims: Record<string, unknown> = payload;
   const ctx: AuthContext = {
+    subject,
     userId,
-    aggregatorId,
     serves: readStringList(claims.aggregator_type),
     ...identityOf(payload),
   };
@@ -280,8 +281,8 @@ async function actingContext(
   logActing(null);
   const row = acting.value;
   const ctx: AuthContext = {
-    userId: sub,
-    aggregatorId: row.id,
+    subject: sub,
+    userId: row.id,
     serves: row.serves,
     decisionMade: decisionOf(row.status),
     ...identityOf(payload),
@@ -309,14 +310,15 @@ export async function authenticateAllowingActing(req: FastifyRequest): Promise<A
     logActing('MALFORMED');
     return actingInvalid('x-acting-account is not an account id');
   }
-  const claimed = readAggregatorId(payload);
-  if (!claimed) {
-    if (acting.kind === 'absent') return missingAggregatorId();
+  const claim = readUserIdClaim(payload);
+  if (claim.kind === 'absent') {
+    if (acting.kind === 'absent') return missingUserId();
     return actingContext(sub, acting.id, payload);
   }
+  const claimed = claim.userId;
   if (acting.kind === 'account' && acting.id !== claimed.toLowerCase()) {
     logActing('CLAIM_MISMATCH');
-    return actingInvalid('x-acting-account differs from the token aggregator_id');
+    return actingInvalid('x-acting-account differs from the token user_id');
   }
   return { ok: true, context: hydrateContext(sub, claimed, payload) };
 }
@@ -332,7 +334,7 @@ export async function authenticateAllowingActing(req: FastifyRequest): Promise<A
  * logged and do not block the request.
  *
  * An org owner may act as its own coordinator account by sending
- * `x-acting-account` with a token that has no `aggregator_id`. The account
+ * `x-acting-account` with a token that has no `user_id`. The account
  * must be the coordinator linked to this login, the login must also hold an
  * admin account, and the coordinator and its org must be active. The context
  * then comes from the coordinator row, and neither the backfill nor the
@@ -364,11 +366,7 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
     await backfillSignalstackOrgId(result.context);
   }
   // Record the coordinator's IdP login once per process per user; best-effort.
-  await recordLoginIdentity(
-    result.context.aggregatorId,
-    result.context.userId,
-    'auth.recordIdentity',
-  );
+  await recordLoginIdentity(result.context.userId, result.context.subject, 'auth.recordIdentity');
   return result;
 }
 
@@ -382,8 +380,8 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   const start = Date.now();
   const log = logger.child({
     operation: 'auth.backfillSignalstackOrgId',
-    aggregator_id: ctx.aggregatorId,
-    user_id: ctx.userId,
+    aggregator_id: ctx.userId,
+    subject: ctx.subject,
   });
 
   const signalstack = getSignalStackWriter();
@@ -393,7 +391,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   }
 
   const store = getUserStore();
-  const found = await store.findById(ctx.aggregatorId);
+  const found = await store.findById(ctx.userId);
   if (!found.ok) {
     log.warn(
       { status: 'failure', sub_operation: 'userStore.findById', code: found.error.code },
@@ -421,7 +419,7 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     );
   }
   const upsert = await signalstack.upsertAggregator({
-    external_id: ctx.aggregatorId,
+    external_id: ctx.userId,
     name: found.value.name,
     slug: found.value.orgSlug,
     ...(served.length > 0 ? { domains: served } : {}),
@@ -446,8 +444,8 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   // column (read by the worker and public-link submit). The context is updated
   // in memory for the current request.
   const [attr, dbWrite] = await Promise.all([
-    idp.setAttributes(ctx.userId, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
-    store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.userId),
+    idp.setAttributes(ctx.subject, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
+    store.updateSignalstackOrgId(ctx.userId, orgId, ctx.subject),
   ]);
   if (!attr.ok) {
     log.warn(
@@ -486,7 +484,8 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
 }
 
 /**
- * Verifies the Bearer token without requiring an `aggregator_id` claim.
+ * Verifies the Bearer token without requiring a `user_id`
+ * claim. A token whose two claims differ is still refused.
  *
  * Use on routes reached through the BFF, which attaches a service-account
  * token for anonymous callers. Accepts user and service tokens; handlers can
@@ -527,17 +526,18 @@ export async function authenticateAny(
     return { ok: false, error: { code: 'INVALID_TOKEN', message: 'missing sub claim' } };
   }
   const claims = payload as Record<string, unknown>;
-  const aggregatorId = readAggregatorId(payload);
+  const claim = readUserIdClaim(payload);
+  const userId = claim.kind === 'present' ? claim.userId : undefined;
   const ctx: AnyAuthContext = {
     subject: payload.sub,
-    isUser: Boolean(aggregatorId),
+    isUser: Boolean(userId),
   };
   if (typeof claims.azp === 'string') ctx.authorizedParty = claims.azp;
   if (typeof claims.client_id === 'string') ctx.clientId = claims.client_id;
   if (typeof claims.preferred_username === 'string') {
     ctx.preferredUsername = claims.preferred_username;
   }
-  if (aggregatorId) ctx.aggregatorId = aggregatorId;
+  if (userId) ctx.userId = userId;
   if (typeof claims.email === 'string') ctx.email = claims.email;
   return { ok: true, context: ctx };
 }
@@ -556,14 +556,6 @@ function readStringList(v: unknown): string[] {
 function readStringOrFirst(v: unknown): string | undefined {
   if (typeof v === 'string' && v.length > 0) return v;
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
-  return undefined;
-}
-
-function readAggregatorId(payload: JWTPayload): string | undefined {
-  // A mapper may publish the attribute as a string or a one-element array.
-  const direct = (payload as Record<string, unknown>).aggregator_id;
-  if (typeof direct === 'string' && direct.length > 0) return direct;
-  if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
   return undefined;
 }
 

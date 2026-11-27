@@ -115,7 +115,7 @@ async function activateCoordinator(
   if (org === null) return { kind: 'org_inactive' };
 
   const outcome = await approveCoordinator({
-    aggregatorId: row.id,
+    userId: row.id,
     decidedBy: `invite:${org.ownerUserId}`,
     requestId,
     log,
@@ -262,9 +262,9 @@ export async function activateInvitedAccount(
   }
   if (!kc.value) return refused(scoped, { kind: 'not_found' }, { reason: 'no_idp_user' });
 
-  const aggregatorId = kc.value.attributes?.[KC_ATTR.AGGREGATOR_ID]?.[0];
-  if (aggregatorId) {
-    const row = await getUserStore().findById(aggregatorId);
+  const userId = kc.value.attributes?.[KC_ATTR.USER_ID]?.[0];
+  if (userId) {
+    const row = await getUserStore().findById(userId);
     if (!row.ok) {
       return refused(
         scoped,
@@ -276,7 +276,7 @@ export async function activateInvitedAccount(
       return refused(
         scoped,
         { kind: 'not_found' },
-        { reason: 'no_coordinator', aggregator_id: aggregatorId },
+        { reason: 'no_coordinator', aggregator_id: userId },
       );
     }
     return activateCoordinator(row.value, kc.value, scoped, requestId);

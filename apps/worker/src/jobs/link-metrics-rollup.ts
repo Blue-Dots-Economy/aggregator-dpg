@@ -19,7 +19,7 @@ import { logger } from '../logger.js';
 const BATCH_SIZE = 1000;
 
 interface BucketKey {
-  aggregatorId: string;
+  userId: string;
   orgSlug: string;
   linkId: string;
   hourBucketIso: string;
@@ -47,7 +47,7 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     .select({
       id: schema.linkSubmissions.id,
       linkId: schema.linkSubmissions.linkId,
-      aggregatorId: schema.linkSubmissions.userId,
+      userId: schema.linkSubmissions.userId,
       orgSlug: schema.users.signalstackOrgSlug,
       outcome: schema.linkSubmissions.outcome,
       createdAt: schema.linkSubmissions.createdAt,
@@ -67,12 +67,12 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
   const buckets = new Map<string, { key: BucketKey; totals: BucketTotals }>();
   for (const row of rows) {
     const bucketStart = startOfHour(row.createdAt);
-    const cacheKey = `${row.aggregatorId}|${row.linkId}|${bucketStart.toISOString()}`;
+    const cacheKey = `${row.userId}|${row.linkId}|${bucketStart.toISOString()}`;
     let entry = buckets.get(cacheKey);
     if (!entry) {
       entry = {
         key: {
-          aggregatorId: row.aggregatorId,
+          userId: row.userId,
           orgSlug: row.orgSlug,
           linkId: row.linkId,
           hourBucketIso: bucketStart.toISOString(),
@@ -95,7 +95,7 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     await getDb()
       .insert(schema.onboarding)
       .values({
-        userId: key.aggregatorId,
+        userId: key.userId,
         signalstackOrgSlug: key.orgSlug,
         source: 'link',
         batchId: null,

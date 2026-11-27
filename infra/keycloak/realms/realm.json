@@ -32,7 +32,7 @@
   "attributes": {
     "phoneDefaultRegion": "IN",
     "userProfileEnabled": "true",
-    "kc.user.profile.config": "{\"unmanagedAttributePolicy\":\"ENABLED\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"required\":{\"roles\":[\"user\"]}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumber\",\"displayName\":\"Phone Number\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumberVerified\",\"displayName\":\"Phone Number Verified\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"aggregator_id\",\"displayName\":\"Aggregator id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"decision_made\",\"displayName\":\"Registration decision\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"aggregator_type\",\"displayName\":\"Profile types\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":true},{\"name\":\"signalstack_org_id\",\"displayName\":\"Signals organisation id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}]}"
+    "kc.user.profile.config": "{\"unmanagedAttributePolicy\":\"ENABLED\",\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"displayName\":\"${email}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"required\":{\"roles\":[\"user\"]}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumber\",\"displayName\":\"Phone Number\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"phoneNumberVerified\",\"displayName\":\"Phone Number Verified\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"user_id\",\"displayName\":\"User id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"decision_made\",\"displayName\":\"Registration decision\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"aggregator_type\",\"displayName\":\"Profile types\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":true},{\"name\":\"signalstack_org_id\",\"displayName\":\"Signals organisation id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}]}"
   },
   "smtpServer": {
     "host": "__SMTP_HOST__",
@@ -174,7 +174,7 @@
     },
     {
       "alias": "aggregator-portal-gate-otp-entitled",
-      "description": "Deny before OTP dispatch: neither a coordinator (no aggregator_id) nor an org owner (no org_owner role). Conditions are ANDed; runs after otp-identifier-form sets the user.",
+      "description": "Deny before OTP dispatch: neither a coordinator (no user_id) nor an org owner (no org_owner role). Conditions are ANDed; runs after otp-identifier-form sets the user.",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -184,7 +184,7 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
-          "authenticatorConfig": "aggregator-portal-cond-no-aggregator-id"
+          "authenticatorConfig": "aggregator-portal-cond-no-user-id"
         },
         {
           "authenticator": "conditional-user-role",
@@ -211,7 +211,7 @@
     },
     {
       "alias": "aggregator-portal-gate-otp-approved",
-      "description": "Deny before OTP dispatch: a coordinator (aggregator_id present) whose decision_made is not approved. Mirrors requireApproved() in the API.",
+      "description": "Deny before OTP dispatch: a coordinator (user_id present) whose decision_made is not approved. Mirrors requireApproved() in the API.",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -221,7 +221,7 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
-          "authenticatorConfig": "aggregator-portal-cond-has-aggregator-id"
+          "authenticatorConfig": "aggregator-portal-cond-has-user-id"
         },
         {
           "authenticator": "conditional-user-attribute",
@@ -251,7 +251,7 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
-          "authenticatorConfig": "aggregator-portal-cond-no-aggregator-id-sso"
+          "authenticatorConfig": "aggregator-portal-cond-no-user-id-sso"
         },
         {
           "authenticator": "conditional-user-role",
@@ -288,7 +288,7 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
-          "authenticatorConfig": "aggregator-portal-cond-has-aggregator-id-sso"
+          "authenticatorConfig": "aggregator-portal-cond-has-user-id-sso"
         },
         {
           "authenticator": "conditional-user-attribute",
@@ -327,9 +327,9 @@
       }
     },
     {
-      "alias": "aggregator-portal-cond-no-aggregator-id",
+      "alias": "aggregator-portal-cond-no-user-id",
       "config": {
-        "attribute_name": "aggregator_id",
+        "attribute_name": "user_id",
         "attribute_expected_value": ".+",
         "regex": "true",
         "include_group_attributes": "false",
@@ -337,9 +337,9 @@
       }
     },
     {
-      "alias": "aggregator-portal-cond-no-aggregator-id-sso",
+      "alias": "aggregator-portal-cond-no-user-id-sso",
       "config": {
-        "attribute_name": "aggregator_id",
+        "attribute_name": "user_id",
         "attribute_expected_value": ".+",
         "regex": "true",
         "include_group_attributes": "false",
@@ -379,9 +379,9 @@
       }
     },
     {
-      "alias": "aggregator-portal-cond-has-aggregator-id",
+      "alias": "aggregator-portal-cond-has-user-id",
       "config": {
-        "attribute_name": "aggregator_id",
+        "attribute_name": "user_id",
         "attribute_expected_value": ".+",
         "regex": "true",
         "include_group_attributes": "false",
@@ -389,9 +389,9 @@
       }
     },
     {
-      "alias": "aggregator-portal-cond-has-aggregator-id-sso",
+      "alias": "aggregator-portal-cond-has-user-id-sso",
       "config": {
-        "attribute_name": "aggregator_id",
+        "attribute_name": "user_id",
         "attribute_expected_value": ".+",
         "regex": "true",
         "include_group_attributes": "false",
@@ -483,13 +483,13 @@
       },
       "protocolMappers": [
         {
-          "name": "aggregator_id",
+          "name": "user_id",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-attribute-mapper",
           "consentRequired": false,
           "config": {
-            "user.attribute": "aggregator_id",
-            "claim.name": "aggregator_id",
+            "user.attribute": "user_id",
+            "claim.name": "user_id",
             "jsonType.label": "String",
             "id.token.claim": "false",
             "access.token.claim": "true",
@@ -841,13 +841,13 @@
       "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"],
       "protocolMappers": [
         {
-          "name": "aggregator_id",
+          "name": "user_id",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-attribute-mapper",
           "consentRequired": false,
           "config": {
-            "user.attribute": "aggregator_id",
-            "claim.name": "aggregator_id",
+            "user.attribute": "user_id",
+            "claim.name": "user_id",
             "jsonType.label": "String",
             "id.token.claim": "false",
             "access.token.claim": "true",

@@ -79,12 +79,12 @@ describe('GET /v1/dashboard', () => {
     await idp.createUser({
       email: 'kc-1@x.com',
       enabled: true,
-      attributes: { aggregator_id: AGG_A, decision_made: 'approved' },
+      attributes: { user_id: AGG_A, decision_made: 'approved' },
     });
     await idp.createUser({
       email: 'kc-2@x.com',
       enabled: true,
-      attributes: { aggregator_id: AGG_B, decision_made: 'approved' },
+      attributes: { user_id: AGG_B, decision_made: 'approved' },
     });
     _setIdpAdmin(idp);
 
@@ -151,7 +151,7 @@ describe('GET /v1/dashboard', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: tokenTypes,
           signalstack_org_id: ORG_A,
@@ -161,7 +161,7 @@ describe('GET /v1/dashboard', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: tokenTypes,
         };
@@ -170,7 +170,7 @@ describe('GET /v1/dashboard', () => {
         return {
           sub: 'kc-2',
           email: 'b@x.com',
-          aggregator_id: AGG_B,
+          user_id: AGG_B,
           decision_made: 'approved',
           aggregator_type: tokenTypes,
         };
@@ -179,7 +179,7 @@ describe('GET /v1/dashboard', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'pending',
         };
       }
@@ -440,7 +440,7 @@ describe('GET /v1/dashboard', () => {
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refresh: false }));
   });
 
-  it('403 FORBIDDEN when the token has no aggregator_id claim', async () => {
+  it('403 FORBIDDEN when the token has no user_id claim', async () => {
     _setAccessTokenVerifier(async (token) => {
       if (token === 'no-agg') return { sub: 'kc-x', decision_made: 'approved' };
       throw new Error('invalid token');
@@ -647,7 +647,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
     await idp.createUser({
       email: 'kc-1@x.com',
       enabled: true,
-      attributes: { aggregator_id: AGG_A, decision_made: 'approved' },
+      attributes: { user_id: AGG_A, decision_made: 'approved' },
     });
     _setIdpAdmin(idp);
 
@@ -671,7 +671,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'approved',
           aggregator_type: tokenTypes,
           signalstack_org_id: ORG_A,
@@ -681,7 +681,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
         return {
           sub: 'kc-1',
           email: 'a@x.com',
-          aggregator_id: AGG_A,
+          user_id: AGG_A,
           decision_made: 'pending',
         };
       }

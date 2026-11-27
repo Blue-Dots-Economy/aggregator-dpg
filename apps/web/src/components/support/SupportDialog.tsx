@@ -22,6 +22,7 @@ import { readApiError, type ApiError } from '@/lib/api-error';
 import { FieldMessage, useHandFieldErrors, type HandFieldError } from '../forms/useHandFieldErrors';
 import { PhoneInput } from '../forms/PhoneInput';
 import { isAcceptedPhone } from '@/lib/phone';
+import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
 import { useFieldErrorCopy } from '../forms/useFieldErrors';
 import {
   encodeAttachments,
@@ -191,6 +192,7 @@ function SupportForm({
   const t = useTranslations('support');
   const tForm = useTranslations('form');
   const { user } = useAuth();
+  const phoneCountries = usePhoneCountries();
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
@@ -233,7 +235,7 @@ function SupportForm({
     name: req(name.trim() !== '', t('label_name')),
     email: emailFieldError(),
     phone:
-      phone.trim() && !isAcceptedPhone(phone.trim())
+      phone.trim() && !isAcceptedPhone(phone.trim(), phoneCountries)
         ? { kind: 'invalid', message: copy.invalid(t('error_phone_invalid')) }
         : null,
     details: req(details.trim() !== '', t('label_details')),

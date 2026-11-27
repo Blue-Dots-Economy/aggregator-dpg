@@ -43,7 +43,7 @@ const schema: RJSFSchema = {
 const uiSchema = { consent: { 'ui:widget': 'ConsentCheckboxWidget' } };
 
 const apiResponse = {
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   org_slug: 'acme',
   org_name: 'Acme Org',
   actor_type: 'aggregator' as const,

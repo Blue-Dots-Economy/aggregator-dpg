@@ -35,7 +35,7 @@ import {
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { modeOffers, modeOffersVoice, resolveVoiceBot } from '../services/voice-bots/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseKnownPhone, parseMobilePhone, phoneForField } from '../services/phone.js';
 import {
   LIFECYCLE_STATUSES,
   resolveLifecycle,
@@ -366,6 +366,19 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       }
       const phoneSourceKey = linkDomainCfg.identity.phone;
 
+      // 0. Clean the phone first, so the schema check below sees the stored form. Any
+      // valid number passes; Signals refuses a non-mobile only for a new person.
+      const phoneRaw = readString(body, phoneSourceKey) ?? '';
+      let phoneNormalised: string | null = null;
+      if (phoneRaw && phoneSourceKey) {
+        const phone = parseKnownPhone(phoneRaw);
+        if (!phone.ok) {
+          throw httpError('INVALID_PHONE', { detail: phone.error.message });
+        }
+        phoneNormalised = phone.value;
+        body[phoneSourceKey] = phoneForField(phone.value, linkDomainCfg.schema, phoneSourceKey);
+      }
+
       // 1. Validate against the domain schema. Skipped for `account_only`: identity
       // was checked above and Ajv would flag the consent keys as extra properties.
       if (submissionShape !== 'account_only') {
@@ -430,19 +443,10 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         }
       }
 
-      // 2. Normalise the phone and email. Any client-supplied `participant_id` is
+      // 2. Normalise the email. Any client-supplied `participant_id` is
       // dropped, so an anonymous caller cannot choose it.
       delete body['participant_id'];
       const emailSourceKey = linkDomainCfg.identity.email;
-      const phoneRaw = readString(body, phoneSourceKey) ?? '';
-      let phoneNormalised: string | null = null;
-      if (phoneRaw) {
-        const phone = normalisePhone(phoneRaw);
-        if (!phone.ok) {
-          throw httpError('INVALID_PHONE', { detail: phone.error.message });
-        }
-        phoneNormalised = phone.value;
-      }
       // Email is optional.
       const emailRaw = readString(body, emailSourceKey) ?? '';
       const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
@@ -453,7 +457,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       const ss = getSignalStackWriter();
       let signalstackOrgId: string | null = null;
       if (ss) {
-        const aggLookup = await getUserStore().findById(link.aggregatorId);
+        const aggLookup = await getUserStore().findById(link.userId);
         if (!aggLookup.ok) {
           throw httpError('DB_UNAVAILABLE', {
             fields: { sub_operation: 'userStore.findById' },
@@ -465,7 +469,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         signalstackOrgId = aggLookup.value.signalstackOrgId;
         if (!signalstackOrgId) {
           throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-            fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+            fields: { aggregator_id: link.userId, link_id: link.id },
           });
         }
       }
@@ -484,7 +488,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           .insert(linkSubmissions)
           .values({
             linkId: link.id,
-            userId: link.aggregatorId,
+            userId: link.userId,
             metadataSnapshot: link.context,
             submittedData: body,
             outcome,
@@ -496,8 +500,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           const nameSourceKey = linkDomainCfg.identity.name;
           // Fallback only; the guard above rejects a blank name. The link id is an opaque UUID.
           const name = readString(body, nameSourceKey) ?? link.id;
-          const phoneFromBody = readString(body, phoneSourceKey) ?? phoneNormalised;
-          const pushPhone = phoneNormalised ?? phoneFromBody;
+          const pushPhone = phoneNormalised;
           const result = await ss.onboard({
             actingOrgId: signalstackOrgId,
             requestId: req.id,
@@ -671,11 +674,18 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         withItem: false,
       });
 
-      const phone = normalisePhone(readString(body, domainCfg.identity.phone) ?? '');
+      // Any valid number finds a stored person; a new one must be a mobile (checked below).
+      const phone = parseKnownPhone(readString(body, domainCfg.identity.phone) ?? '');
       if (!phone.ok) {
         throw httpError('INVALID_PHONE', { detail: phone.error.message });
       }
       const phoneNumber = phone.value;
+      // The stored submission keeps the cleaned number, as the form submit does.
+      body[domainCfg.identity.phone] = phoneForField(
+        phoneNumber,
+        domainCfg.schema,
+        domainCfg.identity.phone,
+      );
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -684,7 +694,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
           detail: 'Signalstack integration is not configured.',
         });
       }
-      const aggLookup = await getUserStore().findById(link.aggregatorId);
+      const aggLookup = await getUserStore().findById(link.userId);
       if (!aggLookup.ok) {
         throw httpError('DB_UNAVAILABLE', { fields: { sub_operation: 'userStore.findById' } });
       }
@@ -694,7 +704,7 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
       const actingOrgId = aggLookup.value.signalstackOrgId;
       if (!actingOrgId) {
         throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
-          fields: { aggregator_id: link.aggregatorId, link_id: link.id },
+          fields: { aggregator_id: link.userId, link_id: link.id },
         });
       }
 
@@ -722,11 +732,15 @@ export function registerPublicRegistrationLinkRoutes(base: FastifyInstance): voi
         });
       }
       const existing = probe.value.user_exists;
+      if (!existing) {
+        const mobile = parseMobilePhone(phoneNumber);
+        if (!mobile.ok) throw httpError('INVALID_PHONE', { detail: mobile.error.message });
+      }
 
       // The stored body keeps identity only; consent and birth year were stripped.
       const submission = {
         linkId: link.id,
-        userId: link.aggregatorId,
+        userId: link.userId,
         metadataSnapshot: link.context,
         submittedData: body,
       };

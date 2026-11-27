@@ -8,6 +8,7 @@
  * @module apps/web/src/lib/jwt
  */
 
+import { readUserIdClaim } from '@aggregator-dpg/shared-primitives/user-id-claim';
 import { readJsonObject } from './json-object';
 
 /**
@@ -27,17 +28,16 @@ export function decodeJwtClaims(token: string): Record<string, unknown> | null {
 }
 
 /**
- * Returns the non-empty `aggregator_id` claim, or `null` when absent.
+ * Returns the coordinator's user id: the `user_id` claim.
  *
  * Only coordinators have it; org owners and the network admin do not.
  *
  * @param token - A Keycloak access token.
- * @returns The aggregator id, or `null`.
+ * @returns The user id, or `null`.
  */
-export function tokenAggregatorId(token: string): string | null {
-  const claims = decodeJwtClaims(token);
-  const id = claims?.['aggregator_id'];
-  return typeof id === 'string' && id.length > 0 ? id : null;
+export function tokenUserId(token: string): string | null {
+  const claim = readUserIdClaim(decodeJwtClaims(token));
+  return claim.kind === 'present' ? claim.userId : null;
 }
 
 /**
@@ -61,7 +61,7 @@ export function tokenRealmRoles(token: string): string[] {
  * The result only picks which login message to show; it grants no access.
  * The signature is not verified (see the module note).
  *
- * @param token - A Keycloak access token that lacks `aggregator_id`.
+ * @param token - A Keycloak access token that lacks `user_id`.
  * @param signalsRoles - Realm roles that identify a Signals participant.
  * @returns Which population the token belongs to.
  */

@@ -82,12 +82,12 @@ async function withRoles(actor: Actor): Promise<ActorResult> {
 export class StoreActorResolver extends ActorResolverBase {
   async resolve(input: ResolveActorInput): Promise<ActorResult> {
     const actingId = input.actingAccountId?.toLowerCase();
-    if (input.aggregatorId) {
-      if (actingId !== undefined && actingId !== input.aggregatorId.toLowerCase()) {
+    if (input.userId) {
+      if (actingId !== undefined && actingId !== input.userId.toLowerCase()) {
         logActing('CLAIM_MISMATCH');
-        return actingInvalid('acting account differs from the aggregator_id claim');
+        return actingInvalid('acting account differs from the user_id claim');
       }
-      return this.claimedCoordinator(input.aggregatorId, input.subject);
+      return this.claimedCoordinator(input.userId, input.subject);
     }
     if (actingId !== undefined) return this.actingCoordinator(input.subject, actingId);
 
@@ -151,7 +151,7 @@ export class StoreActorResolver extends ActorResolverBase {
   }
 
   /**
-   * Resolves the coordinator named by the `aggregator_id` claim.
+   * Resolves the coordinator named by the `user_id` claim.
    *
    * Accepted only when that coordinator's recorded login is this token's
    * subject. A coordinator with no recorded login resolves to nothing.

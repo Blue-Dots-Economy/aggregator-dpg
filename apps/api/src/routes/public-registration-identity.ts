@@ -229,6 +229,14 @@ export function onboardFailureError(error: BaseError, domainSchema: unknown): Ht
     });
   }
   const details = error.details;
+  // Signals refuses a new person's non-mobile phone; an existing person's number is accepted.
+  if (details?.upstreamCode === 'INVALID_PHONE') {
+    const signalsMessage = details.signalsMessage;
+    return httpError('INVALID_PHONE', {
+      detail: typeof signalsMessage === 'string' ? signalsMessage : 'phone must be a mobile number',
+      cause: error,
+    });
+  }
   if (
     details?.upstreamCode === 'INVALID_ITEM_STATE' &&
     isStringMap(details.signalsFields) &&

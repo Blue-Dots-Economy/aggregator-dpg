@@ -36,7 +36,7 @@ describe('buildCsvTemplate', () => {
   // The workbook takes `identity` for exactly this reason, and CSV is the
   // format an operator gets by default. Without the selectors a phone column
   // that declares no pattern samples as "Example Mobile", which
-  // `normalisePhone` strips to zero digits and `bulk-row-process` rejects
+  // `parsePhone` reads as no number and `bulk-row-process` rejects
   // before Ajv ever sees the row.
   it('uses the configured identity columns for name, phone and email', () => {
     const schema = {

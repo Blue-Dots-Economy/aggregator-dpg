@@ -5,7 +5,7 @@
  * since the real adapter/store hit Keycloak/Redis. Uses the *real*
  * `signFlowState`/`verifyFlowState` from `@/lib/cookies` (pure HMAC, no I/O)
  * so the flow-cookie round trip is exercised for real. Crafts a fake JWT
- * (base64url payload, no real signature — `tokenAggregatorId` never
+ * (base64url payload, no real signature — `tokenUserId` never
  * verifies the signature) to drive the coordinator-gate branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -94,7 +94,7 @@ describe('GET /api/auth/callback', () => {
       ok: true,
       value: {
         tokens: {
-          accessToken: fakeJwt({ aggregator_id: 'agg-1' }),
+          accessToken: fakeJwt({ user_id: 'agg-1' }),
           refreshToken: 'refresh-1',
           idToken: 'id-1',
           accessTokenExp: Date.now() + 60_000,
@@ -166,7 +166,7 @@ describe('GET /api/auth/callback', () => {
 
   /**
    * One Keycloak realm serves this portal and the Signals app, so "no
-   * aggregator_id" covers three different populations. The reason code has to
+   * user_id" covers three different populations. The reason code has to
    * tell them apart or the login screen shows org-owner advice to a Signals
    * participant (#753).
    */

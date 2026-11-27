@@ -21,7 +21,7 @@ describe('isSharedLogin', () => {
     return created.value.id;
   }
 
-  it('is shared for an admin login whose Keycloak user has no aggregator_id', async () => {
+  it('is shared for an admin login whose Keycloak user has no user_id', async () => {
     const id = await user();
     expect(await isSharedLogin(id, { admin: 'a1', coordinator: 'c1' })).toEqual({
       ok: true,
@@ -29,8 +29,8 @@ describe('isSharedLogin', () => {
     });
   });
 
-  it('is not shared when the Keycloak user carries aggregator_id (a legacy coordinator login)', async () => {
-    const id = await user({ [KC_ATTR.AGGREGATOR_ID]: 'c1' });
+  it('is not shared when the Keycloak user carries user_id (a legacy coordinator login)', async () => {
+    const id = await user({ [KC_ATTR.USER_ID]: 'c1' });
     expect(await isSharedLogin(id, { admin: 'a1', coordinator: 'c1' })).toEqual({
       ok: true,
       value: false,

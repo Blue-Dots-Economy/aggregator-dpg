@@ -176,7 +176,8 @@
                       },
                       "phone": {
                         "type": "string",
-                        "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                        "maxLength": 32,
+                        "pattern": "^\\+?[\\d\\s\\-().]+$"
                       },
                       "email": {
                         "type": "string",
@@ -331,7 +332,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -351,7 +352,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "status",
                     "message",
@@ -2039,7 +2040,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -2072,7 +2073,8 @@
                         },
                         "phone": {
                           "type": "string",
-                          "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                          "maxLength": 32,
+                          "pattern": "^\\+?[\\d\\s\\-().]+$"
                         },
                         "email": {
                           "type": "string",
@@ -2252,7 +2254,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "actor_type",
                     "type",
@@ -2515,7 +2517,8 @@
                           },
                           "phone": {
                             "type": "string",
-                            "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                            "maxLength": 32,
+                            "pattern": "^\\+?[\\d\\s\\-().]+$"
                           },
                           "email": {
                             "type": "string",
@@ -2641,7 +2644,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "org_slug": {
@@ -2674,7 +2677,8 @@
                         },
                         "phone": {
                           "type": "string",
-                          "pattern": "^(\\+?\\d{10,15}|\\d{10})$"
+                          "maxLength": 32,
+                          "pattern": "^\\+?[\\d\\s\\-().]+$"
                         },
                         "email": {
                           "type": "string",
@@ -2811,7 +2815,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "org_slug",
                     "actor_type",
                     "type",
@@ -21104,7 +21108,7 @@
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
                     },
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "from": {
@@ -21121,7 +21125,7 @@
                     "passed",
                     "failed",
                     "skipped",
-                    "aggregator_id",
+                    "user_id",
                     "from",
                     "to"
                   ],
@@ -21338,7 +21342,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aggregator_id": {
+                    "user_id": {
                       "type": "string"
                     },
                     "from": {
@@ -21390,7 +21394,7 @@
                     }
                   },
                   "required": [
-                    "aggregator_id",
+                    "user_id",
                     "from",
                     "to",
                     "by_source"
@@ -23466,7 +23470,8 @@
                   },
                   "phone": {
                     "type": "string",
-                    "maxLength": 20
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   },
                   "type": {
                     "type": "string",

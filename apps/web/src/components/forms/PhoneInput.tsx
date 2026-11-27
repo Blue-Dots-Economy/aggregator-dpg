@@ -26,7 +26,7 @@ const CODE_BOX_STYLE: CSSProperties = { width: '6rem', flexShrink: 0 };
 export interface PhoneInputProps {
   /** Id of the number box; the country list gets `${id}-code`. */
   id: string;
-  /** Stored value, `+<code><number>` (a bare 10-digit value reads as +91). */
+  /** Stored value, `+<code><number>` (a value without `+` reads in the first listed country). */
   value: string | undefined;
   /** Called with the joined value, or `undefined` when the number is empty. */
   onChange: (value: string | undefined) => void;
@@ -76,6 +76,8 @@ export function PhoneInput({
   const code = nationalOnly ? defaultCode : typedCode;
   const country = phoneCountry(code, countries);
   const maxLength = nationalMaxLength(code, countries);
+  // The given placeholder is a number in the default country; others show their own sample.
+  const hint = code === defaultCode ? placeholder : (country?.sample ?? placeholder);
   const apply = (raw: string) => {
     const next = nationalFromInput(raw, code, countries);
     const nextCode = nationalOnly ? defaultCode : next.code;
@@ -133,7 +135,7 @@ export function PhoneInput({
         maxLength={maxLength}
         required={required}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={hint}
         {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
         {...inputProps}
         onChange={(e) => apply(e.target.value)}

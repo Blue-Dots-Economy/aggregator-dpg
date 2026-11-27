@@ -281,7 +281,7 @@ export abstract class OrganisationStoreBase {
    * Used by the org-create check that keeps one phone per person; the phone
    * is the OTP login key.
    *
-   * @param phone - Canonical (`normalisePhone`) phone.
+   * @param phone - Canonical (`parsePhone`) phone.
    * @returns The first matching org, or `null`.
    */
   abstract findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>>;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { profileService } from '../../services/profile.service';
 
 const apiResponse = {
-  aggregator_id: 'agg-1',
+  user_id: 'agg-1',
   org_slug: 'trrain-abcd',
   org_name: 'TRRAIN',
   actor_type: 'aggregator',

@@ -39,8 +39,8 @@ def flat(tree):
     return out, lambda e: configs.get(e.get("authenticationConfig"), {})
 
 
-def entitled(name, role_negate="true", with_role=True, with_invited=True):
-    conds = [(ATTR, ATTR, "REQUIRED", gate.NO_AGG_ID, [])]
+def entitled(name, role_negate="true", with_role=True, with_invited=True, id_attr="user_id"):
+    conds = [(ATTR, ATTR, "REQUIRED", dict(gate.NO_USER_ID, attribute_name=id_attr), [])]
     if with_role:
         conds.append((ROLE, ROLE, "REQUIRED", {"condUserRole": "org_owner", "negate": role_negate}, []))
     if with_invited:
@@ -49,10 +49,10 @@ def entitled(name, role_negate="true", with_role=True, with_invited=True):
             conds + [(DENY, DENY, "REQUIRED", {"denyErrorMessage": "x"}, [])])
 
 
-def approved(name, has=True, decision=gate.NOT_APPROVED):
+def approved(name, has=True, decision=gate.NOT_APPROVED, id_attr="user_id"):
     conds = []
     if has:
-        conds.append((ATTR, ATTR, "REQUIRED", gate.HAS_AGG_ID, []))
+        conds.append((ATTR, ATTR, "REQUIRED", dict(gate.HAS_USER_ID, attribute_name=id_attr), []))
     conds.append((ATTR, ATTR, "REQUIRED", decision, []))
     return (name, None, "CONDITIONAL", None,
             conds + [(DENY, DENY, "REQUIRED", {"denyErrorMessage": "x"}, [])])
@@ -100,10 +100,20 @@ class VerifyTree(unittest.TestCase):
 
     def test_rejects_the_pre_phase5_coordinator_only_tree(self):
         t = tree(
-            [old_gate("aggregator-portal-gate-otp-coordinator", gate.NO_AGG_ID),
+            [old_gate("aggregator-portal-gate-otp-coordinator", gate.NO_USER_ID),
              old_gate("aggregator-portal-gate-otp-approved", gate.NOT_APPROVED)],
-            [old_gate("aggregator-portal-gate-sso-coordinator", gate.NO_AGG_ID),
+            [old_gate("aggregator-portal-gate-sso-coordinator", gate.NO_USER_ID),
              old_gate("aggregator-portal-gate-sso-approved", gate.NOT_APPROVED)])
+        with self.assertRaises(AssertionError):
+            self.verify(t)
+
+    def test_rejects_a_tree_that_checks_aggregator_id(self):
+        # A realm gated on the former attribute name fails and is rebuilt on user_id.
+        t = tree(
+            [entitled("aggregator-portal-gate-otp-entitled", id_attr="aggregator_id"),
+             approved("aggregator-portal-gate-otp-approved", id_attr="aggregator_id")],
+            [entitled("aggregator-portal-gate-sso-entitled", id_attr="aggregator_id"),
+             approved("aggregator-portal-gate-sso-approved", id_attr="aggregator_id")])
         with self.assertRaises(AssertionError):
             self.verify(t)
 
@@ -116,7 +126,7 @@ class VerifyTree(unittest.TestCase):
             self.verify(t)
 
     def test_rejects_an_approval_gate_that_would_deny_owners(self):
-        # Without "has aggregator_id", every owner (no decision) is denied.
+        # Without "has user_id", every owner (no decision) is denied.
         t = tree(
             [entitled("aggregator-portal-gate-otp-entitled"),
              approved("aggregator-portal-gate-otp-approved", has=False)],

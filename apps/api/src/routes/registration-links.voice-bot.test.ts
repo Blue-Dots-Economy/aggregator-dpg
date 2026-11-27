@@ -46,7 +46,7 @@ class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
     const now = new Date();
     const row: RegistrationLink = {
       id: `link-${this.idCounter}`,
-      aggregatorId: input.aggregatorId,
+      userId: input.userId,
       slug: input.slug,
       domain: input.domain,
       context: input.context,
@@ -111,7 +111,7 @@ async function bootApp(
     return {
       sub: USER_ID,
       email: 'a@x.com',
-      aggregator_id: AGG_ID,
+      user_id: AGG_ID,
       aggregator_type: 'seeker',
       decision_made: 'approved',
     };
@@ -285,7 +285,7 @@ describe('POST /v1/links/create — voice_bot_key', () => {
     expect(created.voiceBotKey).toBe('a');
     store.rows.push({
       id: r.json().link_id,
-      aggregatorId: created.aggregatorId,
+      userId: created.userId,
       slug: created.slug,
       domain: created.domain,
       context: created.context,
@@ -330,7 +330,7 @@ describe('voice_bot on read for modes that do not offer voice', () => {
     const now = new Date();
     const row: RegistrationLink = {
       id,
-      aggregatorId: AGG_ID,
+      userId: AGG_ID,
       slug: `slug-${id}`,
       domain: 'seeker',
       context: {},

@@ -27,10 +27,13 @@ describe('phone helpers', () => {
     expect(isValidPhone('12345')).toBe(false);
   });
 
-  it('accepts another country code only as the server does (10-15 digits after +)', () => {
-    expect(isValidPhone('+447911123456')).toBe(true);
-    expect(isValidPhone('+65912345')).toBe(false);
-    expect(isValidPhone('+4479111234567890')).toBe(false);
+  it('accepts another country only when it is listed, by its own rules', () => {
+    expect(isValidPhone('+447911123456')).toBe(false);
+    const list = parsePhoneCountries('IN:+91,GB:+44,AU:+61');
+    expect(isValidPhone('+447911123456', list)).toBe(true);
+    expect(isValidPhone('+61412345678', list)).toBe(true);
+    expect(isValidPhone('+614123456789', list)).toBe(false);
+    expect(isValidPhone('+4479111234567890', list)).toBe(false);
   });
 
   it('treats only real phone field names as phone fields', () => {
@@ -83,7 +86,7 @@ describe('phone helpers', () => {
   });
 
   it('accepts any server-valid number for optional contact fields', () => {
-    expect(isAcceptedPhone('+914012345678')).toBe(true);
+    expect(isAcceptedPhone('+911123456789')).toBe(true);
     expect(isAcceptedPhone('12345')).toBe(false);
   });
 
@@ -98,6 +101,27 @@ describe('phone helpers', () => {
     expect(splitPhone('+919876543210')).toEqual({ code: '+91', national: '9876543210' });
     expect(splitPhone('9876543210')).toEqual({ code: '+91', national: '9876543210' });
     expect(splitPhone(undefined)).toEqual({ code: '+91', national: '' });
+    const gbFirst = parsePhoneCountries('GB:+44,IN:+91');
+    expect(splitPhone('7400123456', gbFirst)).toEqual({ code: '+44', national: '7400123456' });
+    expect(splitPhone('447400123456', gbFirst)).toEqual({ code: '+44', national: '7400123456' });
+    expect(nationalFromInput('+91 09876 543210', '+91')).toEqual({
+      code: '+91',
+      national: '9876543210',
+    });
+    expect(nationalFromInput('0091 98765 43210', '+91')).toEqual({
+      code: '+91',
+      national: '9876543210',
+    });
+    const inGb = parsePhoneCountries('IN:+91,GB:+44');
+    expect(nationalFromInput('+44 (0)7911 123456', '+91', inGb)).toEqual({
+      code: '+44',
+      national: '7911123456',
+    });
+    const at = parsePhoneCountries('AT:+43');
+    expect(nationalFromInput('+43 664 1234567', '+43', at)).toEqual({
+      code: '+43',
+      national: '6641234567',
+    });
     expect(splitPhone('09876543210')).toEqual({ code: '+91', national: '9876543210' });
   });
 
@@ -122,11 +146,13 @@ describe('phone helpers', () => {
     expect(parsePhoneCountries(undefined)).toEqual(DEFAULT_PHONE_COUNTRIES);
     expect(parsePhoneCountries('')).toEqual(DEFAULT_PHONE_COUNTRIES);
     expect(parsePhoneCountries('junk, X:+1')).toEqual(DEFAULT_PHONE_COUNTRIES);
-    const list = parsePhoneCountries(' gb:44 , IN:+91, US:+1, CA:+1, bad, FR:+33');
+    expect(parsePhoneCountries('GB:+44, bad')).toEqual(DEFAULT_PHONE_COUNTRIES);
+    expect(parsePhoneCountries('US:+1, CA:+1')).toEqual(DEFAULT_PHONE_COUNTRIES); // one country per dial code
+    const list = parsePhoneCountries(' gb:44 , IN:+91, US:+1, FR:+33');
     expect(list.map((c) => `${c.iso}${c.code}`)).toEqual(['GB+44', 'IN+91', 'US+1', 'FR+33']);
     expect(list[0].flag).toBe('🇬🇧');
     expect(nationalMaxLength('+44', list)).toBe(10);
-    expect(nationalMaxLength('+33', list)).toBe(13);
+    expect(nationalMaxLength('+33', list)).toBe(9);
   });
 
   it('splits and reads numbers for a configured country', () => {

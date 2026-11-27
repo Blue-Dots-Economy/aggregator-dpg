@@ -81,7 +81,7 @@ const { processBulkFile } = await import('./bulk-file-process.js');
 
 const JOB = {
   uploadId: 'up-1',
-  aggregatorId: 'agg-1',
+  userId: 'agg-1',
   s3Key: 'bulk-uploads/up-1/source.csv',
   participantType: 'seeker',
   schemaId: 'participant-seeker',
@@ -105,6 +105,17 @@ beforeEach(() => {
   uploadRow.status = 'uploaded';
   selectRowMissing = false;
   vi.clearAllMocks();
+});
+
+describe('processBulkFile — job shape', () => {
+  it('carries the job userId to its row jobs, and no other id field', async () => {
+    const res = await processBulkFile({ ...JOB, userId: 'u-2' });
+    expect(res.status).toBe('enqueued');
+    const row = expect.objectContaining({ userId: 'u-2' });
+    expect(enqueueRowProcessBulk).toHaveBeenCalledWith([row, row]);
+    const noOldName = expect.not.objectContaining({ aggregatorId: expect.anything() });
+    expect(enqueueRowProcessBulk).toHaveBeenCalledWith([noOldName, noOldName]);
+  });
 });
 
 describe('processBulkFile — success path', () => {

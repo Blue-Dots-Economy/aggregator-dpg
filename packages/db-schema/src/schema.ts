@@ -206,7 +206,7 @@ export const contact = pgTable(
     id: text('id').primaryKey(),
     /** Lowercased, trimmed. Unique across every role. */
     email: text('email').notNull(),
-    /** Canonical `normalisePhone` form, or NULL. Unique across every role. */
+    /** Canonical `parsePhone` form, or NULL. Unique across every role. */
     phone: text('phone'),
     /** NULL when never captured. */
     name: text('name'),

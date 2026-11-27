@@ -14,7 +14,7 @@ import { IdentityStoreFake } from '../services/identity-store/testing.js';
 import { _setIdentityStore } from '../services/identity-store/index.js';
 import { IDP_PROVIDER } from '../services/idp-admin/provider.js';
 
-const aggregatorId = '22222222-2222-2222-2222-222222222222';
+const userId = '22222222-2222-2222-2222-222222222222';
 
 describe('aggregator profile routes', () => {
   let app: FastifyInstance;
@@ -28,7 +28,7 @@ describe('aggregator profile routes', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
 
     userStore = new UserStoreFake();
-    userStore.seed([buildCoordinator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
+    userStore.seed([buildCoordinator({ id: userId, orgSlug: 'trrain-zzzz' })]);
     _setUserStore(userStore);
     orgStore = new OrganisationStoreFake();
     _setOrganisationStore(orgStore);
@@ -39,7 +39,7 @@ describe('aggregator profile routes', () => {
       firstName: 'Asha',
       lastName: 'Rao',
       phone: '+919876543210',
-      attributes: { aggregator_id: aggregatorId, association: 'TRRAIN' },
+      attributes: { user_id: userId, association: 'TRRAIN' },
     });
     _setIdpAdmin(idp);
     // sub claim is populated lazily — use the KC user id created above so
@@ -55,7 +55,7 @@ describe('aggregator profile routes', () => {
           given_name: 'Asha',
           family_name: 'Rao',
           phone_number: '+919876543210',
-          aggregator_id: aggregatorId,
+          user_id: userId,
         };
       }
       if (token === 'no-attribute') {
@@ -80,7 +80,7 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('GET returns 403 when token has no aggregator_id', async () => {
+  it('GET returns 403 when token has no user_id', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/aggregators/profile/me',
@@ -97,7 +97,7 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(body.aggregator_id).toBe(aggregatorId);
+    expect(body.user_id).toBe(userId);
     // The removed `aggregator_profile` keys must not reappear in the response.
     for (const k of [
       'contact_name',
@@ -121,7 +121,7 @@ describe('aggregator profile routes', () => {
   it('GET returns every domain the coordinator serves', async () => {
     userStore.seed([
       buildCoordinator({
-        id: aggregatorId,
+        id: userId,
         orgSlug: 'trrain-zzzz',
         type: 'seeker',
         serves: ['seeker', 'provider'],
@@ -242,9 +242,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH keeps a stored phone saved before the mobile rule when it is sent back unchanged', async () => {
     const legacy = { name: 'Asha', phone: '+912234567890', email: 'asha@trrain.org' };
-    userStore.seed([
-      buildCoordinator({ id: aggregatorId, orgSlug: 'trrain-zzzz', contact: legacy }),
-    ]);
+    userStore.seed([buildCoordinator({ id: userId, orgSlug: 'trrain-zzzz', contact: legacy })]);
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -271,7 +269,7 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
-    const stored = await userStore.findById(aggregatorId);
+    const stored = await userStore.findById(userId);
     if (stored.ok) expect(stored.value?.contact.phone).not.toBe('+919876543211');
   });
 
@@ -357,7 +355,7 @@ describe('aggregator profile routes', () => {
     const shared = 'c'.repeat(64);
     userStore.seed([
       buildCoordinator({
-        id: aggregatorId,
+        id: userId,
         orgSlug: 'trrain-zzzz',
         contactId: shared,
         contact: { name: 'Both', phone: '+919876543201', email: 'both@trrain.org' },
@@ -496,7 +494,7 @@ describe('aggregator profile routes', () => {
   });
 
   it('PATCH refuses consent: read-only after registration (#836, 0029)', async () => {
-    const before = await userStore.findById(aggregatorId);
+    const before = await userStore.findById(userId);
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -514,7 +512,7 @@ describe('aggregator profile routes', () => {
     });
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
-    const after = await userStore.findById(aggregatorId);
+    const after = await userStore.findById(userId);
     expect(after.ok && after.value?.name).toBe(before.ok ? before.value?.name : undefined);
     expect(after.ok && after.value?.consent).toEqual(before.ok ? before.value?.consent : undefined);
   });
@@ -546,7 +544,7 @@ describe('aggregator profile routes', () => {
   });
 
   it('PATCH accepts org details unchanged from what GET returned (an echoed contact)', async () => {
-    const before = await userStore.findById(aggregatorId);
+    const before = await userStore.findById(userId);
     if (!before.ok || !before.value) throw new Error('seed missing');
     const res = await app.inject({
       method: 'PATCH',
@@ -592,7 +590,7 @@ describe('aggregator profile routes', () => {
   ])(
     'PATCH of org details %j → 409 ORG_DETAILS_READ_ONLY before any write (0028)',
     async (aggregator, fields) => {
-      const before = await userStore.findById(aggregatorId);
+      const before = await userStore.findById(userId);
       const res = await app.inject({
         method: 'PATCH',
         url: '/v1/aggregators/profile/me',
@@ -603,7 +601,7 @@ describe('aggregator profile routes', () => {
       const body = res.json() as { error: { code: string; fields: { fields: string[] } } };
       expect(body.error.code).toBe('ORG_DETAILS_READ_ONLY');
       expect(body.error.fields.fields).toEqual(fields);
-      const after = await userStore.findById(aggregatorId);
+      const after = await userStore.findById(userId);
       expect(after.ok && after.value?.name).toBe(before.ok && before.value?.name);
     },
   );
@@ -684,7 +682,7 @@ describe('aggregator profile routes, owner acting as its coordinator account', (
     _setOrganisationStore(orgs);
     idp = new IdpAdminFake();
     _setIdpAdmin(idp);
-    // Owner token: no aggregator_id.
+    // Owner token: no user_id.
     _setAccessTokenVerifier(async () => ({
       sub: SUB,
       email: 'owner@example.org',
@@ -715,11 +713,11 @@ describe('aggregator profile routes, owner acting as its coordinator account', (
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
-      aggregator_id: string;
+      user_id: string;
       serves: string[];
       identity: Record<string, unknown>;
     };
-    expect(body.aggregator_id).toBe(COORD);
+    expect(body.user_id).toBe(COORD);
     expect(body.serves).toEqual(['seeker', 'provider']);
     expect(body.identity).toEqual({
       first_name: 'Asha Rao',

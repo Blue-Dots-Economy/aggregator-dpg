@@ -183,7 +183,7 @@ describe('blockingValidationReasons', () => {
 describe('pushToSignalStack — owned_elsewhere handling', () => {
   const job = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
@@ -236,7 +236,7 @@ describe('pushToSignalStack — owned_elsewhere handling', () => {
 describe('pushToSignalStack — consent forwarding', () => {
   const job = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
@@ -297,7 +297,7 @@ describe('pushToSignalStack — consent forwarding', () => {
 describe('pushToSignalStack — age forwarding', () => {
   const baseJob = {
     uploadId: 'up-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
     rowIndex: 0,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',

@@ -942,7 +942,7 @@ describe('FileNetworkConfigLoader — voice bot mistakes are dropped, not fatal'
 
   it('drops a bot with an invalid phone, keeps the valid one and names the entry', async () => {
     const cfg = await loadWith(
-      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '+9101204404274', 'seeker')}`,
+      `  voice_bots:\n${bot('good', '+919876543210', 'seeker')}${bot('bad', '+91 12345', 'seeker')}`,
     );
     expect(cfg.aggregator.voice_bots.map((b) => b.key)).toEqual(['good']);
     expect(cfg.warnings).toEqual([

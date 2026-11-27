@@ -48,7 +48,7 @@ describe('activateInvitedAccount logging', () => {
       email: 'asha@trrain.org',
       enabled: true,
       emailVerified: true,
-      attributes: { [KC_ATTR.DECISION_MADE]: 'invited', [KC_ATTR.AGGREGATOR_ID]: 'missing-row' },
+      attributes: { [KC_ATTR.DECISION_MADE]: 'invited', [KC_ATTR.USER_ID]: 'missing-row' },
     });
     if (!created.ok) throw new Error('seed');
     const { log, warn } = recordingLog();

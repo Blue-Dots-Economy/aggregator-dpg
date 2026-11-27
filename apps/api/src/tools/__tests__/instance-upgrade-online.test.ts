@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
-import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../instance-upgrade-online.js';
+import {
+  backfillUserIdClaim,
+  enableOwnersStep,
+  enrichExitCode,
+  enrichIdentities,
+  removeAggregatorIdAttribute,
+} from '../instance-upgrade-online.js';
 import { buildOrganisation, buildDefaultOrg } from '../../services/organisation-store/index.js';
 import type { Organisation } from '../../services/organisation-store/index.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';
@@ -11,12 +17,12 @@ const C1 = '11111111-1111-4111-8111-111111111111';
 const C2 = '22222222-2222-4222-8222-222222222222';
 const C3 = '33333333-3333-4333-8333-333333333333';
 
-async function kcUser(idp: IdpAdminFake, n: number, aggregatorId: string): Promise<string> {
+async function kcUser(idp: IdpAdminFake, n: number, userId: string): Promise<string> {
   const r = await idp.createUser({
     email: `u${n}@x.test`,
     firstName: 'U',
     lastName: `${n}`,
-    attributes: { aggregator_id: aggregatorId },
+    attributes: { aggregator_id: userId },
   } as Parameters<IdpAdminFake['createUser']>[0]);
   if (!r.ok) throw new Error('seed failed');
   return r.value.id;
@@ -97,6 +103,194 @@ describe('enrichIdentities', () => {
       linked: 0,
     });
     expect(pauses).toEqual([]);
+  });
+});
+
+/** An IdP whose attribute writes always fail; lookups work. */
+class WriteFailingIdp extends IdpAdminFake {
+  override setAttributes(): ReturnType<IdpAdminFake['setAttributes']> {
+    return Promise.resolve({ ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'down' } });
+  }
+}
+
+describe('backfillUserIdClaim', () => {
+  let idp: IdpAdminFake;
+  const pauses: number[] = [];
+  const deps = (ids: string[]) => ({
+    idp,
+    listCandidates: () => Promise.resolve(ids),
+    pause: (ms: number) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+  });
+  const userIdOf = async (sub: string) => {
+    const r = await idp.findById(sub);
+    return r.ok ? r.value?.attributes?.user_id : undefined;
+  };
+
+  beforeEach(() => {
+    idp = new IdpAdminFake();
+    pauses.length = 0;
+  });
+
+  it('copies aggregator_id into user_id, skips the done ones and reports conflicts', async () => {
+    const sub1 = await kcUser(idp, 1, C1);
+    const sub2 = await kcUser(idp, 2, C2);
+    await idp.setAttributes(sub2, { user_id: C2 });
+    const sub3 = await kcUser(idp, 3, C3);
+    await idp.setAttributes(sub3, { user_id: 'someone-else' });
+    const report = await backfillUserIdClaim(deps([C1, C2, C3, 'absent']), {
+      dryRun: false,
+      ratePerSecond: 4,
+    });
+    expect(report).toEqual({
+      candidates: 4,
+      copied: 1,
+      already: 1,
+      notInKeycloak: 1,
+      conflicts: 1,
+      failed: 0,
+      conflictIds: [C3],
+    });
+    expect(await userIdOf(sub1)).toEqual([C1]);
+    expect(await userIdOf(sub3)).toEqual(['someone-else']);
+    expect(pauses).toEqual([250, 250, 250, 250]);
+  });
+
+  it('is a no-op on a second run', async () => {
+    await kcUser(idp, 1, C1);
+    await backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    const again = await backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    expect(again).toMatchObject({ copied: 0, already: 1 });
+  });
+
+  it('writes nothing on a dry run', async () => {
+    const sub1 = await kcUser(idp, 1, C1);
+    const report = await backfillUserIdClaim(deps([C1]), { dryRun: true, ratePerSecond: 1000 });
+    expect(report.copied).toBe(1);
+    expect(await userIdOf(sub1)).toBeUndefined();
+  });
+
+  it('counts a failed write', async () => {
+    idp = new WriteFailingIdp();
+    await kcUser(idp, 1, C1);
+    const report = await backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    expect(report).toMatchObject({ candidates: 1, failed: 1, copied: 0 });
+  });
+
+  it('counts a failed lookup and carries on', async () => {
+    await kcUser(idp, 2, C2);
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const report = await backfillUserIdClaim(deps([C1, C2]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 2, failed: 1, copied: 1 });
+  });
+
+  it('refuses a rate that would disable the pacing', async () => {
+    await expect(
+      backfillUserIdClaim(deps([C1]), { dryRun: false, ratePerSecond: 0 }),
+    ).rejects.toThrow(RangeError);
+  });
+});
+
+describe('removeAggregatorIdAttribute', () => {
+  let idp: IdpAdminFake;
+  const pauses: number[] = [];
+  const deps = (ids: string[]) => ({
+    idp,
+    listCandidates: () => Promise.resolve(ids),
+    pause: (ms: number) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+  });
+  const attrsOf = async (sub: string) => {
+    const r = await idp.findById(sub);
+    return r.ok ? r.value?.attributes : undefined;
+  };
+  const backfilled = async (n: number, id: string) => {
+    const sub = await kcUser(idp, n, id);
+    await idp.setAttributes(sub, { user_id: id });
+    return sub;
+  };
+
+  beforeEach(() => {
+    idp = new IdpAdminFake();
+    pauses.length = 0;
+  });
+
+  it('removes aggregator_id from backfilled users and keeps it where user_id is missing or different', async () => {
+    const sub1 = await backfilled(1, C1);
+    const sub2 = await kcUser(idp, 2, C2);
+    const sub3 = await kcUser(idp, 3, C3);
+    await idp.setAttributes(sub3, { user_id: 'someone-else' });
+    const report = await removeAggregatorIdAttribute(deps([C1, C2, C3, 'absent']), {
+      dryRun: false,
+      ratePerSecond: 4,
+    });
+    expect(report).toEqual({
+      candidates: 4,
+      removed: 1,
+      absent: 1,
+      notBackfilled: 2,
+      failed: 0,
+      notBackfilledIds: [C2, C3],
+    });
+    expect(await attrsOf(sub1)).toEqual({ user_id: [C1] });
+    expect((await attrsOf(sub2))?.aggregator_id).toEqual([C2]);
+    expect((await attrsOf(sub3))?.aggregator_id).toEqual([C3]);
+    expect(pauses).toEqual([250, 250, 250, 250]);
+  });
+
+  it('is a no-op on a second run', async () => {
+    await backfilled(1, C1);
+    await removeAggregatorIdAttribute(deps([C1]), { dryRun: false, ratePerSecond: 1000 });
+    const again = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(again).toMatchObject({ removed: 0, absent: 1 });
+  });
+
+  it('writes nothing on a dry run', async () => {
+    const sub1 = await backfilled(1, C1);
+    const report = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: true,
+      ratePerSecond: 1000,
+    });
+    expect(report.removed).toBe(1);
+    expect((await attrsOf(sub1))?.aggregator_id).toEqual([C1]);
+  });
+
+  it('counts a failed write', async () => {
+    idp = new WriteFailingIdp();
+    const sub = await kcUser(idp, 1, C1);
+    // WriteFailingIdp refuses every write, so seed user_id through the base class.
+    await IdpAdminFake.prototype.setAttributes.call(idp, sub, { user_id: C1 });
+    const report = await removeAggregatorIdAttribute(deps([C1]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 1, failed: 1, removed: 0 });
+  });
+
+  it('counts a failed lookup and carries on', async () => {
+    await backfilled(2, C2);
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const report = await removeAggregatorIdAttribute(deps([C1, C2]), {
+      dryRun: false,
+      ratePerSecond: 1000,
+    });
+    expect(report).toMatchObject({ candidates: 2, failed: 1, removed: 1 });
+  });
+
+  it('refuses a rate that would disable the pacing', async () => {
+    await expect(
+      removeAggregatorIdAttribute(deps([C1]), { dryRun: false, ratePerSecond: 0 }),
+    ).rejects.toThrow(RangeError);
   });
 });
 

@@ -114,25 +114,22 @@ export async function syncCoordinatorProfileTypes(
  * Brings one coordinator's Keycloak attribute in line with its target types.
  *
  * @param deps - Collaborators (see {@link ProfileTypesSyncDeps}).
- * @param aggregatorId - The coordinator's `users.id`.
+ * @param userId - The coordinator's `users.id`.
  * @param target - The network domains it serves; empty removes the attribute.
  * @param dryRun - When true, reports what would change without writing.
  * @returns The outcome to count; never throws.
  */
 async function syncOne(
   deps: ProfileTypesSyncDeps,
-  aggregatorId: string,
+  userId: string,
   target: string[],
   dryRun: boolean,
 ): Promise<SyncOutcome> {
   const delayMs = deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const start = Date.now();
-  const found = await withRetry(
-    () => deps.idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId),
-    delayMs,
-  );
+  const found = await withRetry(() => deps.idp.findByAttribute(KC_ATTR.USER_ID, userId), delayMs);
   if (!found.ok) {
-    logFailure('profileTypesSync.findUser', aggregatorId, found.error.code, start);
+    logFailure('profileTypesSync.findUser', userId, found.error.code, start);
     return 'failed';
   }
   if (!found.value) {
@@ -140,7 +137,7 @@ async function syncOne(
       operation: 'profileTypesSync.findUser',
       status: 'skipped',
       reason: 'kc_user_missing',
-      aggregator_id: aggregatorId,
+      aggregator_id: userId,
     });
     return 'kcMissing';
   }
@@ -158,7 +155,7 @@ async function syncOne(
     delayMs,
   );
   if (!written.ok) {
-    logFailure('profileTypesSync.setAttributes', aggregatorId, written.error.code, start);
+    logFailure('profileTypesSync.setAttributes', userId, written.error.code, start);
     return 'failed';
   }
   logger.info({
@@ -166,7 +163,7 @@ async function syncOne(
     status: 'success',
     outcome,
     latency_ms: Date.now() - start,
-    aggregator_id: aggregatorId,
+    aggregator_id: userId,
   });
   return outcome;
 }
@@ -179,13 +176,13 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /** Logs a failed Keycloak call for one coordinator. */
-function logFailure(operation: string, aggregatorId: string, code: string, start: number): void {
+function logFailure(operation: string, userId: string, code: string, start: number): void {
   logger.error({
     operation,
     status: 'failure',
     error_type: code,
     latency_ms: Date.now() - start,
-    aggregator_id: aggregatorId,
+    aggregator_id: userId,
   });
 }
 

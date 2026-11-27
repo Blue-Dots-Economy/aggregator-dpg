@@ -94,7 +94,7 @@ export interface UpdateLinkInput {
 }
 
 export const OnboardingSummarySchema = OutcomeCountsSchema.extend({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
 });
@@ -105,7 +105,7 @@ export const OnboardingSourceSliceSchema = OutcomeCountsSchema.extend({ source: 
 export type OnboardingSourceSlice = z.infer<typeof OnboardingSourceSliceSchema>;
 
 export const OnboardingBySourceSchema = z.object({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
   by_source: z.array(OnboardingSourceSliceSchema),

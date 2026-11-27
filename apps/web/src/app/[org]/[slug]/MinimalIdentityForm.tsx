@@ -17,7 +17,7 @@ import {
   type HandFieldError,
 } from '@/components/forms/useHandFieldErrors';
 import { PhoneInput } from '@/components/forms/PhoneInput';
-import { isValidPhone, phoneValueMode } from '@/lib/phone';
+import { isAcceptedPhone, phoneValueMode } from '@/lib/phone';
 import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
 import { useFieldErrorCopy } from '@/components/forms/useFieldErrors';
 import { isMinorBirthYear, isValidBirthYear } from '@/lib/registration-gates';
@@ -114,7 +114,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const hasName = name.trim().length > 0;
   const hasPhone = !!phoneKey && phone.trim().length > 0;
   const hasEmail = showEmail && email.trim().length > 0;
-  const phoneFormatOk = isValidPhone(phone);
+  const phoneFormatOk = isAcceptedPhone(phone, phoneCountries);
   const emailFormatOk = looksLikeEmail(email.trim());
   const phoneValid = hasPhone && phoneFormatOk;
   const emailValid = hasEmail && emailFormatOk;

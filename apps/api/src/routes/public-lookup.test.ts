@@ -165,6 +165,20 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
     expect(body.user_exists).toBe(true);
   });
 
+  it('finds an existing person stored with a landline-range number', async () => {
+    signalstack.seedOwnUser({
+      actingOrgId: ORG_ID,
+      phoneNumber: '+918020123456',
+      item: { item_id: 'item-3', lifecycle_status: 'live' },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/public/v1/aggregators/acme/lookup?phone_number=%2B918020123456&network=blue_dot&domain=seeker',
+    });
+    expect(r.statusCode).toBe(200);
+    expect((r.json() as { user_exists: boolean }).user_exists).toBe(true);
+  });
+
   it('400s INVALID_PHONE when phone_number cannot be normalised', async () => {
     const r = await app.inject({
       method: 'GET',

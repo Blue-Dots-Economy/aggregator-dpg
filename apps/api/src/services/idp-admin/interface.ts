@@ -55,7 +55,7 @@ export abstract class IdpAdminAdapter {
   abstract findByEmail(email: string): Promise<IdpResult<IdpUser | null>>;
   abstract findById(userId: string): Promise<IdpResult<IdpUser | null>>;
   /**
-   * Looks up a user by an attribute name/value pair, e.g. `aggregator_id`.
+   * Looks up a user by an attribute name/value pair, e.g. `user_id`.
    */
   abstract findByAttribute(name: string, value: string): Promise<IdpResult<IdpUser | null>>;
   abstract enableUser(userId: string): Promise<IdpResult<void>>;
@@ -74,7 +74,7 @@ export abstract class IdpAdminAdapter {
    * Writes the `decision_made` attribute on a user. Does not enable or
    * disable the user; call `enableUser` / `disableUser` for that.
    *
-   * @param userId  - Keycloak user id (from `findByAttribute(aggregator_id)`).
+   * @param userId  - Keycloak user id (from `findByAttribute(user_id)`).
    * @param decision - One of `'pending'`, `'approved'`, `'rejected'`.
    */
   abstract setUserDecision(

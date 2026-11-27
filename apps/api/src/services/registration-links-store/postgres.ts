@@ -28,7 +28,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .insert(registrationLinks)
         .values({
-          userId: input.aggregatorId,
+          userId: input.userId,
           slug: input.slug,
           domain: input.domain,
           context: input.context,
@@ -112,12 +112,12 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     }
   }
 
-  async findById(id: string, aggregatorId: string): Promise<StoreResult<RegistrationLink | null>> {
+  async findById(id: string, userId: string): Promise<StoreResult<RegistrationLink | null>> {
     try {
       const rows = await getDb()
         .select()
         .from(registrationLinks)
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, userId)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -132,16 +132,13 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
   }
 
   async list(
-    aggregatorId: string,
+    userId: string,
     options: ListRegistrationLinksOptions,
   ): Promise<StoreResult<ListRegistrationLinksResult>> {
     try {
       const where = options.status
-        ? and(
-            eq(registrationLinks.userId, aggregatorId),
-            eq(registrationLinks.status, options.status),
-          )
-        : eq(registrationLinks.userId, aggregatorId);
+        ? and(eq(registrationLinks.userId, userId), eq(registrationLinks.status, options.status))
+        : eq(registrationLinks.userId, userId);
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()
@@ -172,7 +169,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateDraft(
     id: string,
-    aggregatorId: string,
+    userId: string,
     patch: UpdateDraftInput,
   ): Promise<StoreResult<RegistrationLink>> {
     const start = Date.now();
@@ -187,7 +184,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         .where(
           and(
             eq(registrationLinks.id, id),
-            eq(registrationLinks.userId, aggregatorId),
+            eq(registrationLinks.userId, userId),
             // Only drafts are editable; live rows have published their QR and public URL.
             eq(registrationLinks.status, 'draft'),
           ),
@@ -229,14 +226,14 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
 
   async updateStatus(
     id: string,
-    aggregatorId: string,
+    userId: string,
     nextStatus: RegistrationLinkStatus,
   ): Promise<StoreResult<RegistrationLink>> {
     try {
       const rows = await getDb()
         .update(registrationLinks)
         .set({ status: nextStatus, updatedAt: new Date() })
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, userId)))
         .returning();
       const row = rows[0];
       if (!row) {
@@ -257,7 +254,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
 function toDomain(row: RegistrationLinkRow): RegistrationLink {
   return {
     id: row.id,
-    aggregatorId: row.userId,
+    userId: row.userId,
     slug: row.slug,
     domain: row.domain,
     context: row.context,

@@ -232,7 +232,7 @@ services:
   # Reuses aggregator-dpg's realm import, OTP SPI jar, and brand themes, but
   # runs in LOCALHOST mode (root path on :8080, no nginx /auth subpath).
   # render-realm.sh substitutes __PUBLIC_BASE_URL__ + __SMTP_*__ placeholders
-  # in the realm JSON at boot; the aggregator_id / phone_number protocol
+  # in the realm JSON at boot; the user_id / phone_number protocol
   # mappers and unmanagedAttributePolicy are already baked into the realm JSON
   # (no manual mapper step needed).
   # ───────────────────────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ services:
   # Post-import init: applies settings that Keycloak's realm import does NOT
   # reliably apply from the realm JSON — most importantly
   # unmanagedAttributePolicy=ENABLED, WITHOUT which the API's custom
-  # `aggregator_id` / `phone_number` user attributes are silently dropped and
+  # `user_id` / `phone_number` user attributes are silently dropped and
   # the registration-approval page 404s ("identity record missing"). Also
   # re-applies SMTP + reconciles the aggregator-portal client secret. Runs once,
   # idempotently. Reuses aggregator-dpg/infra/keycloak/init/apply-user-profile.sh.
@@ -525,6 +525,7 @@ services:
     # Not published: every request reaches the API through aggregator-envoy,
     # which owns host port 4000 (docs/rbac/rbac-edge-enforcement.md §7.1).
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       PORT: "4000"
       HOST: "0.0.0.0"
@@ -628,7 +629,7 @@ services:
       keycloak:
         condition: service_healthy
       # Wait for the realm to have unmanagedAttributePolicy=ENABLED before the
-      # API can create users — otherwise aggregator_id attributes are dropped.
+      # API can create users — otherwise user_id attributes are dropped.
       keycloak-init:
         condition: service_completed_successfully
       # So the first requests are not denied because OPA is still starting.
@@ -712,6 +713,7 @@ services:
     container_name: sd-aggregator-web
     restart: unless-stopped
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
@@ -761,6 +763,7 @@ services:
     container_name: sd-aggregator-worker
     restart: unless-stopped
     environment:
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/${AGGREGATOR_DB:-aggregator}

@@ -13,20 +13,18 @@
  * (`registration_links.domain`).
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
+import type { AuthContext } from '../services/auth/access-token.js';
 import { getDb } from '../db/client.js';
 import { bulkUploads, onboarding, registrationLinks } from '../db/schema.js';
-import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { servedDomains } from '../services/user-store/serves.js';
 import { resolveRequestedDomain } from './served-domains-shared.js';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 const RangeQuerySchema = z.object({
   from: z.iso.datetime({ offset: true }).optional(),
@@ -47,14 +45,14 @@ const OnboardingCountersSchema = z.object({
 });
 
 const OnboardingSummaryResponseSchema = OnboardingCountersSchema.extend({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   from: z.string().nullable(),
   to: z.string().nullable(),
 }).loose();
 
 const OnboardingBySourceResponseSchema = z
   .object({
-    aggregator_id: z.string(),
+    user_id: z.string(),
     from: z.string().nullable(),
     to: z.string().nullable(),
     by_source: z.array(OnboardingCountersSchema.extend({ source: z.string() }).loose()),
@@ -81,7 +79,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
@@ -96,7 +94,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
 
       const r = rows[0] ?? { total: 0, passed: 0, failed: 0, skipped: 0 };
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         ...r,
@@ -122,7 +120,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { range, where } = await metricsFilter(auth, req.query);
 
       const rows = await getDb()
@@ -138,7 +136,7 @@ export function registerOnboardingRoutes(base: FastifyInstance): void {
         .groupBy(onboarding.source);
 
       return reply.send({
-        aggregator_id: auth.aggregatorId,
+        user_id: auth.userId,
         from: range.from?.toISOString() ?? null,
         to: range.to?.toISOString() ?? null,
         by_source: rows,
@@ -161,7 +159,7 @@ async function metricsFilter(
   query: z.infer<typeof RangeQuerySchema>,
 ): Promise<{ range: { from?: Date; to?: Date }; where: SQL | undefined }> {
   const range = parseRange(query);
-  const conditions = [eq(onboarding.userId, auth.aggregatorId)];
+  const conditions = [eq(onboarding.userId, auth.userId)];
   if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
   if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
   const byType = await profileTypeCondition(auth, query.domain);
@@ -204,20 +202,4 @@ function parseRange(query: z.infer<typeof RangeQuerySchema>): { from?: Date; to?
   if (query.from) out.from = new Date(query.from);
   if (query.to) out.to = new Date(query.to);
   return out;
-}
-
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
-  }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
-  }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
 }

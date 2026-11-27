@@ -13,6 +13,7 @@ import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
   campaignExportConfigFields,
+  phoneConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
 
@@ -230,6 +231,7 @@ const ConfigSchema = z.object({
   // ─── SignalStack outward push ───────────────────────────────────────────
   // Shared with the worker; the acting org id below is api-only.
   ...signalStackConfigFields,
+  ...phoneConfigFields,
   /**
    * Signals org id sent as `x-acting-org-id` for admin upserts. Required when
    * SIGNALSTACK_BASE_URL is set, so approval can register the aggregator in Signals.

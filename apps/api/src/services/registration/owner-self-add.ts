@@ -3,7 +3,7 @@
  * coordinator account in an organisation they own, on the same contact and
  * the same IdP login, approved at once.
  *
- * The owner's Keycloak user is never written here: no `aggregator_id`, no
+ * The owner's Keycloak user is never written here: no `user_id`, no
  * decision stamp, no enable or disable. The approval skips Keycloak for a
  * login that also holds an admin account (`services/decisions/coordinator.ts`).
  */
@@ -207,7 +207,7 @@ async function checkReactivation(
     return refuse('ALREADY_COORDINATOR', 'coordinator account belongs to another login');
   }
   // A row registered before self-add has its own Keycloak user; one row never gets two logins.
-  const legacy = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, row.id);
+  const legacy = await getIdpAdmin().findByAttribute(KC_ATTR.USER_ID, row.id);
   if (!legacy.ok) return refuse('UNAVAILABLE', 'idp lookup');
   if (legacy.value !== null && legacy.value.id !== subject) {
     return refuse('ALREADY_COORDINATOR', 'coordinator account has its own Keycloak user');
@@ -386,7 +386,7 @@ async function approve(
   requestId: string | undefined,
 ): Promise<SelfAddResult<Coordinator>> {
   const outcome = await approveCoordinator({
-    aggregatorId: id,
+    userId: id,
     decidedBy,
     log,
     ...(requestId ? { requestId } : {}),

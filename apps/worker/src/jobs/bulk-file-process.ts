@@ -54,10 +54,11 @@ function failureReason(reason: FileFailureReason, detail?: string): string {
 }
 
 export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessOutcome> {
+  const { userId } = job;
   const log = logger.child({
     operation: 'bulkFileProcess',
     upload_id: job.uploadId,
-    aggregator_id: job.aggregatorId,
+    aggregator_id: userId,
   });
   const start = Date.now();
 
@@ -169,7 +170,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   const writeChunk = async (slice: typeof rows): Promise<void> => {
     const payloads = slice.map((r) => ({
       uploadId: job.uploadId,
-      aggregatorId: job.aggregatorId,
+      userId,
       rowIndex: r.rowIndex,
       schemaId: job.schemaId,
       schemaVersion: job.schemaVersion,

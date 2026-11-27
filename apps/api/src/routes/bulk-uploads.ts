@@ -12,7 +12,7 @@
  *   GET /v1/bulk-uploads/:id
  *     Status read for UI polling: status, counters and the errors.csv key.
  *
- * Every endpoint checks the token's `aggregator_id` owns the upload; another
+ * Every endpoint checks the token's `user_id` owns the upload; another
  * aggregator's upload answers 403. Belongs to `@aggregator-dpg/api`.
  */
 
@@ -21,9 +21,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
-import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { throwIfActingError } from '../services/auth/acting.js';
-import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
+import { getBulkUploadsStore, type BulkUpload } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
@@ -40,9 +38,9 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
-import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import { errorMessage, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { requireServedDomain } from './served-domains-shared.js';
+import { requireCoordinatorAuth } from './coordinator-auth-shared.js';
 
 /**
  * Returns the valid participant types for the active network.
@@ -231,10 +229,10 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
 
       // Per-coordinator rate limit. Fails open on a Redis error.
-      const templateRate = await checkBulkTemplateRate(auth.userId);
+      const templateRate = await checkBulkTemplateRate(auth.subject);
       if (!templateRate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many template requests; please try again later.',
@@ -309,10 +307,10 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
 
       // Per-coordinator rate limit.
-      const uploadRate = await checkBulkUploadRate(auth.userId);
+      const uploadRate = await checkBulkUploadRate(auth.subject);
       if (!uploadRate.allowed) {
         throw httpError('RATE_LIMITED', {
           detail: 'Too many bulk uploads; please try again later.',
@@ -320,7 +318,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         });
       }
 
-      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
+      const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.subject });
       const start = Date.now();
 
       // Check the type against the network config.
@@ -340,13 +338,13 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
 
       const store = getBulkUploadsStore();
       const created = await store.create({
-        aggregatorId: auth.aggregatorId,
+        userId: auth.userId,
         participantType,
         // Placeholder; the real key needs the row id and is set below.
         storageKey: 'pending',
         schemaId,
         schemaVersion,
-        uploadedBy: auth.userId,
+        uploadedBy: auth.subject,
       });
       if (!created.ok) {
         log.error({
@@ -358,7 +356,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       }
 
       const uploadId = created.value.id;
-      const storedKey = buildKey('bulk-uploads', auth.aggregatorId, uploadId, 'raw.csv');
+      const storedKey = buildKey('bulk-uploads', auth.userId, uploadId, 'raw.csv');
       const rawRef: ObjectRef = { area: 'bulk-uploads', key: storedKey };
       const storage = getObjectStorage();
       const [signed, signedPut] = await Promise.all([
@@ -391,7 +389,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
         status: 'success',
         latency_ms: Date.now() - start,
         upload_id: uploadId,
-        aggregator_id: auth.aggregatorId,
+        aggregator_id: auth.userId,
       });
 
       return reply.code(201).send({
@@ -433,28 +431,20 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
       const body = req.body;
       const log = req.log.child({
         operation: 'bulkUploads.start',
-        actor: auth.userId,
+        actor: auth.subject,
         upload_id: uploadId,
       });
       const start = Date.now();
 
       const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
-      const upload = found.value;
       // Already past 'uploaded': return the current state.
       if (upload.status !== 'pending' && upload.status !== 'uploaded') {
         log.warn({
@@ -518,7 +508,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       // Record the attestation before the state change. Fails closed: no upload
       // is processed without one.
       const attestationRecorded = await recordBulkUploadAttestation({
-        aggregatorId: auth.aggregatorId,
+        userId: auth.userId,
         uploadId,
         log,
       });
@@ -529,7 +519,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       }
 
       // Re-uploading the same file is allowed, so a failure here is never a duplicate.
-      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.fingerprint);
+      const marked = await store.markUploaded(uploadId, auth.userId, head.fingerprint);
       if (!marked.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
       }
@@ -537,7 +527,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       try {
         await enqueueBulkFileProcess({
           uploadId: marked.value.id,
-          aggregatorId: auth.aggregatorId,
+          userId: auth.userId,
           s3Key: marked.value.storageKey,
           participantType: marked.value.participantType,
           schemaId: marked.value.schemaId,
@@ -583,11 +573,11 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       const { limit, offset } = req.query;
 
       const store = getBulkUploadsStore();
-      const result = await store.list(auth.aggregatorId, { limit, offset });
+      const result = await store.list(auth.userId, { limit, offset });
       if (!result.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
       }
@@ -621,21 +611,14 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
 
-      const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
-      const counts = await loadCounts(found.value.id, found.value.status);
-      return reply.send(toResponse(found.value, counts));
+      const counts = await loadCounts(upload.id, upload.status);
+      return reply.send(toResponse(upload, counts));
     },
   );
 
@@ -658,26 +641,17 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       },
     },
     async (req, reply) => {
-      const auth = await requireAuth(req);
+      const auth = await requireCoordinatorAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
       const { id: uploadId } = req.params;
       const log = req.log.child({
         operation: 'bulkUploads.errorsCsv',
-        actor: auth.userId,
+        actor: auth.subject,
         upload_id: uploadId,
       });
       const start = Date.now();
 
-      const store = getBulkUploadsStore();
-      const found = await store.findById(uploadId, auth.aggregatorId);
-      if (!found.ok) {
-        throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
-      }
-      if (!found.value) {
-        // 403 to prevent cross-aggregator enumeration.
-        throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
-      }
-      const upload = found.value;
+      const upload = await findOwnUpload(uploadId, auth.userId);
 
       if (upload.status !== 'completed') {
         log.info({
@@ -703,7 +677,7 @@ export function registerBulkUploadsRoutes(base: FastifyInstance): void {
       // Only sign keys that match the errors.csv layout, never an arbitrary object.
       const expectedKeys = [
         `bulk-uploads/${upload.id}/errors.csv`,
-        buildKey('bulk-uploads', auth.aggregatorId, upload.id, 'errors.csv'),
+        buildKey('bulk-uploads', auth.userId, upload.id, 'errors.csv'),
       ];
       if (!expectedKeys.includes(upload.errorsCsvStorageKey)) {
         log.error({
@@ -919,20 +893,24 @@ async function loadCountsBatch(
   return out;
 }
 
-async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
-  const result = await requireApproved(req);
-  if (!result.ok) {
-    throwIfActingError(result.error);
-    if (result.error.code === 'NOT_APPROVED') {
-      throw httpError('NOT_APPROVED', { detail: result.error.message });
-    }
-    throw httpError('UNAUTHORIZED', { detail: result.error.message });
+/**
+ * Reads one of the caller's own uploads.
+ *
+ * @param uploadId - The upload id from the path.
+ * @param userId - The caller's `users.id`; the store returns only that user's uploads.
+ * @returns The upload.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws FORBIDDEN if no upload of the caller has this id, so other coordinators' uploads cannot be enumerated.
+ */
+async function findOwnUpload(uploadId: string, userId: string): Promise<BulkUpload> {
+  const found = await getBulkUploadsStore().findById(uploadId, userId);
+  if (!found.ok) {
+    throw httpError('DB_UNAVAILABLE', { cause: new Error(found.error.message) });
   }
-  if (!result.context.aggregatorId) {
-    throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
+  if (!found.value) {
+    throw httpError('FORBIDDEN', { detail: 'Upload not accessible.' });
   }
-  await recordRouteCaller(req, callerFromAuth(result.context));
-  return result.context;
+  return found.value;
 }
 
 /**
@@ -942,17 +920,17 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
  * versions go in their own columns. Returns `false` on any failure so the
  * caller aborts the upload.
  *
- * @param aggregatorId - The uploading aggregator (ledger subject).
+ * @param userId - The uploading aggregator (ledger subject).
  * @param uploadId - The bulk_uploads row this attestation authorises.
  * @param log - Request-scoped logger.
  * @returns `true` when the ledger row was written; `false` on any failure.
  */
 async function recordBulkUploadAttestation({
-  aggregatorId,
+  userId,
   uploadId,
   log,
 }: {
-  aggregatorId: string;
+  userId: string;
   uploadId: string;
   log: ReturnType<FastifyRequest['log']['child']>;
 }): Promise<boolean> {
@@ -988,7 +966,7 @@ async function recordBulkUploadAttestation({
 
   const result = await getConsentLedger().recordRegistrationConsent({
     subjectType: 'user',
-    subjectId: aggregatorId,
+    subjectId: userId,
     network,
     brand: brand ?? null,
     termsVersion,

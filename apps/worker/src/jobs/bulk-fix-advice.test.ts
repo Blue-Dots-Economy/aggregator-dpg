@@ -21,7 +21,7 @@ const schema = {
 describe('adviceForSchemaIssue', () => {
   it('asks for a 10-digit number when a phone column fails its pattern', () => {
     expect(adviceForSchemaIssue({ keyword: 'pattern' }, 'phone', schema, '|')).toBe(
-      'Check the format of the phone number in the "phone" column. It should be a 10-digit mobile number, or + and the country code followed by the number.',
+      'Check the format of the phone number in the "phone" column. It should be a valid mobile number; add + and the country code for a number from another country.',
     );
   });
 

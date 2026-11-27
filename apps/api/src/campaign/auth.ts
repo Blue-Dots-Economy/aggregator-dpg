@@ -29,11 +29,11 @@ import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 export async function requireCampaignAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req, { allowedAzp: campaignManagerAllowedAzp() });
   if (!result.ok) {
-    const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
+    const code = result.error.code === 'MISSING_USER_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
     throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
   }
   // The system token shares this client's `azp`. Reject it even if it was
-  // given an `aggregator_id` by mistake, so it can never reach org-scoped PII.
+  // given a `user_id` by mistake, so it can never reach org-scoped PII.
   if (result.context.preferredUsername === campaignDumpServiceAccount()) {
     throw httpError('FORBIDDEN', {
       detail: 'the campaign-manager system token cannot access org-scoped campaign routes',

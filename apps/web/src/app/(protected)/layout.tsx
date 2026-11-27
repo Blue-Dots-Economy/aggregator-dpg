@@ -17,7 +17,7 @@ import type { ReactNode } from 'react';
 import { Sidebar } from '../../components/shell/Sidebar';
 import { AuthProvider } from '../../lib/auth-context';
 import { getSession } from '../../lib/server-session';
-import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '../../lib/jwt';
+import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenUserId } from '../../lib/jwt';
 import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import type { User } from '../../types';
 import { getConsoleActor, type ConsoleActorResult } from '../../lib/console-actor';
@@ -40,11 +40,11 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
-  // Only coordinators (tokens with `aggregator_id`) and org owners acting as
+  // Only coordinators (tokens with `user_id`) and org owners acting as
   // their own coordinator account use this portal. Other org owners go to the
   // console; everyone else is logged out with a reason.
   const acting = session.actingAccountId !== undefined;
-  if (!acting && !tokenAggregatorId(session.accessToken)) {
+  if (!acting && !tokenUserId(session.accessToken)) {
     const population = classifyNonCoordinator(
       session.accessToken,
       await resolveSignalsRealmRoles(),

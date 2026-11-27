@@ -41,7 +41,7 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
-import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
+import { parseMobilePhone } from '../services/phone.js';
 import { splitName } from '../services/name.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -54,7 +54,7 @@ const CoordinatorInviteAcceptBodySchema = RegistrationPayloadSchema.extend({
 
 /** `201` of an invite accept: the account is pending until the email code is entered. */
 const InviteAcceptedResponseSchema = z.object({
-  aggregator_id: z.string(),
+  user_id: z.string(),
   org_slug: z.string(),
   status: z.literal('pending'),
   message: z.string(),
@@ -143,7 +143,7 @@ type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
 type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
- * Checks a coordinator form, normalises its phone, stamps its consent and applies the submit rate limit.
+ * Normalises a coordinator form's phone, then checks the form, stamps its consent and applies the submit rate limit.
  *
  * @param body - The parsed form, validated against the registration JSON Schema.
  * @throws {HttpError} SCHEMA_VALIDATION, INVALID_PHONE or RATE_LIMITED.
@@ -163,14 +163,8 @@ async function checkCoordinatorSubmission(
       fields: { type: 'invalid' },
     });
   }
-  const validate = await getRegistrationValidator();
-  if (!validate(body)) {
-    throw httpError('SCHEMA_VALIDATION', {
-      detail: 'Payload failed JSON Schema validation.',
-      fields: { issues: validate.errors ?? [] },
-    });
-  }
-  const phoneResult = normalisePhone(body.contact.phone);
+  // The phone is cleaned first, so the schema checks the E.164 form, not the typed one.
+  const phoneResult = parseMobilePhone(body.contact.phone);
   if (!phoneResult.ok) {
     throw httpError('INVALID_PHONE', {
       detail: phoneResult.error.message,
@@ -179,6 +173,13 @@ async function checkCoordinatorSubmission(
   }
   const phoneE164 = phoneResult.value;
   const contact: BecknContact = { ...body.contact, phone: phoneE164 };
+  const validate = await getRegistrationValidator();
+  if (!validate({ ...body, contact })) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'Payload failed JSON Schema validation.',
+      fields: { issues: validate.errors ?? [] },
+    });
+  }
 
   const consent = stampConsent(body.consent);
   if (!consent) {
@@ -237,7 +238,7 @@ async function acceptCoordinatorInvite(
   await claimInvite(invite.jti);
   let committed = false;
   try {
-    const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
+    const { userId, orgSlug } = await createCoordinatorRow(userStore, body, {
       contact,
       domains,
       consent,
@@ -247,7 +248,7 @@ async function acceptCoordinatorInvite(
       log,
     });
     const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
-      aggregatorId,
+      userId,
       types: domains,
       contact,
     });
@@ -256,14 +257,14 @@ async function acceptCoordinatorInvite(
       {
         status: 'success',
         latency_ms: Date.now() - start,
-        aggregator_id: aggregatorId,
+        aggregator_id: userId,
         org_slug: orgSlug,
         keycloak_user_id: keycloakUserId,
       },
       'invited coordinator registered; awaiting email verification',
     );
     return reply.status(201).send({
-      aggregator_id: aggregatorId,
+      user_id: userId,
       org_slug: orgSlug,
       status: 'pending',
       message: 'Registration received. Sign in with the code we email you to finish.',
@@ -412,7 +413,7 @@ async function createCoordinatorRow(
     locations: BecknLocation[];
     log: RequestLog;
   },
-): Promise<{ aggregatorId: string; orgSlug: string }> {
+): Promise<{ userId: string; orgSlug: string }> {
   const recordConsent = await aggregatorConsentWriter({ consent: row.consent, log: row.log });
   if (!recordConsent) {
     throw httpError('CONSENT_WRITE_FAILED', {
@@ -440,7 +441,7 @@ async function createCoordinatorRow(
         : {}),
     });
   }
-  return { aggregatorId: created.value.id, orgSlug: created.value.orgSlug };
+  return { userId: created.value.id, orgSlug: created.value.orgSlug };
 }
 
 /**
@@ -453,7 +454,7 @@ async function createCoordinatorLogin(
   userStore: ReturnType<typeof getUserStore>,
   idp: ReturnType<typeof getIdpAdmin>,
   user: {
-    aggregatorId: string;
+    userId: string;
     /** Every profile type served (multivalued claim). */
     types: string[];
     contact: BecknContact;
@@ -469,14 +470,14 @@ async function createCoordinatorLogin(
     firstName,
     lastName,
     attributes: {
-      [KC_ATTR.AGGREGATOR_ID]: user.aggregatorId,
+      [KC_ATTR.USER_ID]: user.userId,
       [KC_ATTR.AGGREGATOR_TYPE]: user.types,
       [KC_ATTR.PHONE_NUMBER]: user.contact.phone,
       [KC_ATTR.DECISION_MADE]: 'invited',
     },
   });
   if (created.ok) return created.value.id;
-  await userStore.deleteById(user.aggregatorId);
+  await userStore.deleteById(user.userId);
   if (created.error.code === 'USER_EXISTS') {
     throw httpError('USER_EXISTS', {
       cause: created.error,
