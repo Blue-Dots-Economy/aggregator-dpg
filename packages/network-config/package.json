@@ -35,6 +35,10 @@
     "./signals-cta": {
       "import": "./dist/signals-cta.js",
       "types": "./dist/signals-cta.d.ts"
+    },
+    "./warnings": {
+      "import": "./dist/warnings.js",
+      "types": "./dist/warnings.d.ts"
     }
   },
   "scripts": {

@@ -5,7 +5,8 @@
  * Keycloak user that is enabled, unverified and `decision_made = invited`.
  * Signing in with an email code marks the email verified, which proves the
  * invitee owns the invited address. Activation then approves the account and
- * tells the inviting org's owner that the invitee joined.
+ * tells the inviting org's owner that the invitee joined. For an org, it also
+ * approves the owner's pending coordinator account when registration created one.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -17,6 +18,7 @@ import { approveCoordinator } from '../decisions/coordinator.js';
 import { approveOrg, grantOwnerAccess, type OwnerAccessResult } from '../decisions/org.js';
 import { renderCoordinatorJoined, renderOrgJoined } from '../email-templates/index.js';
 import { config } from '../../config.js';
+import { approveOwnerTeamAccount } from '../registration/owner-self-add.js';
 
 /** Which account an activation is about. */
 export type ActivatedAccount = 'coordinator' | 'org_owner';
@@ -291,5 +293,24 @@ export async function activateInvitedAccount(
   if (owned.value?.ownerKcSub !== subject) {
     return refused(scoped, { kind: 'not_found' }, { reason: 'no_owned_org' });
   }
-  return activateOrg(owned.value, kc.value, scoped);
+  const outcome = await activateOrg(owned.value, kc.value, scoped);
+  if (outcome.kind === 'activated' || outcome.kind === 'already_active') {
+    await approveTeamAccount(owned.value, scoped, requestId);
+  }
+  return outcome;
+}
+
+/**
+ * Approves the owner's pending coordinator account, which an `auto` instance
+ * creates at org registration. Not on an `off` instance. A failure is logged
+ * by the service and does not fail the activation; the owner can still add
+ * themselves from the console.
+ */
+async function approveTeamAccount(
+  org: Organisation,
+  log: FastifyBaseLogger,
+  requestId: string,
+): Promise<void> {
+  if (config.OWNER_SELF_ADD_MODE === 'off') return;
+  await approveOwnerTeamAccount(org, log, requestId);
 }

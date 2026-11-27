@@ -28,6 +28,7 @@ import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
+import { OwnerSelfAddModeSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 // The tile and status-rule schemas come from network-config, which keeps unknown
 // keys. The reply strips them, so it carries only the documented fields.
@@ -111,8 +112,11 @@ const AggregatorConfigResponseSchema = z.object({
    * could reject a value that boot accepted and cause a 500.
    */
   signals_ui_urls: z.record(z.string(), z.string()),
-  /** Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`. */
-  features: z.object({ custom_roles: z.boolean() }),
+  /**
+   * Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`;
+   * `owner_self_add` is `OWNER_SELF_ADD_MODE`.
+   */
+  features: z.object({ custom_roles: z.boolean(), owner_self_add: OwnerSelfAddModeSchema }),
   /** Largest bulk-upload CSV the api accepts, in bytes (`BULK_UPLOAD_MAX_BYTES`). */
   bulk_upload_max_bytes: z.number().int().positive(),
   /** The role name the console shows for an invited organisation. */
@@ -202,7 +206,10 @@ export function registerAggregatorConfigRoutes(base: FastifyInstance): void {
             ]),
         ),
         signals_ui_urls: signalsUiUrls,
-        features: { custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED },
+        features: {
+          custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED,
+          owner_self_add: config.OWNER_SELF_ADD_MODE,
+        },
         bulk_upload_max_bytes: config.BULK_UPLOAD_MAX_BYTES,
         organisation: {
           invite_role_label:

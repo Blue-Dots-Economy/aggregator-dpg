@@ -21,6 +21,7 @@ import {
   type GradientSchema,
   type PaletteSwatchSchema,
 } from '@aggregator-dpg/network-config/interface';
+import { OwnerSelfAddModeSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 import { jsonFetch } from '../services/http';
 
@@ -109,7 +110,10 @@ export const AggregatorConfigPayloadSchema = z.object({
   }),
   network: z.object({ id: z.string(), display_name: z.string().optional() }),
   domains: z.array(AggregatorConfigDomainSchema),
-  features: z.object({ custom_roles: z.boolean() }),
+  features: z.object({
+    custom_roles: z.boolean(),
+    owner_self_add: OwnerSelfAddModeSchema.optional(),
+  }),
   dashboardBuckets: DashboardBucketsSchema.optional(),
   /** Per-link registration modes declared by the network (admin dropdown source). */
   registration_modes: z.record(z.string(), RegistrationModeConfigSchema).optional(),

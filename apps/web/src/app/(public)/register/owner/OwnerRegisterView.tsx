@@ -17,6 +17,11 @@ export interface OwnerRegisterViewProps {
    * the widget then shows plain text.
    */
   orgConsentContent?: ConsentDocContent | null;
+  /**
+   * Terms/Privacy content for the team member (aggregator) audience, when the
+   * owner also joins the org's team at registration; `null` otherwise.
+   */
+  teamConsentContent?: ConsentDocContent | null;
   /** The org invite the owner arrived with. */
   invite: OrgFormInvite;
 }
@@ -34,6 +39,7 @@ export function OwnerRegisterView({
   schema,
   uiSchema,
   orgConsentContent,
+  teamConsentContent,
   invite,
 }: Readonly<OwnerRegisterViewProps>): JSX.Element {
   const t = useTranslations('register');
@@ -44,6 +50,7 @@ export function OwnerRegisterView({
         schema={schema}
         uiSchema={uiSchema}
         {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
+        {...(teamConsentContent ? { teamConsentContent } : {})}
         invite={invite}
       />
     </RegisterPageShell>

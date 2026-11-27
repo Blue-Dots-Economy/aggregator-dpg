@@ -65,9 +65,9 @@ describe('voice_bots schema', () => {
     ).toContain('default_voice_bots');
   });
 
-  it('rejects two bots serving a domain with no default, naming the domain', () => {
-    const text = errorText(yamlWith({ voice_bots: [BOT, { ...BOT, key: 'b' }] }));
-    expect(text).toContain('default_voice_bots.seeker is required');
+  it('parses two bots serving a domain with no default', () => {
+    const r = AggregatorYamlSchema.safeParse(yamlWith({ voice_bots: [BOT, { ...BOT, key: 'b' }] }));
+    expect(r.success).toBe(true);
   });
 
   it('parses two bots serving a domain when a default is set', () => {
@@ -114,6 +114,12 @@ describe('voice_bots schema', () => {
     );
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.aggregator.voice_bots[0]?.phone).toBe('+911204404274');
+  });
+
+  it('rejects a +91 number starting with 0', () => {
+    expect(errorText(yamlWith({ voice_bots: [{ ...BOT, phone: '+91 0120440427' }] }))).toContain(
+      'phone',
+    );
   });
 
   it('rejects empty languages and empty domains', () => {

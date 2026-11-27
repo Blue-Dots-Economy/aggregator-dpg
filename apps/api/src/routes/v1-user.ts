@@ -790,13 +790,14 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         tags: ['console'],
         summary: 'Add the signed-in owner to the team of an organisation they own',
         description:
-          "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated.",
+          "Creates the owner's own coordinator account in `org_id` on the owner's contact and sign-in, and approves it at once. `serves` lists one or more network domain ids. `consent` is the coordinator Terms and Privacy consent, the same block as `POST /v1/user/invite/accept`; it is recorded in the consent ledger with the account. The owner's Keycloak user is not changed. Refused for the Default org, an org that is not active, an org the caller does not own, and any owner of the network root. One coordinator account per person: a second self-add answers 409, except that a deactivated account in the same org is reactivated, and so is the pending account an `auto` instance created at registration. 403 SELF_ADD_DISABLED when `OWNER_SELF_ADD_MODE` is `off`.",
         body: SelfAddRequestSchema,
         response: { 201: UserSchema, ...errorResponses(400, 401, 403, 409, 429, 503) },
       },
     },
     async (req, reply) => {
       const { actor, auth } = await requireActor(req);
+      if (config.OWNER_SELF_ADD_MODE === 'off') throw httpError('SELF_ADD_DISABLED');
       await guardWriteRate(actor, reply);
       const consent = stampConsent(req.body.consent);
       if (!consent) {

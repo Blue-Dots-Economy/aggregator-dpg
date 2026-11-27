@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { storageConfigFields } from '@aggregator-dpg/object-storage/config';
+import { OwnerSelfAddModeSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { dumpFilesSchema } from './services/object-storage/dump-keys.js';
 import {
   assertSignalStackClientIdentity,
@@ -261,6 +262,14 @@ const ConfigSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * How an organisation owner joins their own team. `owner` (default): the
+   * owner adds themselves from the console. `auto`: organisation registration
+   * also creates the owner's coordinator account, with the coordinator Terms
+   * and Privacy the owner accepted there, and activation approves it. `off`:
+   * `POST /v1/user/self/add` is refused with `403 SELF_ADD_DISABLED`.
+   */
+  OWNER_SELF_ADD_MODE: OwnerSelfAddModeSchema.default('owner'),
   /** Base URL of the OPA sidecar. Validated at boot. */
   OPA_URL: z.url().default('http://localhost:8181'),
   /** Per-attempt timeout for an OPA decision. */

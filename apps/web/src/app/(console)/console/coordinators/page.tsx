@@ -23,6 +23,7 @@ import { getConsoleActor, type ConsoleActorResult } from '@/lib/console-actor';
 import { isKnownAsEnabled } from '@/lib/known-as-flag';
 import { canInvite, canViewCoordinators, selfAddOrgs } from '@/lib/capabilities';
 import { AddMyselfButton } from '@/components/console/SelfAddDialog';
+import { ownerSelfAddMode } from '@/lib/features.server';
 import { loadConsentContent } from '@/app/(public)/register/register-server';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
@@ -123,11 +124,11 @@ function filterChips(
  * The orgs the viewer owns, what it may do on the page, and which row is theirs.
  *
  * @param actor - The viewer, from `read/me`; nothing is offered when it could not be read.
- * @param hasDomains - Whether the network has domains; without them there are no profile types to offer.
+ * @param offerSelfAdd - Whether to offer "Add myself": the deployment allows it and the network has domains to serve.
  */
 function viewerOf(
   actor: ConsoleActorResult,
-  hasDomains: boolean,
+  offerSelfAdd: boolean,
 ): {
   ownedIds: ReadonlySet<string>;
   showInvite: boolean;
@@ -141,7 +142,7 @@ function viewerOf(
     ownedIds: new Set(actor.me.orgs.map((o) => o.id)),
     // Same gate the sidebar link used to apply, now checked here instead.
     showInvite: canInvite(actor.me),
-    addSelfOrgs: hasDomains ? selfAddOrgs(actor.me) : [],
+    addSelfOrgs: offerSelfAdd ? selfAddOrgs(actor.me) : [],
     ownAccountId: actor.me.own_coordinator_account_id ?? null,
   };
 }
@@ -179,7 +180,11 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
-  const { ownedIds, showInvite, addSelfOrgs, ownAccountId } = viewerOf(actor, domains.length > 0);
+  const selfAddOn = (await ownerSelfAddMode()) !== 'off';
+  const { ownedIds, showInvite, addSelfOrgs, ownAccountId } = viewerOf(
+    actor,
+    selfAddOn && domains.length > 0,
+  );
   // Users are visible only in the orgs the viewer owns, so filters and counts use those.
   const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
   const counts = await countCoordinators(ownOrgs, orgId, serves);

@@ -45,10 +45,17 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
   },
 }));
 
-let capturedGateProps: { open: boolean; onAccept: () => void; onCancel?: () => void } | undefined;
+interface GateShimProps {
+  open: boolean;
+  onAccept: () => void;
+  onCancel?: () => void;
+  docs?: Array<{ id: string; title: string }>;
+  agreeLabel?: string;
+}
+let capturedGateProps: GateShimProps | undefined;
 
 vi.mock('@/components/consent/ConsentGate', () => ({
-  ConsentGate: (props: { open: boolean; onAccept: () => void; onCancel?: () => void }) => {
+  ConsentGate: (props: GateShimProps) => {
     capturedGateProps = props;
     if (!props.open) return null;
     return (
@@ -184,6 +191,67 @@ describe('OwnerRegisterView', () => {
     expect(body.consent).toMatchObject({ value: true });
     expect(body.consent?.['given_at']).toBeDefined();
     expect(body.consent?.['valid_till']).toBeDefined();
+  });
+
+  it('with team consent, the gate holds the team documents too and the body carries team_consent', async () => {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      if (String(input).includes('/api/invite/org/accept')) {
+        calls.push(init?.body ?? '');
+        return new Response(JSON.stringify({ slug: 'acme-org' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    renderView({ teamConsentContent: consentContentFixture });
+    expect(screen.getByText(messages.register.consent.team_join_note)).toBeInTheDocument();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+
+    expect(capturedGateProps?.docs?.map((d) => d.id)).toEqual([
+      'privacy',
+      'terms',
+      'team-privacy',
+      'team-terms',
+    ]);
+    expect(capturedGateProps?.docs?.[2]?.title).toBe('My Team: Privacy');
+    expect(capturedGateProps?.agreeLabel).toContain(messages.register.consent.team_scope);
+
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const body = JSON.parse(calls[0]!) as { team_consent?: Record<string, unknown> };
+    expect(body.team_consent).toMatchObject({ value: true });
+    expect(body.team_consent?.['valid_till']).toBeDefined();
+  });
+
+  it('without team consent, sends no team_consent and shows no team note', async () => {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      if (String(input).includes('/api/invite/org/accept')) {
+        calls.push(init?.body ?? '');
+        return new Response(JSON.stringify({ slug: 'acme-org' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    renderView();
+    expect(screen.queryByText(messages.register.consent.team_join_note)).toBeNull();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+    expect(capturedGateProps?.docs?.map((d) => d.id)).toEqual(['privacy', 'terms']);
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(JSON.parse(calls[0]!)).not.toHaveProperty('team_consent');
   });
 
   it('when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {

@@ -23,7 +23,7 @@ import { _setNetworkConfig } from '../network-config.js';
 import { _setSignalStackWriter } from '../signalstack.js';
 import { buildAdminActor } from '../auth/actor/testing.js';
 import type { Actor } from '../auth/actor/index.js';
-import { ownerSelfAdd } from './owner-self-add.js';
+import { approveOwnerTeamAccount, createOwnerTeamAccount, ownerSelfAdd } from './owner-self-add.js';
 
 const ADMIN = '00000000-0000-4000-8000-0000000000a1';
 const ROOT = '00000000-0000-4000-8000-000000000001';
@@ -149,7 +149,9 @@ describe('ownerSelfAdd', () => {
     expect(row.serves).toEqual(['seeker']);
     expect(row.contactEmail).toBe(EMAIL);
     expect(row.contactPhone).toBe(PHONE);
-    expect(row.name).toBe('Owner Person');
+    expect(row.name).toBe('Org f1');
+    expect(row.orgSlug).toMatch(/^org-f1-/);
+    expect(row.contact.name).toBe('Owner Person');
     expect(row.status).toBe('active');
     expect(row.signalstackOrgId).toBeTruthy();
     expect(row.updatedBy).toBe(ADMIN);
@@ -342,5 +344,102 @@ describe('ownerSelfAdd', () => {
       error: { code: 'DB_UNAVAILABLE', message: 'down' },
     });
     expect(await errorCode(input())).toBe('UNAVAILABLE');
+  });
+
+  describe('owner team account at registration', () => {
+    const pendingOrg = () => ownerOrg(ORG, { status: 'pending' });
+    const create = (serves: string[] = ['seeker', 'provider']) =>
+      createOwnerTeamAccount({ org: pendingOrg(), subject: SUB, serves, consent: CONSENT }, log);
+
+    it('creates a pending coordinator in the pending org, linked to the login, with its consent', async () => {
+      orgs.seed([pendingOrg()]);
+      const spies = USER_WRITES.map((m) => vi.spyOn(idp, m));
+
+      const out = await create();
+
+      if (!out.success) throw new Error(`create failed: ${out.error.code}`);
+      const row = await users.findById(out.value);
+      expect(row.ok && row.value).toMatchObject({
+        status: 'pending',
+        parentOrgId: ORG,
+        serves: ['seeker', 'provider'],
+        contactEmail: EMAIL,
+      });
+      expect(await identities.accountsOf(IDP_PROVIDER, SUB)).toEqual({
+        ok: true,
+        value: { admin: ADMIN, coordinator: out.value },
+      });
+      expect(ledger.list()).toEqual([expect.objectContaining({ subjectId: out.value })]);
+      expect(signals.listAggregators()).toEqual([]);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('refuses profile types the network does not have', async () => {
+      const out = await create(['not-a-domain']);
+      expect(out.success ? 'ok' : out.error.code).toBe('NO_PROFILE_TYPES');
+      expect(ledger.list()).toEqual([]);
+    });
+
+    it('refuses an owner contact with no phone', async () => {
+      const out = await createOwnerTeamAccount(
+        {
+          org: ownerOrg(ORG, { status: 'pending', ownerPhone: null }),
+          subject: SUB,
+          serves: ['seeker'],
+          consent: CONSENT,
+        },
+        log,
+      );
+      expect(out.success ? 'ok' : out.error.code).toBe('OWNER_PHONE_REQUIRED');
+    });
+
+    it('approves the pending account once the org is active, without writing Keycloak', async () => {
+      orgs.seed([pendingOrg()]);
+      const created = await create();
+      if (!created.success) throw new Error('create failed');
+      orgs.seed([ownerOrg(ORG)]);
+      const spies = USER_WRITES.map((m) => vi.spyOn(idp, m));
+
+      const out = await approveOwnerTeamAccount(ownerOrg(ORG), log);
+
+      expect(out).toEqual({ success: true, value: created.value });
+      const row = await users.findById(created.value);
+      expect(row.ok && row.value?.status).toBe('active');
+      expect(row.ok && row.value?.updatedBy).toBe(ADMIN);
+      expect(signals.listAggregators().map((a) => a.external_id)).toEqual([created.value]);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the owner has no pending account in the org', async () => {
+      expect(await approveOwnerTeamAccount(ownerOrg(ORG), log)).toEqual({
+        success: true,
+        value: null,
+      });
+      users.seed([
+        buildCoordinator({ contactEmail: EMAIL, parentOrgId: ORG_2, status: 'pending' }),
+      ]);
+      expect(await approveOwnerTeamAccount(ownerOrg(ORG), log)).toEqual({
+        success: true,
+        value: null,
+      });
+    });
+
+    it('leaves the account pending when Signals fails, so the console self-add can finish it', async () => {
+      orgs.seed([pendingOrg()]);
+      const created = await create();
+      if (!created.success) throw new Error('create failed');
+      orgs.seed([ownerOrg(ORG)]);
+      const failing = new SignalStackWriterFake();
+      failing.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
+      _setSignalStackWriter(failing);
+
+      const out = await approveOwnerTeamAccount(ownerOrg(ORG), log);
+      expect(out.success ? 'ok' : out.error.code).toBe('UNAVAILABLE');
+
+      _setSignalStackWriter(signals);
+      const retry = await selfAdd();
+      expect(retry.success && retry.value.id).toBe(created.value);
+      expect(retry.success && retry.value.status).toBe('active');
+    });
   });
 });

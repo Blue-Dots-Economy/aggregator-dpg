@@ -716,6 +716,22 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(me.own_coordinator_account_id).toBe(body.id);
     });
 
+    it('403 SELF_ADD_DISABLED when OWNER_SELF_ADD_MODE is off, and creates nothing', async () => {
+      const prev = config.OWNER_SELF_ADD_MODE;
+      config.OWNER_SELF_ADD_MODE = 'off';
+      try {
+        const res = await selfAdd('a', { org_id: ORG_A });
+        expect(res.statusCode).toBe(403);
+        expect(codeOf(res)).toBe('SELF_ADD_DISABLED');
+        expect(await getIdentityStore().accountsOf('keycloak', 'sub-a')).toEqual({
+          ok: true,
+          value: { admin: OWNER_A, coordinator: null },
+        });
+      } finally {
+        config.OWNER_SELF_ADD_MODE = prev;
+      }
+    });
+
     it('409 ALREADY_COORDINATOR on a second self-add', async () => {
       expect((await selfAdd('a', { org_id: ORG_A })).statusCode).toBe(201);
       const again = await selfAdd('a', { org_id: ORG_A });
